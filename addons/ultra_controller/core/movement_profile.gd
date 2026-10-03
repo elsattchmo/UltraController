@@ -1,0 +1,97 @@
+@tool
+class_name MovementProfile
+extends Resource
+## Everything that makes a controller feel like an FPS, an adventure game, a survival game
+## or a shooter. Presets live in addons/ultra_controller/profiles/. Speeds are in m/s.
+
+enum Rotation { FACE_AIM, FACE_MOVE, FACE_MOVE_UNTIL_AIM }
+enum View { FIRST_PERSON, THIRD_PERSON }
+
+@export_group("View")
+@export var default_view := View.FIRST_PERSON
+@export var allow_view_toggle := true
+## Body rotation in first person is always FACE_AIM; this applies to third person.
+@export var tp_rotation := Rotation.FACE_MOVE_UNTIL_AIM
+@export var camera: UltraCameraProfile = UltraCameraProfile.new()
+
+@export_group("Speeds")
+@export_range(0.5, 4, 0.05) var walk_speed := 1.55
+@export_range(1, 8, 0.05) var jog_speed := 3.6
+@export_range(2, 12, 0.05) var sprint_speed := 6.2
+@export_range(0.3, 4, 0.05) var crouch_speed := 1.5
+@export_range(0.1, 2, 0.05) var crawl_speed := 0.75
+@export_range(0.2, 1, 0.01) var back_mult := 0.62
+@export_range(0.2, 1, 0.01) var strafe_mult := 0.85
+## Below this stick deflection the player walks; above it they jog (analog sticks).
+@export_range(0.1, 1, 0.01) var walk_deflection := 0.55
+
+@export_group("Inertia")
+## Ground acceleration (m/s²) and its shape over speed ratio (0 = standing, 1 = target speed).
+@export_range(1, 80, 0.5) var accel := 9.0
+@export var accel_curve: Curve
+@export_range(1, 80, 0.5) var decel := 11.0
+## Deceleration used when input opposes velocity — the weighty plant-and-pivot.
+@export_range(1, 80, 0.5) var brake_decel := 16.0
+## How fast the velocity heading can swing (deg/s) at walk and at sprint: momentum.
+@export_range(30, 2000, 5) var turn_rate_walk := 720.0
+@export_range(30, 2000, 5) var turn_rate_sprint := 150.0
+## Body yaw tracking for FACE_MOVE (deg/s).
+@export_range(30, 2000, 5) var body_turn_rate := 540.0
+## Idle FACE_AIM: the spine absorbs aim up to this angle before the feet turn.
+@export_range(10, 120, 1) var turn_in_place_angle := 70.0
+@export_range(10, 900, 5) var turn_in_place_rate := 280.0
+
+@export_group("Air")
+@export_range(0, 40, 0.5) var air_accel := 3.5
+@export_range(0, 1, 0.01) var air_control := 0.35
+@export_range(0.1, 4, 0.05) var jump_height := 1.05
+@export_range(1, 4, 0.05) var fall_gravity_mult := 1.55
+@export_range(1, 6, 0.05) var jump_cut_gravity_mult := 2.2
+@export_range(0, 0.4, 0.01) var coyote_time := 0.12
+@export_range(0, 0.4, 0.01) var jump_buffer := 0.12
+@export_range(5, 100, 1) var max_fall_speed := 45.0
+
+@export_group("Ground")
+@export_range(10, 70, 0.5) var max_slope_deg := 46.0
+@export_range(0, 0.7, 0.01) var step_height := 0.36
+@export_range(0, 1, 0.01) var floor_snap := 0.45
+
+@export_group("Body")
+@export_range(0.1, 0.6, 0.01) var radius := 0.3
+@export_range(1, 2.5, 0.01) var stand_height := 1.8
+@export_range(0.6, 2, 0.01) var crouch_height := 1.2
+@export_range(0.3, 1.2, 0.01) var crawl_height := 0.7
+@export_range(0.02, 0.6, 0.01) var stance_transition := 0.14
+@export_range(20, 300, 1) var mass := 80.0
+@export_range(0, 2000, 10) var push_strength := 350.0
+
+@export_group("Slide")
+@export var enable_slide := true
+@export_range(1, 10, 0.1) var slide_min_speed := 4.6
+@export_range(0, 20, 0.1) var slide_friction := 3.2
+@export_range(0, 6, 0.1) var slide_boost := 1.0
+@export_range(0, 3, 0.05) var slide_max_time := 1.1
+
+@export_group("Landing")
+@export_range(2, 30, 0.5) var hard_land_speed := 9.5
+@export_range(0, 1, 0.01) var land_recover_time := 0.22
+@export_range(0, 1, 0.01) var hard_land_recover_time := 0.6
+
+@export_group("Features")
+@export var enable_sprint := true
+@export var enable_crouch := true
+@export var enable_crawl := true
+@export var enable_roll := true
+@export var enable_lean := true
+@export var enable_turn_in_place := true
+
+
+func get_accel_mult(speed_ratio: float) -> float:
+	if accel_curve == null:
+		# Default: strong initial push, tapering as you reach speed (feels heavy, not floaty).
+		return lerpf(1.35, 0.55, clampf(speed_ratio, 0.0, 1.0))
+	return accel_curve.sample_baked(clampf(speed_ratio, 0.0, 1.0))
+
+
+func jump_velocity(gravity: float) -> float:
+	return sqrt(2.0 * gravity * jump_height)

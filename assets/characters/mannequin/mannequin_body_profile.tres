@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="BodyProfile" format=3]
+
+[ext_resource type="Resource" path="res://assets/characters/mannequin/mannequin_animset.tres" id="1_xgtje"]
+[ext_resource type="PackedScene" path="res://assets/characters/mannequin/mannequin.glb" id="2_e5be1"]
+[ext_resource type="AnimationLibrary" path="res://assets/characters/mannequin/anims/ual.res" id="3_rmh8l"]
+[ext_resource type="Script" path="res://addons/ultra_controller/core/body_profile.gd" id="4_axlxm"]
+
+[resource]
+script = ExtResource("4_axlxm")
+body_scene = ExtResource("2_e5be1")
+anim_set = ExtResource("1_xgtje")
+library = ExtResource("3_rmh8l")

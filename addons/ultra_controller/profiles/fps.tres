@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="MovementProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/core/camera_profile.gd" id="1_83kip"]
+[ext_resource type="Script" path="res://addons/ultra_controller/core/movement_profile.gd" id="2_0apwu"]
+
+[sub_resource type="Resource" id="Resource_u6uy5"]
+script = ExtResource("1_83kip")
+
+[resource]
+script = ExtResource("2_0apwu")
+camera = SubResource("Resource_u6uy5")
+accel = 11.0
+brake_decel = 20.0
+turn_rate_sprint = 220.0
