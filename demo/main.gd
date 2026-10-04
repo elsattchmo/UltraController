@@ -21,7 +21,7 @@ const BODY := "res://assets/characters/mannequin/mannequin_body_profile.tres"
 var args := {}
 var map: Node3D
 var locals: UltraLocalPlayers
-var menu: Control
+var menu: CanvasLayer
 var player: UltraCharacter          ## first local player (tours, single-player tools)
 var effects: UltraEffects
 var headless := false
@@ -82,6 +82,10 @@ func _ready() -> void:
 		UltraNet.start_offline(1)
 	else:
 		_show_menu()
+		if args.has("menu-pick"):
+			# Automation: press a menu entry, e.g. --menu-pick=single | split:2 | host
+			var pick := UltraArgs.get_str("menu-pick").split(":")
+			get_tree().create_timer(0.5).timeout.connect(func() -> void: menu_start(pick[0], pick[1] if pick.size() > 1 else ""))
 
 
 func _wants_session() -> bool:

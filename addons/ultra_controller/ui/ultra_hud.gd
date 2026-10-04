@@ -15,6 +15,7 @@ var _health: ProgressBar
 var _breath: ProgressBar
 var _msg: Label
 var _hotbar: HBoxContainer
+var _laid_out_for := Vector2.ZERO
 var _inv_panel: PanelContainer
 var _inv_grid: GridContainer
 var _hit_t := 0.0
@@ -121,9 +122,40 @@ func _draw_cross() -> void:
 			_cross.draw_line(d.normalized() * 8.0, d.normalized() * 16.0, hc, 2.5)
 
 
+## Fit the bottom bar to the pane: narrow split-screen panes shrink the hotbar slots and lift
+## the health / air bars above it instead of letting them overlap.
+func _layout() -> void:
+	var sz := _root.size
+	if sz == _laid_out_for or sz.x < 10.0:
+		return
+	_laid_out_for = sz
+	var n := Inventory.HOTBAR
+	var gap := 4.0
+	var slot := clampf((sz.x - 32.0 - gap * (n - 1)) / n, 36.0, 70.0)
+	var slot_h := clampf(slot * 0.72, 32.0, 50.0)
+	var bar_w := slot * n + gap * (n - 1)
+	for i in n:
+		var p := _hotbar.get_child(i) as Panel
+		p.custom_minimum_size = Vector2(slot, slot_h)
+		(p.get_child(0) as Label).size = Vector2(slot, slot_h)
+		(p.get_child(0) as Label).add_theme_font_size_override("font_size", 12 if slot >= 60.0 else 10)
+	_hotbar.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_hotbar.position = Vector2((sz.x - bar_w) * 0.5, sz.y - slot_h - 14.0)
+	var health_w := minf(260.0, sz.x * 0.4)
+	var lifted := (sz.x - bar_w) * 0.5 < 24.0 + health_w + 12.0
+	var hy := _hotbar.position.y - 34.0 if lifted else sz.y - 58.0
+	for c: Control in [_health, _breath]:
+		c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_health.position = Vector2(24.0 if not lifted else (sz.x - health_w) * 0.5, hy)
+	_health.size = Vector2(health_w, 22)
+	_breath.position = _health.position + Vector2(0, -16)
+	_breath.size = Vector2(health_w, 12)
+
+
 func _process(delta: float) -> void:
 	if character == null or not is_instance_valid(character):
 		return
+	_layout()
 	var s := character.state
 	var fp := character.is_first_person()
 	_cross.visible = fp or s.equipped != 0
