@@ -19,6 +19,8 @@ func _build() -> void:
 		{"t": 1.5, "move": Vector2(0, 0)},
 		{"t": 1.2, "move": Vector2(1, 0), "shot": "10_tp_strafe_right"},
 		{"t": 1.2, "move": Vector2(0, -1), "shot": "11_tp_backpedal"},
+		{"t": 1.6, "move": Vector2(0, 1), "buttons": F.B_SPRINT},
+		{"t": 0.35, "move": Vector2(0, 1), "buttons": F.B_SPRINT | F.B_CROUCH, "shot": "11b_tp_slide"},
 		{"t": 1.0, "buttons": F.B_CROUCH, "shot": "12_tp_crouch_idle"},
 		{"t": 1.4, "move": Vector2(0, 1), "buttons": F.B_CROUCH, "shot": "13_tp_crouch_walk"},
 		{"t": 1.4, "move": Vector2(0, 1), "buttons": F.B_CROUCH | F.B_CRAWL, "shot": "14_tp_crawl"},

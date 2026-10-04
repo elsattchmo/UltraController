@@ -1,0 +1,74 @@
+# UltraController — working rules
+
+Universal first/third-person character controller for Godot 4.7.1 (GDScript, Forward+,
+Jolt). Reusable addon in `addons/ultra_controller/`; demo + playground in `demo/`.
+Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8).
+
+## Engine and tools
+- Godot: `C:\Dev\Godot_v4.7.1-stable_win64.exe` (shared with Moonlit_Ridge, pinned). Always `--path .`.
+- Blender 5.0 (`C:\Program Files\Blender Foundation\Blender 5.0`), MCP `mcp__blender__*`.
+- **Verify on a fresh copy:** `bash tools/verify.sh m1 [--keep] [--tour]` → `C:\Dev\verify\ultra\`
+  (its own `user://`; screenshots in `C:\Dev\verify\ultra\review\<suite>`). Never write to
+  `C:\Dev\verify\review` — that is Moonlit Ridge's.
+- Tests: `godot --headless --path . --fixed-fps 60 res://tests/test_runner.tscn -- --suite=m1`
+  (scene runner, not `--script`, so autoloads work). Suites live in `tests/suites/<suite>_*.gd`.
+- Capture tour: `godot --path . --resolution 1280x720 -- --tour=m1 --out=<dir>`.
+- Regenerate after changing the importer / clips:
+  1. delete `.godot/imported/mannequin.glb-*` then `--import` (a changed import *script* does not trigger reimport)
+  2. `--script res://tools/build_animset.gd` (measures clips, writes mannequin_animset.tres)
+  3. `--script res://tools/build_resources.gd` (input map seed, layer names, profiles, body profile)
+  4. `--script res://demo/maps/playground/build_playground.gd`
+
+## Architecture (don't break these)
+- **Input is data.** Actions live in Project Settings > Input Map (`uc_*`, seeded by
+  `UltraInputDefaults.install_missing`, never overwriting). Code reads `UltraInput.action(&"jump")`.
+  No `KEY_*`/`JOY_*` outside `addons/ultra_controller/input/` (verify.sh greps for it).
+  Tunables: `ultra_controller/input/*`; per-player overrides + rebinds in `user://ultra_input.cfg`.
+- **The motor is a pure step:** `UltraMotor.step(MotorState, InputFrame, dt)`. All sim state is in
+  `MotorState` (copyable, codec'd); state handlers are stateless. Single-player, server, client
+  prediction and replay all call the same function. Never read wall-clock or render state in it.
+- InputFrame carries **absolute** quantized yaw/pitch (`quantize()` before use) so packet loss
+  can't drift aim and the local sim matches the server bit-for-bit.
+- **Root motion is baked** (`RootMotionCurve`, char space, -Z forward) and played by the motor;
+  the AnimationTree's `root_motion_track` only strips it from the pose.
+- Presentation is separate: `VisualRoot` (top_level, interpolation OFF) is placed every frame from
+  the last two ticks + `visual_offset` (step pops, reconciliation smoothing).
+- Nothing names a clip or bone in gameplay code: roles → clips via `AnimationSet`, model facts in
+  `BodyProfile`. Swapping Mixamo/Blender clips = editing those resources.
+- Skeleton is retargeted to `SkeletonProfileHumanoid` at import (`GeneralSkeleton`, bone names
+  `Hips`, `LeftFoot`…). Model faces +Z; the body node is turned 180°.
+- **No MultiplayerSpawner/MultiplayerSynchronizer** (4.7.1 GH-109864) — custom RPC tick system.
+
+## Godot 4.7 facts (probed)
+- All IK nodes exist: TwoBoneIK3D, FABRIK3D, CCDIK3D, JacobianIK3D, SplineIK3D, ChainIK3D,
+  LookAtModifier3D, AimModifier3D, CopyTransformModifier3D, BoneTwistDisperser3D,
+  LimitAngularVelocityModifier3D, SpringBoneSimulator3D, PhysicalBoneSimulator3D.
+- SkeletonModifier3D virtual: `_process_modification_with_delta(delta)`. **Modified poses are only
+  readable at `Skeleton3D.skeleton_updated`** — reading bones in `_process` gives the pre-modifier
+  pose (the FP camera and the foot-slide test both hook that signal).
+- BlendSpace1D/2D have `sync_mode` (None, Independent, Cyclic Mutable, Cyclic Constant) — cyclic
+  phase sync is built in. `add_blend_point(node, pos, -1, &"name")` — always name points.
+- Import retarget keys (in `.import` `_subresources.nodes."PATH:Mannequin/Skeleton3D"`):
+  `retarget/bone_map` (Resource path), `retarget/bone_renamer/*`, `retarget/rest_fixer/*`.
+  `normalize_position_tracks` divides position tracks by hip height → `Skeleton3D.motion_scale`
+  (0.9167 here); multiply root tracks back when baking.
+- `animation/remove_immutable_tracks` must stay **false** (it drops held non-rest poses);
+  `UltraImportTools.clean_tracks` removes only rest-constant + duplicate tracks.
+- Jolt is the 3D engine (`physics/3d/physics_engine="Jolt Physics"`).
+- Godot doesn't save a project setting equal to its initial value; read with a default.
+
+## GDScript traps
+- `:=` can't infer through untyped Array/Dictionary access — type it (`var x: bool = ...`).
+- Lambdas capture locals **by value** — use a one-element Array to accumulate.
+- `const` can't hold a class reference in a function (`const F := InputFrame` fails) — use `var`.
+- A SceneTree script's members can't be named `root`.
+- Const Dictionaries are read-only — duplicate before mutating.
+
+## Assets
+- `art_src/exported-model.glb`: original (ignored by Godot). `assets/characters/mannequin/mannequin.glb`:
+  imported copy. Quaternius UAL 1+2 mannequin, 66 bones, 178 clips (+RESET), 12 `_RM` clips.
+- Clips found beyond the obvious: OverhandThrow, Throw_Object, LayToIdle (get-up), Push,
+  Kick_Breach, Consume, Chest_Open, Idle_Hurt, Tired_Hunched, Zombie_Walk.
+- Turn_* clips do not rotate (feet step in place); the motor turns the body procedurally.
+- Measured authored speeds (m/s): walk 0.80, back 0.97, jog 4.83, sprint 7.12, crouch 0.59.
+  Walk_Backwards' planted feet drift sideways in the source clip (foot lock in M3 fixes it).

@@ -17,6 +17,8 @@ signal state_changed(old_state: int, new_state: int)
 @export var view_index := -1
 ## Step the simulation from _physics_process (single-player / tests without the net layer).
 @export var self_simulate := true
+## Build the animated body (off for pure-simulation bots, servers and tests).
+@export var build_visuals := true
 
 var input_source: InputSource
 var motor: UltraMotor
@@ -71,7 +73,7 @@ func _build_visual() -> void:
 	visual_root.top_level = true
 	visual_root.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	add_child(visual_root)
-	if body_profile == null or body_profile.body_scene == null:
+	if body_profile == null or body_profile.body_scene == null or not build_visuals:
 		return
 	body_node = body_profile.body_scene.instantiate() as Node3D
 	body_node.name = "Body"
@@ -156,6 +158,7 @@ func _process(delta: float) -> void:
 		anim.turning = state.has(UltraMotor.F_TURNING)
 		anim.rm_clip = state.rm_clip
 		anim.hard_landing = state.has(MotorState.F_HARD_LANDING)
+		anim.land_impact = state.land_impact
 		anim.accel = _accel
 
 

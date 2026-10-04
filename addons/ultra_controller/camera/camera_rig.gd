@@ -57,6 +57,8 @@ func attach(c: UltraCharacter) -> void:
 		_head_bone = c.skeleton.find_bone("Head")
 		if _head_bone >= 0:
 			_head_rest_inv = c.skeleton.get_bone_global_rest(_head_bone).basis.orthonormalized().inverse()
+		# Bone poses include IK / aim / lean only once the skeleton has run its modifiers.
+		c.skeleton.skeleton_updated.connect(_on_skeleton_updated)
 
 
 func _on_landed(impact: float) -> void:
@@ -69,6 +71,23 @@ func _on_landed(impact: float) -> void:
 ## Camera kick (recoil, hits): radians of pitch/yaw that spring back.
 func kick(pitch: float, yaw: float) -> void:
 	_kick.impulse(Vector2(yaw, pitch) * 30.0)
+
+
+var _eye_sk_cached := Vector3.ZERO
+var _have_eye := false
+
+
+func _on_skeleton_updated() -> void:
+	if _head_bone < 0:
+		return
+	var sk := character.skeleton
+	var head_sk := sk.get_bone_global_pose(_head_bone)
+	var rot_sk := head_sk.basis.orthonormalized() * _head_rest_inv
+	var to_sk := sk.global_basis.orthonormalized().inverse() * character.visual_root.global_basis
+	var eye_sk := head_sk.origin + rot_sk * (to_sk * character.body_profile.eye_offset)
+	# Store relative to the visual root so it stays valid when the root moves next frame.
+	_eye_sk_cached = character.visual_root.global_transform.affine_inverse() * (sk.global_transform * eye_sk)
+	_have_eye = true
 
 
 func _process(delta: float) -> void:
@@ -90,16 +109,9 @@ func _process(delta: float) -> void:
 	var vis := character.visual_root.global_transform
 
 	# --- first-person eye
-	var eye_local := Vector3(0, character.get_eye_height(), 0)
-	if _head_bone >= 0:
-		# Everything in skeleton space first: the head's rotation away from its rest pose
-		# carries the eye offset (character space -> skeleton space).
-		var sk := character.skeleton
-		var head_sk := sk.get_bone_global_pose(_head_bone)
-		var rot_sk := head_sk.basis.orthonormalized() * _head_rest_inv
-		var to_sk := sk.global_basis.orthonormalized().inverse() * vis.basis
-		var eye_sk := head_sk.origin + rot_sk * (to_sk * character.body_profile.eye_offset)
-		eye_local = vis.affine_inverse() * (sk.global_transform * eye_sk)
+	# Eye from the last fully-modified skeleton pose (aim pitch, lean, IK applied), kept in
+	# visual-root space so it follows this frame's body position without lag.
+	var eye_local := _eye_sk_cached if _have_eye else Vector3(0, character.get_eye_height(), 0)
 	if not _eye_lp_ready:
 		_eye_lp = eye_local
 		_eye_lp_ready = true

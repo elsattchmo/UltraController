@@ -65,61 +65,50 @@ func _init() -> void:
 
 ## Returns [ground speed m/s, left-foot plant phase 0..1]. The clip is in place, so during
 ## stance the planted foot slides backwards under the body at exactly the authored speed.
-func _measure(anim: Animation, skel: Skeleton3D) -> Array:
+func _measure(anim: Animation, skel: Skeleton3D, bone_l := "LeftToes", bone_r := "RightToes") -> Array:
+	## Returns [ground speed m/s, left-foot plant phase 0..1]. The clip is in place, so the
+	## supporting foot (the lower one, while on the ground) slides backwards under the body
+	## at exactly the authored speed. Same rule the foot-slide test uses in-engine.
 	var n := 240
-	var feet := [skel.find_bone("LeftToes"), skel.find_bone("RightToes")]
+	var feet := [skel.find_bone(bone_l), skel.find_bone(bone_r)]
 	var pos := [[], []]
 	for i in n:
-		var t := anim.length * i / n
-		_pose(anim, skel, t)
+		_pose(anim, skel, anim.length * i / n)
 		for f in 2:
 			pos[f].append(_global(skel, feet[f]).origin)
-	var speeds: Array[float] = []
-	var plant := 0.0
-	var found_plant := false
-	var dt := anim.length / n
+	var miny := [INF, INF]
 	for f in 2:
-		var miny := INF
 		for p: Vector3 in pos[f]:
-			miny = minf(miny, p.y)
-		# Stance = foot within 1.5 cm of its lowest point on consecutive samples.
-		var vels: Array[Vector2] = []
-		var was_down := true
-		for i in n:
-			var p: Vector3 = pos[f][i]
-			var q: Vector3 = pos[f][(i + 1) % n]
-			var down := p.y < miny + 0.015 and q.y < miny + 0.015
-			if down:
-				vels.append(Vector2(q.x - p.x, q.z - p.z) / dt)
-			if f == 0 and down and not was_down and not found_plant:
-				plant = float(i) / n
-				found_plant = true
-			was_down = down
-		if vels.is_empty():
+			miny[f] = minf(miny[f], p.y)
+	var dt := anim.length / n
+	var vels: Array[Vector2] = []
+	for i in n:
+		var j := (i + 1) % n
+		var lo := 0 if (pos[0][i] as Vector3).y <= (pos[1][i] as Vector3).y else 1
+		var p: Vector3 = pos[lo][i]
+		var q: Vector3 = pos[lo][j]
+		if p.y > miny[lo] + 0.03 or q.y > miny[lo] + 0.03:
 			continue
-		var segs := 0
-		var prev_down := false
-		for i in n:
-			var dn: bool = (pos[f][i] as Vector3).y < miny + 0.015
-			if dn and not prev_down:
-				segs += 1
-			prev_down = dn
-		var zs := []
-		for i in n:
-			zs.append(snappedf((pos[f][i] as Vector3).z, 0.01))
-		if f == 0 and OS.get_cmdline_user_args().has("--verbose"):
-			print("   foot0 stance segments=", segs, " z-range=", zs.min(), "..", zs.max(), " ylow=", snappedf(miny, 0.001))
-		# Dominant stance direction, then signed speed along it (rejects swing / scuff samples).
-		var mean := Vector2.ZERO
-		for v in vels:
-			mean += v
-		var dir := mean.normalized()
-		for v in vels:
-			var along := v.dot(dir)
-			if along > 0.0:
-				speeds.append(along)
+		vels.append(Vector2(q.x - p.x, q.z - p.z) / dt)
+	var mean := Vector2.ZERO
+	for v in vels:
+		mean += v
+	var dir := mean.normalized()
+	var speeds: Array[float] = []
+	for v in vels:
+		speeds.append(maxf(v.dot(dir), 0.0))
 	speeds.sort()
 	var med := speeds[speeds.size() / 2] if not speeds.is_empty() else 0.0
+	# Left-foot plant: first frame the left foot becomes the low, grounded foot.
+	var plant := 0.0
+	var was := true
+	for i in n:
+		var lo := 0 if (pos[0][i] as Vector3).y <= (pos[1][i] as Vector3).y else 1
+		var down: bool = lo == 0 and (pos[0][i] as Vector3).y < float(miny[0]) + 0.03
+		if down and not was:
+			plant = float(i) / n
+			break
+		was = down
 	return [med, plant]
 
 

@@ -82,36 +82,36 @@ roles = {
 &"wall_climb": "Climb_Wall"
 }
 authored_speed = {
-"Crawl": 1.6841949,
-"Crouch_Walk": 0.5826648,
-"Jog": 4.745943,
-"Run_Anime": 4.9490333,
-"Run_Stealth": 7.617433,
-"Sprint": 7.344155,
-"Strafe_left": 0.6894363,
-"Strafe_right": 0.8463945,
-"Walk": 0.79686654,
-"Walk_Backwards": 0.9724853,
-"Walk_Carry": 0.66105086,
-"Walk_Large": 0.687689,
-"Walk_Stealth": 1.0660286,
-"Zombie_Walk": 1.0256753
+"Crawl": 0.0,
+"Crouch_Walk": 0.5852508,
+"Jog": 4.826462,
+"Run_Anime": 4.8705893,
+"Run_Stealth": 7.571712,
+"Sprint": 7.122055,
+"Strafe_left": 0.80002284,
+"Strafe_right": 0.10543048,
+"Walk": 0.79692125,
+"Walk_Backwards": 0.9718152,
+"Walk_Carry": 0.6618848,
+"Walk_Large": 0.74358684,
+"Walk_Stealth": 0.9989481,
+"Zombie_Walk": 0.9683783
 }
 plant_phase = {
-"Crawl": 0.31666666666666665,
-"Crouch_Walk": 0.9916666666666667,
-"Jog": 0.0625,
-"Run_Anime": 0.14166666666666666,
-"Run_Stealth": 0.25833333333333336,
-"Sprint": 0.0875,
-"Strafe_left": 0.975,
-"Strafe_right": 0.3958333333333333,
-"Walk": 0.09166666666666666,
-"Walk_Backwards": 0.4083333333333333,
-"Walk_Carry": 0.9916666666666667,
-"Walk_Large": 0.0,
-"Walk_Stealth": 0.09583333333333334,
-"Zombie_Walk": 0.12916666666666668
+"Crawl": 0.3,
+"Crouch_Walk": 0.0625,
+"Jog": 0.0375,
+"Run_Anime": 0.10833333333333334,
+"Run_Stealth": 0.225,
+"Sprint": 0.05416666666666667,
+"Strafe_left": 0.0,
+"Strafe_right": 0.5875,
+"Walk": 0.09583333333333334,
+"Walk_Backwards": 0.5,
+"Walk_Carry": 0.004166666666666667,
+"Walk_Large": 0.1125,
+"Walk_Stealth": 0.0875,
+"Zombie_Walk": 0.0875
 }
 root_motion = Array[ExtResource("1_yc1s2")]([ExtResource("2_4rnyo"), ExtResource("3_4elb1"), ExtResource("4_8bn38"), ExtResource("5_rq22h"), ExtResource("6_aqc7a"), ExtResource("7_3d43b"), ExtResource("8_0ylt0"), ExtResource("9_ax87n"), ExtResource("10_76aql"), ExtResource("11_ku1qp"), ExtResource("12_005wl"), ExtResource("13_jreq4")])
 loops = {

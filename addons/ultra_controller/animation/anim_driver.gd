@@ -31,6 +31,7 @@ var aim_pitch: float = 0.0
 var turning := false
 var rm_clip: int = -1
 var hard_landing := false
+var land_impact := 0.0
 var accel := Vector3.ZERO
 
 var _loco: AnimationNodeStateMachinePlayback
@@ -46,6 +47,7 @@ var _lean := Vector2.ZERO
 var _lean_vel := Vector2.ZERO
 var _warp := 0.0
 var _turn_blend := 0.0
+var _backwards := false
 
 
 func setup(p_player: AnimationPlayer, p_skeleton: Skeleton3D) -> void:
@@ -104,6 +106,19 @@ func _anim(role: StringName, loop := true) -> AnimationNodeAnimation:
 			a.timeline_length = lib_anim.length
 			# Align every cycle so the left foot plants at phase 0 (keeps synced blends in step).
 			a.start_offset = float(anim_set.plant_phase.get(String(anim_set.clip(role)), 0.0)) * lib_anim.length
+	return a
+
+
+## One-shot clip that starts `offset` seconds in.
+func _anim_from(role: StringName, offset: float) -> AnimationNodeAnimation:
+	var a := AnimationNodeAnimation.new()
+	a.animation = _clip(role)
+	var src := library.get_animation(anim_set.clip(role)) if library and anim_set.clip(role) != &"" else null
+	if src:
+		a.use_custom_timeline = true
+		a.loop_mode = Animation.LOOP_NONE
+		a.start_offset = offset
+		a.timeline_length = maxf(src.length - offset, 0.05)
 	return a
 
 
@@ -174,8 +189,15 @@ func _build() -> AnimationNodeBlendTree:
 	air.add_transition("Start", "start", air_in)
 	loco.add_node("air", air, Vector2(400, 0))
 	loco.add_node("fall", _anim(&"jump_air"), Vector2(400, 200))
-	loco.add_node("land", _anim(&"jump_land", false), Vector2(600, 0))
-	loco.add_node("land_heavy", _anim(&"land_heavy", false), Vector2(600, 200))
+	# Landings: soft ones play the squat faster (less dip); the heavy one starts after its
+	# built-in fall (Land_Three_Point begins ~4.8 m up).
+	var land := AnimationNodeBlendTree.new()
+	land.add_node("clip", _anim(&"jump_land", false), Vector2(0, 0))
+	land.add_node("speed", AnimationNodeTimeScale.new(), Vector2(200, 0))
+	land.connect_node("speed", 0, "clip")
+	land.connect_node("output", 0, "speed")
+	loco.add_node("land", land, Vector2(600, 0))
+	loco.add_node("land_heavy", _anim_from(&"land_heavy", 0.45), Vector2(600, 200))
 
 	# --- slide
 	var slide := AnimationNodeStateMachine.new()
@@ -325,25 +347,29 @@ func _drive_state(speed: float) -> void:
 
 func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	var moving := speed > 0.12
-	# Orientation warping: past a brisk walk the forward/back cycle plays and the hips turn
-	# toward the travel direction, instead of over-speeding a strafe clip.
+	# Orientation warping: past a brisk walk the forward (or backward) cycle plays and the hips
+	# turn up to 90° toward the travel direction, instead of over-speeding a walk-only strafe.
 	var theta := atan2(local_v.x, local_v.y) if moving else 0.0
-	var backwards := absf(theta) > deg_to_rad(105.0)
+	var a := absf(theta)
+	if _backwards and a < deg_to_rad(80.0):
+		_backwards = false
+	elif not _backwards and a > deg_to_rad(100.0):
+		_backwards = true
+	var backwards := _backwards
 	var warp_w := smoothstep(_walk_speed * 1.4, _walk_speed * 2.6, speed)
 	var target_warp := 0.0
 	var blend_dir := theta
 	if moving:
 		var base := PI if backwards else 0.0
 		var rel := angle_difference(base, theta)
-		var max_warp := deg_to_rad(65.0)
-		target_warp = clampf(rel, -max_warp, max_warp) * warp_w
+		target_warp = clampf(rel, -PI * 0.5, PI * 0.5) * warp_w
 		blend_dir = theta - target_warp
 	_warp = lerp_angle(_warp, target_warp, 1.0 - exp(-10.0 * delta))
 	var bp := Vector2(sin(blend_dir), cos(blend_dir)) * speed
 	var clamped := _clamp_to_hull(bp)
 	var rate := 1.0
 	if clamped.length() > 0.01:
-		rate = clampf(speed / clamped.length(), 1.0, 1.8)
+		rate = clampf(speed / clamped.length(), 1.0, 2.4 if backwards else 1.4)
 	tree.set(LOCO + "ground/move/blend_position", clamped)
 	tree.set(LOCO + "ground/rate/scale", rate)
 	var idle_w := 1.0 - smoothstep(0.05, 0.45, speed)
@@ -355,6 +381,7 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	_turn_blend = move_toward(_turn_blend, want_turn, delta * 6.0)
 	tree.set(LOCO + "ground/turn/blend_amount", _turn_blend)
 	tree.set(LOCO + "ground/turn_rate/scale", 1.8)
+	tree.set(LOCO + "land/speed/scale", lerpf(2.4, 1.0, clampf((land_impact - 3.0) / 6.0, 0.0, 1.0)))
 	# Crouch / crawl cycles: forward clip, warped toward travel direction, rate-matched.
 	var crouch_rate := clampf(speed / _crouch_speed, 0.3, 2.2) * (-1.0 if backwards else 1.0)
 	tree.set(LOCO + "crouch/rate/scale", crouch_rate)
