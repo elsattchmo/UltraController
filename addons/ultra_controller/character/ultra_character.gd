@@ -119,6 +119,10 @@ func _build_visual() -> void:
 	visual_root.add_child(body_node)
 	skeleton = body_node.find_child(body_profile.skeleton_name, true, false) as Skeleton3D
 	head_mesh = body_node.find_child(body_profile.head_mesh_name, true, false) as MeshInstance3D
+	# First person hides the head: close the neck opening it leaves in the body.
+	var bm := body_node.find_child(body_profile.body_mesh_name, true, false) as MeshInstance3D
+	if bm and bm.mesh is ArrayMesh:
+		bm.mesh = UltraMeshCap.capped(bm.mesh as ArrayMesh)
 	var player := body_node.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if player and skeleton:
 		anim = UltraAnimDriver.new()

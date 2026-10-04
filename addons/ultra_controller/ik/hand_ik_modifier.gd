@@ -16,6 +16,8 @@ class Goal:
 	## Line goal (world direction, non-zero): the hand keeps its animated position along this
 	## line through target.origin and is only pulled onto it (climbing a rope or pole), within
 	## line_range metres of target.origin.
+	## 0..1: fingers straightened toward the rest pose (an open hand pressed on a surface).
+	var open := 0.0
 	var line_dir := Vector3.ZERO
 	var line_range := Vector2(-0.8, 0.8)
 
@@ -33,19 +35,30 @@ func _skeleton_changed(_o: Skeleton3D, _n: Skeleton3D) -> void:
 	_resolve()
 
 
+var _fingers := [PackedInt32Array(), PackedInt32Array()]
+
+
 func _resolve() -> void:
 	var sk := get_skeleton()
 	if sk == null:
 		return
+	_fingers = [PackedInt32Array(), PackedInt32Array()]
+	for b in sk.get_bone_count():
+		var n := sk.get_bone_name(b)
+		for i in 2:
+			var side := "Left" if i == 0 else "Right"
+			if n.begins_with(side) and (n.contains("Index") or n.contains("Middle") or n.contains("Ring") or n.contains("Little")):
+				(_fingers[i] as PackedInt32Array).append(b)
 	_arms = []
 	for side in ["Left", "Right"]:
 		_arms.append([sk.find_bone(side + "UpperArm"), sk.find_bone(side + "LowerArm"), sk.find_bone(side + "Hand")])
 
 
 ## Reach `hand` to `world_xform` (the hand bone's desired world transform).
-func set_goal(hand: int, world_xform: Transform3D, weight := 1.0, use_rotation := true, speed := 8.0) -> void:
+func set_goal(hand: int, world_xform: Transform3D, weight := 1.0, use_rotation := true, speed := 8.0, open := 0.0) -> void:
 	var g: Goal = goals[hand]
 	g.line_dir = Vector3.ZERO
+	g.open = open
 	g.target = world_xform
 	g.want_weight = clampf(weight, 0.0, 1.0)
 	g.use_rotation = use_rotation
@@ -109,3 +122,9 @@ func _process_modification_with_delta(delta: float) -> void:
 		var pole := Vector3(1.0 if i == 0 else -1.0, -0.6, -0.3)   # skeleton space: out & down
 		var basis: Variant = t_sk.basis.orthonormalized() if g.use_rotation else null
 		last_error[i] = UltraIK.two_bone(sk, arm[0], arm[1], arm[2], t_sk.origin, w, basis, pole)
+		if g.open > 0.0:
+			# Fingers flatten onto the surface (rest pose = straight), keeping a slight curl.
+			for fb: int in _fingers[i]:
+				var rest := sk.get_bone_rest(fb).basis.get_rotation_quaternion()
+				var cur := sk.get_bone_pose_rotation(fb)
+				sk.set_bone_pose_rotation(fb, cur.slerp(rest, g.open * w * 0.85))

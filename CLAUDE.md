@@ -96,6 +96,15 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Water waves: `UltraWater.wave(p)` (shared clock `wave_time`, global shader uniform
   `ultra_wave_time`) move the surface mesh and float props (`set_meta("buoyancy", k)` tunes how
   deep a prop sits). Swimmers don't collide with loose props (prediction-safe).
+- Body mesh holes (the neck opening left by the FP head split) are capped at runtime
+  (`UltraMeshCap`). The FP eye is kept >= 13 cm above / 9 cm ahead of the Neck bone, so
+  crouch and sprint look-downs never put the camera inside the shoulders.
+- `InertialBlendModifier` (first modifier) inertializes every loco state change on top of the
+  eased crossfades; call `anim.inertial.trigger()` when switching poses abruptly.
+- FP gun: `_gun_motion` (step bob, look lag, sprint lowering) on the camera-anchored pose.
+- Holding: two-handed props ride against the chest within reach; palms go flat on the side
+  faces (`_hands_on_prop`, `UltraGrab.support/surface_point`, HandIK `open`). Fresh grabs get
+  0.8 s to bring the prop in; the hold only breaks after 0.4 s out of reach.
 - Demo playground has infinite ammo (`UltraActionLayer.infinite_ammo`; `--limited-ammo` off).
 - `teleport()` drops any traversal state (else a scripted move drags you back).
 - FP eye is swept from the capsule axis (`CameraRig._fp_guard`): the head bone dips into ledges.

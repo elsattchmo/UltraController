@@ -18,6 +18,12 @@ var tp_blend := 0.0              ## 0 = first person, 1 = third person
 var _eye_lp := Vector3.ZERO      ## low-passed eye, character-local
 var _eye_lp_ready := false
 var _aim_frame_w := 1.0
+var _neck_bone := -1
+var _neck_cached := Vector3.INF
+## The eye stays this far above / in front of the neck joint (crouching or running bends the
+## head down below the shoulders; the camera must not follow it into the body).
+const EYE_ABOVE_NECK := 0.13
+const EYE_AHEAD_OF_NECK := 0.09
 var _land := UltraSpring.new(0.0, 2.0, 0.55)
 var _roll := UltraSpring.new(0.0, 3.0, 0.8)
 var _lean := UltraSpring.new(0.0, 4.0, 0.9)
@@ -132,6 +138,10 @@ func _on_skeleton_updated() -> void:
 	var vis_inv := character.visual_root.global_transform.affine_inverse()
 	# Stored relative to the visual root so it stays valid when the root moves next frame.
 	_eye_sk_cached = vis_inv * (sk.global_transform * head_sk.origin) + yaw_v * character.body_profile.eye_offset
+	if _neck_bone < 0:
+		_neck_bone = sk.find_bone("Neck")
+	if _neck_bone >= 0:
+		_neck_cached = vis_inv * (sk.global_transform * sk.get_bone_global_pose(_neck_bone).origin)
 	_have_eye = true
 
 
@@ -175,6 +185,10 @@ func _process(delta: float) -> void:
 	# Side-to-side (in the aim frame): stay on the body's axis, keeping a little of the sway.
 	var lat := cam_profile.fp_lateral_follow * lerpf(1.0, 0.35, smoothstep(deg_to_rad(15.0), deg_to_rad(60.0), -src.live_pitch))
 	d.x *= lat
+	if _neck_cached != Vector3.INF:
+		var nd := aim_basis.inverse() * (vis.basis * _neck_cached)
+		d.y = maxf(d.y, nd.y + EYE_ABOVE_NECK)
+		d.z = minf(d.z, nd.z - EYE_AHEAD_OF_NECK)
 	var fp_base := e_world.lerp(vis.origin + aim_basis * d, _aim_frame_w)
 	# Look down: ease forward along the aim so the torso never blocks the view.
 	var down := smoothstep(deg_to_rad(25.0), deg_to_rad(80.0), -pitch)

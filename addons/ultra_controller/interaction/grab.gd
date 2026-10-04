@@ -119,6 +119,10 @@ static func _release(c: UltraCharacter, s: MotorState, throw_charge: float, repl
 		o.set_meta("held_locally", false)
 	if rb and rb.has_meta("grab_rel"):
 		rb.remove_meta("grab_rel")
+	if rb and rb.has_meta("held_for"):
+		rb.remove_meta("held_for")
+	if rb and rb.has_meta("far_for"):
+		rb.remove_meta("far_for")
 	c.emit_item_event(&"throw" if throw_charge > 0.0 else &"drop", {"id": s.held_id}, replaying)
 	s.held_id = 0
 	s.held_mass = 0.0
@@ -147,11 +151,57 @@ static func hold_target(c: UltraCharacter, rb: RigidBody3D) -> Vector3:
 	if s.held_grip >= 0:
 		return s.pos + fwd * 0.55 + Vector3.UP * 0.85
 	var aim := Vector3(-sin(yaw) * cos(pitch), sin(pitch), -cos(yaw) * cos(pitch))
-	var size := _size(rb)
-	if rb.mass <= c.profile.lift_limit:
-		return eye + aim * (0.75 + size * 0.6)          # held out in front, follows your look
-	# Heavy: hugged at the chest, only a little pitch.
-	return s.pos + Vector3.UP * (s.height * 0.62 + pitch * 0.15) + fwd * (0.45 + size * 0.5)
+	var r := c.profile.radius
+	var right := Vector3(cos(yaw), 0, -sin(yaw))
+	if rb.mass <= c.profile.lift_limit and support(rb, right) < 0.14:
+		# Small: out in front in the hand, following your look, clear of the camera and body.
+		var p := eye + aim * (0.45 + support(rb, -aim)) + Vector3.DOWN * 0.2 * cos(pitch)
+		var flat := Vector3(p.x - s.pos.x, 0, p.z - s.pos.z)
+		var need := r + 0.08 + maxf(support(rb, -fwd), 0.05)
+		if flat.dot(fwd) < need:
+			p += fwd * (need - flat.dot(fwd))
+		return p
+	# Two-handed: carried against the chest within arm's reach, a little higher or lower with
+	# your look. Its near face sits just in front of the chest, so the camera never ends up
+	# inside it and the arms can wrap its sides.
+	var y := s.height * 0.61 + pitch * 0.12 - support(rb, Vector3.UP) * 0.15
+	return s.pos + Vector3.UP * y + fwd * (r - 0.05 + support(rb, -fwd))
+
+
+## How far the body's collision shape reaches from its centre in world direction `dir`.
+static func support(rb: RigidBody3D, dir: Vector3) -> float:
+	var cs: CollisionShape3D = null
+	for n in rb.get_children():
+		if n is CollisionShape3D and (n as CollisionShape3D).shape:
+			cs = n
+			break
+	if cs == null:
+		return 0.25
+	var xf := rb.global_transform * cs.transform
+	var d := (xf.basis.orthonormalized().inverse() * dir).normalized()
+	var off := (xf.origin - rb.global_position).dot(dir.normalized())
+	var sh := cs.shape
+	if sh is BoxShape3D:
+		var h := (sh as BoxShape3D).size * 0.5
+		return off + absf(d.x) * h.x + absf(d.y) * h.y + absf(d.z) * h.z
+	if sh is SphereShape3D:
+		return off + (sh as SphereShape3D).radius
+	if sh is CylinderShape3D:
+		var cy := sh as CylinderShape3D
+		return off + Vector2(d.x, d.z).length() * cy.radius + absf(d.y) * cy.height * 0.5
+	if sh is CapsuleShape3D:
+		var cp := sh as CapsuleShape3D
+		return off + cp.radius + absf(d.y) * maxf(cp.height * 0.5 - cp.radius, 0.0)
+	return off + _size(rb)
+
+
+## Where a hand meets the shape's surface, coming from the centre along `dir` (world).
+## Exact for boxes on their faces; a good approximation otherwise.
+static func surface_point(rb: RigidBody3D, from: Vector3, dir: Vector3) -> Vector3:
+	var d := dir.normalized()
+	var p := rb.global_position
+	var along := (from - p) - d * (from - p).dot(d)        # keep the offset across the face
+	return p + along + d * support(rb, d)
 
 
 static func _size(rb: RigidBody3D) -> float:
@@ -194,7 +244,16 @@ static func _hold_single(c: UltraCharacter, rb: RigidBody3D, dt: float) -> void:
 				return
 	var target := hold_target(c, rb)
 	var p := rb.global_position
-	if p.distance_to(target) > BREAK_DISTANCE:
+	# A fresh grab gets a moment to bring the prop in (it starts on the floor, out of reach of
+	# the hold point); after that, pulling it away (snagged, blocked) breaks the hold.
+	var held_for := float(rb.get_meta("held_for", 0.0)) + dt
+	rb.set_meta("held_for", held_for)
+	# Out of reach for a moment (a snap turn swings the hold point away) is fine; staying
+	# out of reach (snagged on something) breaks the hold.
+	var far_for := float(rb.get_meta("far_for", 0.0))
+	far_for = far_for + dt if p.distance_to(target) > BREAK_DISTANCE else 0.0
+	rb.set_meta("far_for", far_for)
+	if held_for > 0.8 and far_for > 0.4:
 		_release(c, s, 0.0, false)
 		return
 	rb.sleeping = false

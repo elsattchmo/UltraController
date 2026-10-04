@@ -26,6 +26,12 @@ var _owns := [false, false]          ## hand IK goals we set (never release some
 var _prop: RigidBody3D
 var _owns_prop := false
 var _reload_w := 0.0
+## First-person gun life: step bob, look lag, sprint lowering.
+var _bob_phase := 0.0
+var _bob_amp := 0.0
+var _sway := Vector2.ZERO
+var _last_look := Vector2(NAN, NAN)
+var _sprint_w := 0.0
 
 
 func setup(c: UltraCharacter) -> void:
@@ -117,23 +123,70 @@ func _drive_held_prop(delta: float) -> void:
 		o.set_meta("held_locally", true)
 		var target := UltraGrab.hold_target(character, rb)
 		rb.global_position = rb.global_position.lerp(target, 1.0 - exp(-18.0 * delta))
-	# Hands on the sides (or on the team-lift grip).
-	var xf := rb.global_transform
-	var half := 0.18
-	for n in rb.get_children():
-		if n is CollisionShape3D and (n as CollisionShape3D).shape is BoxShape3D:
-			half = ((n as CollisionShape3D).shape as BoxShape3D).size.x * 0.5
-	var right := character.visual_root.global_basis.x
-	var center := xf.origin
-	if s.held_grip >= 0:
-		var grips := UltraGrab.grip_points(rb)
-		if s.held_grip < grips.size():
-			center = grips[s.held_grip].global_position
-			half = 0.2
-	var hand_rot := character.visual_root.global_basis
-	anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, Transform3D(hand_rot, center - right * (half + 0.03)), 1.0, false, 8.0)
-	anim.hand_ik.set_goal(HandIKModifier.Hand.RIGHT, Transform3D(hand_rot, center + right * (half + 0.03)), 1.0, false, 8.0)
+	_hands_on_prop(rb, s)
 	_owns_prop = true
+
+
+## Both palms flat on the outside of the prop: on its left and right faces (or on top of a
+## team-lift grip), fingers pointing forward, at the real surface of its collision shape.
+func _hands_on_prop(rb: RigidBody3D, s: MotorState) -> void:
+	var ik := character.anim.hand_ik
+	var vb := character.visual_root.global_basis.orthonormalized()
+	var right := vb.x
+	var fwd := -vb.z
+	var c := rb.global_position
+	for i in 2:
+		var side := -1.0 if i == HandIKModifier.Hand.LEFT else 1.0
+		var contact: Vector3
+		var palm_dir: Vector3            # direction the palm faces (into the object)
+		var fingers := (fwd * 0.9 + Vector3.DOWN * 0.3).normalized()
+		if s.held_grip >= 0:
+			var grips := UltraGrab.grip_points(rb)
+			var gp := grips[s.held_grip].global_position if s.held_grip < grips.size() else c
+			var axis := rb.global_basis.x.normalized()
+			if axis.dot(right) < 0.0:
+				axis = -axis
+			var top := gp + axis * 0.14 * side
+			contact = UltraGrab.surface_point(rb, top, Vector3.UP)
+			palm_dir = Vector3.DOWN
+		else:
+			var out := right * side
+			# On the side faces, toward the back half (where the arms come from) and a little low.
+			var from := c + Vector3.DOWN * UltraGrab.support(rb, Vector3.DOWN) * 0.25 - fwd * UltraGrab.support(rb, -fwd) * 0.4
+			contact = UltraGrab.surface_point(rb, from, out)
+			palm_dir = -out
+		# Hand bone sits at the wrist: back along the fingers, out by the hand's thickness.
+		var wrist := contact - fingers * 0.075 - palm_dir * 0.028
+		var basis := _hand_basis(i, fingers, palm_dir)
+		ik.set_goal(i, Transform3D(basis, wrist), 1.0, basis != Basis(), 10.0, 0.8)
+	_owns_prop = true
+
+
+var _palm_local := [Vector3.ZERO, Vector3.ZERO]
+
+
+## World basis for a hand bone whose fingers point along `fingers` and palm faces `palm`. The
+## palm direction in the bone's own frame is learned from the curled fingers of the animation.
+func _hand_basis(hand: int, fingers: Vector3, palm: Vector3) -> Basis:
+	var sk := character.skeleton
+	if _palm_local[hand] == Vector3.ZERO:
+		var side := "Left" if hand == 0 else "Right"
+		var hb := sk.get_bone_global_pose(sk.find_bone(side + "Hand"))
+		var tip := Vector3.ZERO
+		for f in ["MiddleDistal", "RingDistal", "IndexDistal"]:
+			tip += sk.get_bone_global_pose(sk.find_bone(side + f)).origin / 3.0
+		var v := hb.basis.orthonormalized().inverse() * (tip - hb.origin)
+		v.y = 0.0                        # bone +Y runs along the fingers
+		if v.length() < 0.01:
+			return Basis()
+		_palm_local[hand] = v.normalized()
+	var src_y := Vector3.UP
+	var src_p: Vector3 = _palm_local[hand]
+	var src := Basis(src_y.cross(src_p), src_y, src_p)
+	var f := fingers.normalized()
+	var p := (palm - f * palm.dot(f)).normalized()
+	var dst := Basis(f.cross(p), f, p)
+	return dst * src.inverse()
 
 
 func _holster_item() -> ItemInstance:
@@ -145,6 +198,43 @@ func _holster_item() -> ItemInstance:
 		if it and it.uid != character.state.held_uid and it.def() and it.def().can_equip(ItemDefinition.EquipSlot.HIP):
 			return it
 	return null
+
+
+## Make the first-person gun move like it's held: a figure-eight bob in step with the gait,
+## a lag behind fast look movement, and lowered and canted while sprinting. ADS keeps a little.
+func _gun_motion(gun: Transform3D, cam: Transform3D, delta: float, ads_e: float) -> Transform3D:
+	var s := character.state
+	var speed := Vector2(s.vel.x, s.vel.z).length()
+	var grounded := s.is_grounded()
+	var cadence := clampf(0.55 + speed * 0.17, 0.55, 1.8)       # gait cycles per second
+	_bob_phase = fmod(_bob_phase + delta * TAU * cadence, TAU * 8.0)
+	var want_amp := smoothstep(0.1, 1.2, speed) * lerpf(1.0, 2.3, smoothstep(2.0, 6.0, speed)) * (1.0 if grounded else 0.2)
+	_bob_amp = lerpf(_bob_amp, want_amp, 1.0 - exp(-6.0 * delta))
+	var amp := _bob_amp * lerpf(1.0, 0.15, ads_e)
+	var right := cam.basis.x
+	var up := cam.basis.y
+	var fwd := -cam.basis.z
+	var pos := right * sin(_bob_phase) * 0.011 * amp + up * -absf(cos(_bob_phase)) * 0.013 * amp
+	var roll := sin(_bob_phase) * 0.04 * amp
+	# Look lag: the gun trails quick turns a little and settles back.
+	var look := Vector2(character.input_source.live_yaw if character.input_source else 0.0, character.input_source.live_pitch if character.input_source else 0.0)
+	if is_nan(_last_look.x):
+		_last_look = look
+	var dl := Vector2(angle_difference(_last_look.x, look.x), look.y - _last_look.y) / maxf(delta, 0.001)
+	_last_look = look
+	_sway = _sway.lerp((dl * -0.012).limit_length(0.09), 1.0 - exp(-10.0 * delta))
+	var sway := _sway * lerpf(1.0, 0.3, ads_e)
+	pos += right * sway.x * 0.25 + up * -sway.y * 0.25
+	# Sprinting: gun down and canted in, out of the way.
+	var sprinting := s.has(MotorState.F_SPRINTING) and speed > character.profile.jog_speed * 0.9
+	_sprint_w = move_toward(_sprint_w, 1.0 if sprinting and ads_e < 0.1 else 0.0, delta * 5.0)
+	var sw := smoothstep(0.0, 1.0, _sprint_w)
+	pos += up * -0.07 * sw + right * -0.03 * sw * _side
+	var r := Basis(fwd, roll + 0.45 * sw * _side) * Basis(up, sway.x) * Basis(right, sway.y - 0.55 * sw)
+	var g := gun
+	g.basis = (r * g.basis).orthonormalized()
+	g.origin = gun.origin + pos                           # turn about the grip
+	return g
 
 
 ## The held item's grip in its hand's bone space (mirrored for the left hand).
@@ -182,6 +272,7 @@ func _drive_hands(delta: float) -> void:
 		var ads_gun := Transform3D(aim_basis, cam.origin + fwd * 0.37 - aim_basis * rear.origin)
 		var e := smoothstep(0.0, 1.0, ads)
 		var target_gun := hip_gun.interpolate_with(ads_gun, e)
+		target_gun = _gun_motion(target_gun, cam, delta, e)
 		target_gun.origin += target_gun.basis * (_recoil.value as Vector3) * lerpf(1.0, 0.5, e)
 		target_gun.basis = target_gun.basis * Basis(Vector3.RIGHT, (_recoil.value as Vector3).y * 0.25)
 		var hand_target := target_gun * grip().affine_inverse()

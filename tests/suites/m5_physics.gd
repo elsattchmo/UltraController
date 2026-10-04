@@ -144,8 +144,9 @@ func test_cant_stand_on_held_prop() -> void:
 	await _grab(rb)
 	check(c.state.held_id != 0, "holding the crate")
 	c.teleport(rb.global_position + Vector3.UP * 0.8, 0.0)
-	await ticks(30)
-	check(c.state.held_id == 0, "standing on it makes you let go")
+	await ticks(60)
+	# Either you let go, or the prop you hold is pulled out from under you: never a platform.
+	check(c.state.held_id == 0 or c.state.pos.y < 0.15, "can't stand on what you hold (held %d, y %.2f)" % [c.state.held_id, c.state.pos.y])
 
 
 func test_team_lift() -> void:

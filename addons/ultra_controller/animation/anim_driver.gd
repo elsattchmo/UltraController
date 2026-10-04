@@ -21,6 +21,7 @@ var extra_libraries: Dictionary = {}
 var tree: AnimationTree
 var player: AnimationPlayer
 var modifier: BodyDynamicsModifier
+var inertial: InertialBlendModifier
 var foot_ik: FootIKModifier
 var hand_ik: HandIKModifier
 var look: LookModifier
@@ -106,7 +107,10 @@ func setup(p_player: AnimationPlayer, p_skeleton: Skeleton3D) -> void:
 	tree.tree_root = _build()
 	tree.active = true
 	_loco = tree.get(LOCO + "playback")
-	# Modifier order = processing order: pose shaping, then grounding, then hands, then gaze.
+	# Modifier order = processing order: transition smoothing, pose shaping, grounding, hands, gaze.
+	inertial = InertialBlendModifier.new()
+	inertial.name = "InertialBlend"
+	skeleton.add_child(inertial)
 	modifier = BodyDynamicsModifier.new()
 	modifier.name = "BodyDynamics"
 	skeleton.add_child(modifier)
@@ -340,7 +344,7 @@ func _build() -> AnimationNodeBlendTree:
 				continue
 			var t := AnimationNodeStateMachineTransition.new()
 			t.xfade_time = _xfade(a_name, b_name)
-			t.xfade_curve = null
+			t.xfade_curve = _ease_curve()
 			loco.add_transition(a_name, b_name, t)
 	var start := AnimationNodeStateMachineTransition.new()
 	loco.add_transition("Start", "ground", start)
@@ -397,14 +401,26 @@ func _build() -> AnimationNodeBlendTree:
 
 static func _xfade(a: String, b: String) -> float:
 	if b.begins_with("land"):
-		return 0.08
+		return 0.12
 	if a.begins_with("land") or b == "air":
-		return 0.12
+		return 0.2
 	if b.begins_with("rm") or a.begins_with("rm"):
-		return 0.15
+		return 0.22
 	if b == "slide" or a == "slide":
-		return 0.12
-	return 0.22
+		return 0.18
+	return 0.3
+
+
+static var _ease: Curve
+
+
+## Ease-in-out for crossfades (a linear fade reads as a pop at its ends).
+static func _ease_curve() -> Curve:
+	if _ease == null:
+		_ease = Curve.new()
+		_ease.add_point(Vector2(0, 0), 0, 0)
+		_ease.add_point(Vector2(1, 1), 0, 0)
+	return _ease
 
 
 func _upper_body_bones() -> PackedStringArray:
@@ -493,6 +509,8 @@ func _drive_state(speed: float) -> void:
 			_cur_rm = rm_clip
 			_loco.travel(slot)
 			_cur_loco = slot
+			if inertial:
+				inertial.trigger()
 		return
 	_cur_rm = -1
 	if want == "land" and stance != MotorState.Stance.STAND:
@@ -504,6 +522,8 @@ func _drive_state(speed: float) -> void:
 	if want == "getup" and _cur_loco != "getup":
 		_loco.start("getup", true)
 		_cur_loco = want
+		if inertial:
+			inertial.trigger()
 		return
 	if want != _cur_loco:
 		if want in ["air", "land", "land_heavy"]:
@@ -514,6 +534,8 @@ func _drive_state(speed: float) -> void:
 		else:
 			_loco.travel(want)
 		_cur_loco = want
+		if inertial:
+			inertial.trigger()
 
 
 func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
@@ -675,7 +697,7 @@ func _drive_item(delta: float) -> void:
 		want = 0.0
 	_item_w = move_toward(_item_w, want, delta * 5.0)
 	_pose_w = move_toward(_pose_w, item_ready_pose, delta * 6.0)
-	tree.set("parameters/upper/blend_amount", _item_w)
+	tree.set("parameters/upper/blend_amount", smoothstep(0.0, 1.0, _item_w))
 	tree.set("parameters/upper_src/pose/blend_amount", _pose_w)
 	if modifier:
 		modifier.weapon_aim = _item_w * _pose_w

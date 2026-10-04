@@ -177,7 +177,7 @@ func _process(delta: float) -> void:
 		_ammo.text = txt
 	else:
 		_ammo.text = ""
-	if scanner and scanner.focus:
+	if scanner and scanner.focus and s.held_id == 0:
 		_prompt.text = "[%s]  %s" % [_key_hint(&"interact"), scanner.focus.current_prompt(character)]
 	else:
 		_prompt.text = ""
