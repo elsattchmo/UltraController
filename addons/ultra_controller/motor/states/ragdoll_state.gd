@@ -10,7 +10,7 @@ const GET_UP_TIME := 1.5
 
 func enter(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 	if s.state == Id.RAGDOLL:
-		m.body.velocity = s.trav_from
+		m.body.velocity = Vector3(s.trav_from.x, maxf(s.trav_from.y, 0.0), s.trav_from.z)
 		s.set_flag(MotorState.F_GROUNDED, false)
 		s.set_flag(MotorState.F_SPRINTING, false)
 	else:

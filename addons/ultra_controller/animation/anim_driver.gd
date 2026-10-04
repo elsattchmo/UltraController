@@ -42,6 +42,8 @@ var on_platform := false
 var climb_speed := 0.0
 var climb_kind := 0
 var climb_duration := 0.6
+var air_time := 0.0
+var getup_crawl := false
 ## Injuries: limp severity 0..1 and which leg; hunch from a hurt torso.
 var limp := 0.0
 var limp_left := true
@@ -126,6 +128,9 @@ func _clip(role: StringName) -> StringName:
 	return c
 
 
+const BRISK_RATE := 1.75
+
+
 func _read_speeds() -> void:
 	_walk_speed = anim_set.speed_of(&"walk_f", 0.8)
 	_sprint_speed = anim_set.speed_of(&"sprint_f", 7.3)
@@ -194,6 +199,15 @@ func _build() -> AnimationNodeBlendTree:
 	bs.min_space = Vector2(-2, -2)
 	bs.max_space = Vector2(2, 8)
 	bs.add_blend_point(_anim(&"walk_f"), Vector2(0, _walk_speed), -1, &"walk")
+	# A brisk walk: the same cycle played faster (its stride is right; the jog's 2.8 m bound
+	# is not a walk), so normal walking speeds never pull the jog in.
+	var brisk := _anim(&"walk_f")
+	var walk_len := brisk.timeline_length
+	if walk_len > 0.0:
+		brisk.timeline_length = walk_len / BRISK_RATE
+		brisk.stretch_time_scale = true
+		brisk.start_offset /= BRISK_RATE
+		bs.add_blend_point(brisk, Vector2(0, _walk_speed * BRISK_RATE), -1, &"walk_brisk")
 	bs.add_blend_point(_anim(&"jog_f"), Vector2(0, anim_set.speed_of(&"jog_f", 4.7)), -1, &"jog")
 	bs.add_blend_point(_anim(&"sprint_f"), Vector2(0, _sprint_speed), -1, &"sprint")
 	bs.add_blend_point(_anim(&"walk_b"), Vector2(0, -_back_speed), -1, &"back")
@@ -433,7 +447,11 @@ func _drive_state(speed: float) -> void:
 		Id.JUMP:
 			want = "air"
 		Id.FALL:
-			want = "fall" if _cur_loco != "air" else "air"
+			# Brief ungrounded moments (a kerb, a ledge lip) aren't a fall worth showing.
+			if air_time < 0.15 and _cur_loco in ["ground", "crouch", "crawl", "land"]:
+				want = _cur_loco
+			else:
+				want = "fall" if _cur_loco != "air" else "air"
 		Id.LAND:
 			want = "land_heavy" if hard_landing else "land"
 		Id.SLIDE:
@@ -463,7 +481,8 @@ func _drive_state(speed: float) -> void:
 		Id.RAGDOLL, Id.DEAD:
 			want = "fall"
 		Id.GET_UP:
-			want = "getup"
+			# No legs to stand on: fade from the ragdoll straight into the crawl.
+			want = "crawl" if getup_crawl else "getup"
 	if want == "rm":
 		if rm_clip != _cur_rm:
 			var curve := anim_set.rm_curve(rm_clip)
@@ -508,7 +527,9 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	elif not _backwards and a > deg_to_rad(100.0):
 		_backwards = true
 	var backwards := _backwards
-	var warp_w := smoothstep(_walk_speed * 1.4, _walk_speed * 2.6, speed)
+	# Past the strafe clips' own speed the forward cycle plays and the hips turn toward travel
+	# (the strafe/diagonal clips would skate at a brisk walk).
+	var warp_w := smoothstep(_walk_speed * 1.0, _walk_speed * 1.45, speed)
 	var target_warp := 0.0
 	var blend_dir := theta
 	if moving:

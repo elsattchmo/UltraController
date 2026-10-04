@@ -126,7 +126,7 @@ func _push(n: String) -> float:
 	var start := rb.global_position
 	c.teleport(Vector3(start.x, 0.06, start.z + 1.6), 0.0)
 	await ticks(5)
-	await _run([{"ticks": 200, "yaw": 0.0, "move": Vector2(0, 1)}])
+	await _run([{"ticks": 200, "yaw": 0.0, "move": Vector2(0, 1), "buttons": InputFrame.B_SPRINT}])
 	info("%s: char %s crate %s (start %s) frozen %s sleeping %s, char->crate %.2f" % [n, c.state.pos, rb.global_position, start, rb.freeze, rb.sleeping, c.state.pos.distance_to(rb.global_position)])
 	return Vector2(rb.global_position.x - start.x, rb.global_position.z - start.z).length()
 
@@ -174,7 +174,7 @@ func test_team_lift() -> void:
 	check(lifted, "two carriers lift the whole beam")
 	check(absf(c.state.team_share + bot.character.state.team_share - 1.0) < 0.05, "load shares add up to 1")
 	var start := beam.global_position
-	await _run([{"ticks": 180, "yaw": -PI * 0.5, "move": Vector2(1, 0)}])
+	await _run([{"ticks": 300, "yaw": -PI * 0.5, "move": Vector2(1, 0)}])
 	info("carried the beam %.2f m" % beam.global_position.distance_to(start))
 	check(beam.global_position.distance_to(start) > 1.0, "carried it together")
 	bot.character.teleport(bot.character.state.pos + Vector3(4, 0, 4))

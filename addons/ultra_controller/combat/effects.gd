@@ -179,6 +179,83 @@ func sparks(at: Vector3, normal: Vector3) -> void:
 	_burst(at, normal, _spark_mat, 10, 3.0, 0.25)
 
 
+var _splash_mat: StandardMaterial3D
+var _ring_mat: StandardMaterial3D
+
+
+## Something hit the water at `at` (on the surface); strength ~0.2 (a pebble) .. 1.2 (a dive).
+func splash(at: Vector3, strength := 1.0) -> void:
+	if _splash_mat == null:
+		_splash_mat = StandardMaterial3D.new()
+		_splash_mat.albedo_color = Color(0.85, 0.94, 1.0, 0.85)
+		_splash_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_splash_mat.roughness = 0.1
+		_ring_mat = StandardMaterial3D.new()
+		_ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_ring_mat.albedo_color = Color(0.92, 0.97, 1.0, 0.7)
+		_ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	# Droplets thrown up and out.
+	var p := CPUParticles3D.new()
+	p.one_shot = true
+	p.emitting = false
+	p.amount = int(lerpf(16, 70, clampf(strength, 0.0, 1.0)))
+	p.lifetime = 0.9
+	p.explosiveness = 0.92
+	p.direction = Vector3.UP
+	p.spread = 32.0
+	p.initial_velocity_min = 1.5 * strength + 0.5
+	p.initial_velocity_max = 4.5 * strength + 1.0
+	p.gravity = Vector3(0, -9.8, 0)
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
+	p.emission_ring_axis = Vector3.UP
+	p.emission_ring_radius = 0.25 + 0.2 * strength
+	p.emission_ring_inner_radius = 0.05
+	p.emission_ring_height = 0.0
+	p.scale_amount_min = 0.6
+	p.scale_amount_max = 1.6
+	var m := SphereMesh.new()
+	m.radius = 0.025
+	m.height = 0.05
+	m.radial_segments = 6
+	m.rings = 3
+	p.mesh = m
+	p.material_override = _splash_mat
+	add_child(p)
+	p.global_position = at + Vector3.UP * 0.02
+	p.emitting = true
+	get_tree().create_timer(1.3).timeout.connect(p.queue_free)
+	# A column of spray for big entries.
+	if strength > 0.5:
+		var col := p.duplicate() as CPUParticles3D
+		col.amount = 30
+		col.spread = 8.0
+		col.emission_ring_radius = 0.12
+		col.initial_velocity_min = 3.0 * strength
+		col.initial_velocity_max = 5.5 * strength
+		add_child(col)
+		col.global_position = at
+		col.emitting = true
+		get_tree().create_timer(1.5).timeout.connect(col.queue_free)
+	# A ring spreading out on the surface.
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.42
+	tm.outer_radius = 0.5
+	tm.rings = 24
+	tm.ring_segments = 4
+	ring.mesh = tm
+	ring.material_override = _ring_mat.duplicate()
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(ring)
+	ring.global_position = at + Vector3.UP * 0.01
+	ring.scale = Vector3(0.5, 0.05, 0.5)
+	var grow := 1.5 + 2.5 * strength
+	var tw := create_tween()
+	tw.tween_property(ring, "scale", Vector3(grow, 0.05, grow), 1.2).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	tw.parallel().tween_property(ring.material_override, "albedo_color:a", 0.0, 1.2)
+	tw.tween_callback(ring.queue_free)
+
+
 func blood(at: Vector3, normal: Vector3) -> void:
 	_burst(at, normal, _blood_mat, 14, 1.8, 0.45)
 

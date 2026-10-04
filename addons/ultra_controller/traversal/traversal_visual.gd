@@ -33,10 +33,15 @@ func _process(_delta: float) -> void:
 				_release(ik)
 				return
 			var up := (rope.anchor() - grip).normalized()
-			# Right hand above, left below; wrists just beside and behind the rope.
 			var back := vis.basis.z.normalized() * 0.05
-			ik.set_goal(R, Transform3D(vis.basis, grip + up * GRIP_GAP + right * 0.035 + back), 1.0, false, 14.0)
-			ik.set_goal(L, Transform3D(vis.basis, grip - up * GRIP_GAP - right * 0.035 + back), 1.0, false, 14.0)
+			if rope.kind == UltraRope.Kind.CLIMB:
+				# Climbing: the hands go hand over hand with the climb cycle, held onto the rope.
+				ik.set_line_goal(R, grip + right * 0.035 + back, up, Vector2(-0.7, 0.7), 1.0, 14.0)
+				ik.set_line_goal(L, grip - right * 0.035 + back, up, Vector2(-0.7, 0.7), 1.0, 14.0)
+			else:
+				# Swinging: right hand above, left below, fixed on the rope.
+				ik.set_goal(R, Transform3D(vis.basis, grip + up * GRIP_GAP + right * 0.035 + back), 1.0, false, 14.0)
+				ik.set_goal(L, Transform3D(vis.basis, grip - up * GRIP_GAP - right * 0.035 + back), 1.0, false, 14.0)
 			_owns = true
 		MotorState.Id.LEDGE_HANG:
 			var edge_dir := s.trav_normal.cross(Vector3.UP).normalized()

@@ -36,6 +36,7 @@ func _ready() -> void:
 	headless = DisplayServer.get_name() == "headless"
 	UltraArgs.apply_window()
 	UltraInput.apply_user_rebinds()
+	UltraActionLayer.infinite_ammo = not UltraArgs.has("limited-ammo")    # test playground
 	if args.has("launch"):
 		var preset := UltraLauncher.find(String(args["launch"]))
 		if preset:

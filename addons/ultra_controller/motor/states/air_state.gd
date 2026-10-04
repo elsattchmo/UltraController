@@ -21,7 +21,12 @@ func next(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 				s.rm_yaw0 = s.body_yaw
 				s.rm_scale = Vector3.ONE
 				return Id.ROOT_MOTION
-		s.set_flag(MotorState.F_HARD_LANDING, impact > m.profile.hard_land_speed)
+		if impact > m.profile.hard_land_speed:
+			# A big drop: the legs give way - crumple (ragdoll) and get back up.
+			s.trav_from = m.horizontal(s.vel) * 0.6 + Vector3.DOWN * minf(impact * 0.35, 4.0)
+			s.set_flag(MotorState.F_HARD_LANDING, false)
+			return Id.RAGDOLL
+		s.set_flag(MotorState.F_HARD_LANDING, false)
 		if impact > 3.2:
 			return Id.LAND
 		return Id.MOVE if i.move.length() > 0.1 else Id.IDLE

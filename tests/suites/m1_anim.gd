@@ -60,9 +60,9 @@ func test_foot_slide_gaits() -> void:
 	var cases := [
 		["walk", Vector2(0, 0.3), 0],
 		["brisk", Vector2(0, 0.55), 0],
-		["jog", Vector2(0, 1), 0],
+		["walk_full", Vector2(0, 1), 0],
 		["sprint", Vector2(0, 1), InputFrame.B_SPRINT],
-		["diag_jog", Vector2(0.7071, 0.7071), 0],
+		["diag_walk", Vector2(0.7071, 0.7071), 0],
 		["back_slow", Vector2(0, -0.5), 0],
 		["back_mid", Vector2(0, -0.75), 0],
 		["back", Vector2(0, -1), 0],

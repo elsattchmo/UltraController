@@ -75,7 +75,7 @@ func test_stairs() -> void:
 
 func test_slopes() -> void:
 	for a in [10, 20, 30, 40]:
-		check(await _climb("ramp_%d" % a, "ramp_%d_top" % a, 8.0), "walks up %d° ramp" % a)
+		check(await _climb("ramp_%d" % a, "ramp_%d_top" % a, 16.0), "walks up %d° ramp" % a)
 	check(not await _climb("ramp_50", "ramp_50_top", 5.0), "50° ramp is too steep")
 
 
@@ -124,13 +124,16 @@ func test_hard_landing() -> void:
 	var hard := false
 	var impact := [0.0]          # lambdas capture by value: use a container
 	c.landed.connect(func(v: float) -> void: impact[0] = maxf(impact[0], v))
-	bot(c).set_steps([{"ticks": 200, "move": FWD}])
-	for i in 200:
+	bot(c).set_steps([{"ticks": 60, "move": FWD, "buttons": InputFrame.B_SPRINT}, {"ticks": 400}])
+	var up := false
+	for i in 460:
 		await ticks(1)
-		hard = hard or (c.state.state == MotorState.Id.LAND and c.state.has(MotorState.F_HARD_LANDING))
+		hard = hard or c.state.state == MotorState.Id.RAGDOLL
+		up = hard and c.state.state == MotorState.Id.IDLE
 	info("impact %.1f m/s" % impact[0])
 	check(impact[0] > 11.0, "landing impact reported")
-	check(hard, "9 m drop is a hard landing")
+	check(hard, "9 m drop: the legs give way (ragdoll)")
+	check(up, "and the character gets back up")
 
 
 func test_ice_is_slippery() -> void:

@@ -56,6 +56,7 @@ var body_fx: UltraBodyFX
 var ragdoll: UltraRagdoll
 ## Getting up: the body starts where the ragdoll lay and eases onto the capsule.
 var ragdoll_offset := Vector3.ZERO
+var _was_wet := false
 var anim: UltraAnimDriver
 
 ## Visual-only offset that absorbs teleport-free corrections and step pops (decays to zero).
@@ -272,6 +273,14 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 		visual_offset.y -= motor.last_step_up        # the camera/body glide up the step
 	if motor.last_landing > 0.0:
 		landed.emit(motor.last_landing)
+	# Into the water: splash (presentation).
+	var wet := motor.water != null and motor.water_depth > 0.15
+	if wet and not _was_wet and _prev_vel.y < -1.5 and visual_root:
+		var fx := UltraEffects.instance()
+		if fx:
+			var w := motor.water
+			fx.splash(Vector3(state.pos.x, w.surface_y(platform_tick) + w.wave(state.pos), state.pos.z), clampf(-_prev_vel.y / 9.0, 0.3, 1.2))
+	_was_wet = wet
 	if old != state.state:
 		state_changed.emit(old, state.state)
 	# Out of air: drowning hurts once a second (authority decides damage).
@@ -343,6 +352,8 @@ func _process(delta: float) -> void:
 		anim.state = state.state
 		anim.stance = state.stance
 		anim.velocity = state.vel
+		anim.air_time = state.air_time
+		anim.getup_crawl = UltraInjury.must_crawl(state)
 		var S := UltraLimbs.Status
 		var ll := UltraLimbs.leg(state, true)
 		var lr := UltraLimbs.leg(state, false)
@@ -365,8 +376,13 @@ func _process(delta: float) -> void:
 				anim.climb_speed = state.vel.y
 				var lad := UltraLadder.find(state.trav_id)
 				anim.climb_kind = 1 if lad and lad.kind == UltraLadder.Kind.PIPE else 0
-			MotorState.Id.WALL_CLIMB, MotorState.Id.ROPE:
-				anim.climb_speed = state.vel.y if state.state == MotorState.Id.WALL_CLIMB else -state.vel.y * 0.0 + (last_input.move.y if state.state == MotorState.Id.ROPE else 0.0)
+			MotorState.Id.WALL_CLIMB:
+				anim.climb_speed = state.vel.y
+			MotorState.Id.ROPE:
+				# Climb ropes: hand over hand at the climbing speed; swing ropes: just hold on.
+				var rope := UltraRope.find(state.trav_id)
+				var climbing := rope != null and rope.kind == UltraRope.Kind.CLIMB
+				anim.climb_speed = last_input.move.y * 1.1 if climbing else 0.0
 			MotorState.Id.LEDGE_HANG:
 				anim.climb_speed = last_input.move.x * 0.9
 			_:
@@ -425,6 +441,8 @@ func _swim_visual(p: Vector3, yaw: float) -> Transform3D:
 	var hs := Vector2(v.x, v.z).length()
 	var f := clampf((profile.stand_height - state.height) / maxf(profile.stand_height - profile.dive_height, 0.1), 0.0, 1.0)
 	var lift := 0.35 * smoothstep(0.15, 0.8, hs) * (1.0 - f) - 0.6 * f
+	if state.state == MotorState.Id.SWIM and motor and motor.water:
+		lift += motor.water.wave(p) * 0.8                 # ride the waves
 	var want_pitch := 0.0
 	if state.state == MotorState.Id.DIVE and v.length() > 0.3:
 		want_pitch = clampf(atan2(v.y, maxf(hs, 0.01)), deg_to_rad(-75.0), deg_to_rad(75.0))

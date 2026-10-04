@@ -13,13 +13,13 @@ size = Vector3(0.22, 0.09, 0.16)
 [sub_resource type="BoxShape3D" id="BoxShape3D_alu8q"]
 size = Vector3(0.22, 0.09, 0.16)
 
-[node name="Medkit" type="RigidBody3D" unique_id=855768638]
+[node name="Medkit" type="RigidBody3D" unique_id=1824119948]
 script = ExtResource("1_0ulhc")
 item_id = &"medkit"
 
-[node name="Visual" type="MeshInstance3D" parent="." unique_id=303317812]
+[node name="Visual" type="MeshInstance3D" parent="." unique_id=502762309]
 material_override = SubResource("StandardMaterial3D_lim7t")
 mesh = SubResource("BoxMesh_ykpy4")
 
-[node name="Shape" type="CollisionShape3D" parent="." unique_id=1823080455]
+[node name="Shape" type="CollisionShape3D" parent="." unique_id=45300963]
 shape = SubResource("BoxShape3D_alu8q")

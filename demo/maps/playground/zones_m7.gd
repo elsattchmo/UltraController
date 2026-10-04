@@ -143,9 +143,10 @@ func _grotto(w: Node3D) -> void:
 
 func _props(w: Node3D) -> void:
 	var f: Node3D = b._node(w, "Floaters")
-	m5.prop(f, "WoodCrate", "box", Vector3(0.8, 0.8, 0.8), 30.0, Vector3(45, 0.8, 85), Color(0.72, 0.5, 0.28))
+	# "buoyancy" tunes how deep a (hollow, light) prop sits: about half under for crates.
+	m5.prop(f, "WoodCrate", "box", Vector3(0.8, 0.8, 0.8), 30.0, Vector3(45, 0.8, 85), Color(0.72, 0.5, 0.28)).set_meta("buoyancy", 0.12)
 	m5.prop(f, "MetalCrate", "box", Vector3(0.5, 0.5, 0.5), 300.0, Vector3(53, 0.8, 87), Color(0.45, 0.47, 0.5))
-	m5.prop(f, "Barrel", "cylinder", Vector3(0.35, 1.0, 0.35), 40.0, Vector3(53, 0.8, 72), Color(0.7, 0.25, 0.2))
+	m5.prop(f, "Barrel", "cylinder", Vector3(0.35, 1.0, 0.35), 40.0, Vector3(53, 0.8, 72), Color(0.7, 0.25, 0.2)).set_meta("buoyancy", 0.22)
 	m5.prop(f, "BeachBall", "sphere", Vector3(0.3, 0.3, 0.3), 2.0, Vector3(45, 0.8, 72), Color(0.95, 0.85, 0.2))
 	b._label(f, "wood floats · metal sinks", Vector3(49, 1.4, 67.6), 40, 180)
 
@@ -158,7 +159,7 @@ func _river(w: Node3D) -> void:
 	_water(r, "RiverWater", Vector3(98, SURFACE, 80), Vector2(4, 40), 1.7, {"current": Vector3(0, 0, 1.4)})
 	m6._ladder(r, "RiverLadder", Vector3(96.05, SURFACE - 1.7, 98.5), 2.0, 90)
 	for i in 3:
-		m5.prop(r, "DriftCrate%d" % i, "box", Vector3(0.6, 0.6, 0.6), 15.0, Vector3(98, 0.6, 76.0 + i * 3.0), Color(0.7, 0.52, 0.3))
+		m5.prop(r, "DriftCrate%d" % i, "box", Vector3(0.6, 0.6, 0.6), 15.0, Vector3(98, 0.6, 76.0 + i * 3.0), Color(0.7, 0.52, 0.3)).set_meta("buoyancy", 0.15)
 	b._label(r, "RIVER  →  current 1.4 m/s", Vector3(98, 1.6, 59), 44, 180)
 	b._marker("river", Vector3(98, 0.1, 58), 180)
 

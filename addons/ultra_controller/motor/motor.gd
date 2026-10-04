@@ -140,6 +140,12 @@ func step(s: MotorState, input: InputFrame, p_dt: float) -> void:
 
 	var swimming := s.state == MotorState.Id.SWIM or s.state == MotorState.Id.DIVE
 	body.motion_mode = CharacterBody3D.MOTION_MODE_FLOATING if swimming else CharacterBody3D.MOTION_MODE_GROUNDED
+	# Swimmers slip past floating props instead of shoving them: bobbing props are never
+	# exactly where a predicting client sees them, so colliding would mean corrections.
+	if swimming:
+		body.collision_mask &= ~UltraLayers.WORLD_DYNAMIC
+	else:
+		body.collision_mask |= UltraLayers.WORLD_DYNAMIC
 	handler(s.state).tick(self, s, input)
 
 	s.pos = body.global_position
@@ -227,9 +233,11 @@ func target_ground_speed(s: MotorState, input: InputFrame) -> float:
 				speed = profile.sprint_speed
 				s.set_flag(MotorState.F_SPRINTING, true)
 			elif input.has(InputFrame.B_WALK):
-				speed = profile.walk_speed
+				speed = profile.walk_speed * (0.55 if profile.default_gait == MovementProfile.Gait.WALK else 1.0)
 			elif mag < profile.walk_deflection:
 				speed = profile.walk_speed * mag / profile.walk_deflection
+			elif profile.default_gait == MovementProfile.Gait.WALK:
+				speed = profile.walk_speed
 			else:
 				speed = lerpf(profile.walk_speed, profile.jog_speed, (mag - profile.walk_deflection) / (1.0 - profile.walk_deflection))
 	if not (input.has(InputFrame.B_SPRINT) and s.stance == MotorState.Stance.STAND):
@@ -371,6 +379,8 @@ func move(s: MotorState, allow_step: bool) -> void:
 	body.move_and_slide()
 	_push_bodies()
 	var grounded := body.is_on_floor()
+	if not grounded and allow_step and was_grounded and body.velocity.y <= 0.5:
+		grounded = _snap_down()
 	s.set_flag(MotorState.F_WAS_GROUNDED, was_grounded)
 	s.set_flag(MotorState.F_GROUNDED, grounded)
 	_update_platform(s)
@@ -383,6 +393,27 @@ func move(s: MotorState, allow_step: bool) -> void:
 	else:
 		s.coyote_t = maxf(s.coyote_t - dt, 0.0)
 		s.air_time += dt
+
+
+## Walking off a step (or just after stepping up onto one): stay on the ground if there's
+## walkable floor within a step's height below, instead of a few ticks of "falling".
+func _snap_down() -> bool:
+	# A ray under the capsule's centre, not the capsule: its round bottom rides step edges with
+	# a slanted contact the engine won't call floor.
+	var p := body.global_position
+	var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 0.3, p + Vector3.DOWN * (profile.step_height + 0.06), body.collision_mask, [body.get_rid()])
+	var hit := body.get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty() or (hit.normal as Vector3).y < cos(body.floor_max_angle):
+		return false
+	var gap := p.y - (hit.position as Vector3).y
+	if gap > 0.002:
+		var mv := Vector3.DOWN * gap
+		var col := KinematicCollision3D.new()
+		if body.test_move(body.global_transform, mv, col):
+			mv = col.get_travel()
+		body.global_position += mv
+	body.velocity.y = minf(body.velocity.y, 0.0)
+	return true
 
 
 func _try_step_up() -> void:

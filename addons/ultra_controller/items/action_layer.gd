@@ -54,6 +54,17 @@ static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, rep
 		pass   # stays drawn but can't fire (lowered); animation handles the pose
 
 
+## Game rule (same on every machine): reloads never run out and never use up reserve ammo.
+## The demo playground turns it on.
+static var infinite_ammo := false
+
+
+static func reserve_of(c: UltraCharacter, ammo_id: StringName) -> int:
+	if infinite_ammo:
+		return 9999
+	return c.inventory.count_of(ammo_id) if c.inventory else 0
+
+
 static func _set_action(s: MotorState, a: int) -> void:
 	s.action = a
 	s.action_t = 0.0
@@ -84,7 +95,7 @@ static func _firearm(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemD
 	var can_shoot := not busy and not sprinting
 	var mag_size := int(def.stat("mag_size", 0))
 	var ammo_id := StringName(def.stat("ammo", ""))
-	var reserve := c.inventory.count_of(ammo_id) if c.inventory else 0
+	var reserve := reserve_of(c, ammo_id)
 	if i.has(InputFrame.B_RELOAD) and s.mag < mag_size and reserve > 0 and not busy:
 		_set_action(s, Action.RELOADING)
 		c.emit_item_event(&"reload", {}, replaying)
@@ -141,11 +152,11 @@ static func _reload(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDe
 	if s.action_t >= commit and s.action_t - c.motor.dt < commit:
 		var mag_size := int(def.stat("mag_size", 0))
 		var ammo_id := StringName(def.stat("ammo", ""))
-		var reserve := c.inventory.count_of(ammo_id) if c.inventory else 0
+		var reserve := reserve_of(c, ammo_id)
 		var need := mini(mag_size - s.mag, reserve)
 		s.mag += need
 		# Only the authority's inventory really changes; the owner gets it replicated.
-		if c.is_authority() and not replaying and need > 0:
+		if c.is_authority() and not replaying and need > 0 and not infinite_ammo:
 			c.inventory.take(ammo_id, need)
 			c.inventory_changed_by_server()
 		c.emit_item_event(&"mag_in", {}, replaying)

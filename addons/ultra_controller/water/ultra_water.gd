@@ -24,6 +24,15 @@ static var all: Array[UltraWater] = []
 @export var raise_time := 6.0
 @export var material: Material
 @export var show_surface := true
+## Gentle waves: floating props bob and rock on them and the surface mesh moves with them.
+## Swimming itself uses the flat level (deterministic); swimmers only bob visually.
+@export_range(0, 0.5, 0.005) var wave_height := 0.05
+@export_range(0.5, 20, 0.1) var wave_length := 3.2
+@export_range(0, 5, 0.05) var wave_speed := 1.1
+
+## Shared clock for waves (physics and the shader read the same value).
+static var wave_time := 0.0
+static var _clock_owner: UltraWater
 
 var on := false
 var _from := 0.0
@@ -40,6 +49,8 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
 	all.append(self)
+	if _area:
+		_area.body_entered.connect(_on_body_entered)
 	if find_child("NetObject", false, false) == null:
 		var o := NetObject.new()
 		o.name = "NetObject"
@@ -53,6 +64,7 @@ func _exit_tree() -> void:
 func _rebuild() -> void:
 	if not is_inside_tree():
 		return
+	_register_globals()
 	if _mesh == null:
 		_mesh = MeshInstance3D.new()
 		_mesh.name = "Surface"
@@ -60,8 +72,14 @@ func _rebuild() -> void:
 		add_child(_mesh, false, Node.INTERNAL_MODE_FRONT)
 	var pm := PlaneMesh.new()
 	pm.size = size
+	pm.subdivide_width = clampi(int(size.x / 0.5), 0, 120)
+	pm.subdivide_depth = clampi(int(size.y / 0.5), 0, 120)
 	_mesh.mesh = pm
 	_mesh.material_override = material if material else default_material()
+	_mesh.set_instance_shader_parameter("wave_height", wave_height)
+	_mesh.set_instance_shader_parameter("wave_length", wave_length)
+	_mesh.set_instance_shader_parameter("wave_speed", wave_speed)
+	_mesh.set_instance_shader_parameter("flow", Vector2(current.x, current.z))
 	_mesh.visible = show_surface
 	if Engine.is_editor_hint():
 		return
@@ -85,7 +103,13 @@ func _rebuild() -> void:
 static var _default_mat: ShaderMaterial
 
 
+static func _register_globals() -> void:
+	if not (&"ultra_wave_time" in RenderingServer.global_shader_parameter_get_list()):
+		RenderingServer.global_shader_parameter_add(&"ultra_wave_time", RenderingServer.GLOBAL_VAR_TYPE_FLOAT, 0.0)
+
+
 static func default_material() -> ShaderMaterial:
+	_register_globals()
 	if _default_mat == null:
 		_default_mat = ShaderMaterial.new()
 		_default_mat.shader = load("res://addons/ultra_controller/water/water.gdshader")
@@ -119,6 +143,15 @@ func bottom_y() -> float:
 func contains_xz(p: Vector3) -> bool:
 	var l := global_transform.affine_inverse() * p
 	return absf(l.x) <= size.x * 0.5 and absf(l.z) <= size.y * 0.5
+
+
+## Wave offset at a world point (metres above the flat level).
+func wave(p: Vector3, time := wave_time) -> float:
+	if wave_height <= 0.0:
+		return 0.0
+	var k := TAU / wave_length
+	var w := wave_speed * k
+	return wave_height * (0.6 * sin(k * p.x + w * time) + 0.4 * sin(k * 0.73 * p.z - w * 1.27 * time + 1.3))
 
 
 ## The water whose box holds `p` (below its surface); the highest surface wins on overlap.
@@ -183,9 +216,14 @@ func set_net_state(d: Dictionary) -> void:
 func _process(_delta: float) -> void:
 	if _mesh and not Engine.is_editor_hint():
 		_mesh.position.y = surface_y(TickPlatform.current_tick) - global_position.y
+		RenderingServer.global_shader_parameter_set(&"ultra_wave_time", wave_time)
 
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
+	if not Engine.is_editor_hint() and (_clock_owner == null or not is_instance_valid(_clock_owner)):
+		_clock_owner = self
+	if _clock_owner == self:
+		wave_time += delta
 	# Props are simulated wherever physics is authoritative (not on a client: they're kinematic).
 	if Engine.is_editor_hint() or _area == null or UltraNet.mode == UltraNet.Mode.CLIENT:
 		return
@@ -232,14 +270,15 @@ func _buoy(rb: RigidBody3D, sy: float) -> void:
 	# so submersion is exactly linear from the bottom face to the top face.
 	var band := maxf(ext.y * 0.5, 0.03)
 	var sub_total := 0.0
+	var lift := float(rb.get_meta("buoyancy", 1.0))      # hollow / dense props tune how they sit
 	for k in 8:
 		var lp := Vector3(ext.x * (1.0 if k & 1 else -1.0), ext.y * (1.0 if k & 2 else -1.0), ext.z * (1.0 if k & 4 else -1.0)) * 0.5
 		var wp := xf * lp
-		var sub := clampf((sy - wp.y) / (2.0 * band) + 0.5, 0.0, 1.0)
+		var sub := clampf((sy + wave(wp) - wp.y) / (2.0 * band) + 0.5, 0.0, 1.0)
 		if sub <= 0.0:
 			continue
 		sub_total += sub
-		rb.apply_force(Vector3.UP * per * sub, wp - rb.global_position)
+		rb.apply_force(Vector3.UP * per * sub * lift, wp - rb.global_position)
 	if sub_total <= 0.0:
 		return
 	var frac := sub_total / 8.0
@@ -247,9 +286,22 @@ func _buoy(rb: RigidBody3D, sy: float) -> void:
 	var rel := rb.linear_velocity - current
 	# Heave: the waterline is a stiff spring (rho g A); damp it near critical so floats settle
 	# after a few bobs instead of ringing. Fully under, plain drag.
-	var k_wp := density * g * 4.0 * ext.x * ext.z
+	var k_wp := density * g * 4.0 * ext.x * ext.z * lift
 	var c_heave := 2.0 * 0.7 * sqrt(k_wp * rb.mass)
 	var c_v := c_heave if frac < 0.98 else drag * rb.mass
 	var f := Vector3(-rel.x * drag * rb.mass * contact, -rel.y * c_v * contact, -rel.z * drag * rb.mass * contact)
 	rb.apply_central_force(f)
 	rb.apply_torque(-rb.angular_velocity * rb.mass * ext.length_squared() * 4.0 * contact)
+
+
+## Something fell in: splash (presentation, every machine that simulates the prop).
+func _on_body_entered(body: Node) -> void:
+	var rb := body as RigidBody3D
+	if rb == null:
+		return
+	var v := rb.linear_velocity
+	if v.y < -2.0:
+		var fx := UltraEffects.instance()
+		if fx:
+			var p := rb.global_position
+			fx.splash(Vector3(p.x, surface_y(TickPlatform.current_tick) + wave(p), p.z), clampf(-v.y / 8.0 * sqrt(rb.mass / 20.0), 0.2, 1.2))

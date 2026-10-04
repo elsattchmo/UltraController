@@ -6,11 +6,11 @@
 [sub_resource type="BoxShape3D" id="BoxShape3D_dorts"]
 size = Vector3(0.04, 0.14, 0.2)
 
-[node name="Pistol" type="RigidBody3D" unique_id=2110171665]
+[node name="Pistol" type="RigidBody3D" unique_id=1514893502]
 script = ExtResource("1_2bkr4")
 item_id = &"pistol"
 
 [node name="Visual" type="Node3D" parent="." unique_id=1190384000 instance=ExtResource("2_n6h7d")]
 
-[node name="Shape" type="CollisionShape3D" parent="." unique_id=154378991]
+[node name="Shape" type="CollisionShape3D" parent="." unique_id=1464567975]
 shape = SubResource("BoxShape3D_dorts")

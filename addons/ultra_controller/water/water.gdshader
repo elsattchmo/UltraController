@@ -10,15 +10,34 @@ uniform float foam_width = 0.1;
 uniform vec4 foam_color : source_color = vec4(0.9, 0.96, 1.0, 1.0);
 uniform sampler2D normal_a : hint_normal, filter_linear_mipmap, repeat_enable;
 uniform sampler2D normal_b : hint_normal, filter_linear_mipmap, repeat_enable;
-uniform vec2 flow = vec2(0.0, 0.0);
+instance uniform vec2 flow = vec2(0.0, 0.0);
+instance uniform float wave_height = 0.05;
+instance uniform float wave_length = 3.2;
+instance uniform float wave_speed = 1.1;
+global uniform float ultra_wave_time;
 uniform float normal_scale = 0.35;
 uniform float tiling = 0.18;
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 
 varying vec3 world_pos;
 
+// Same wave as UltraWater.wave(), so floating props ride the surface you see.
+float wave(vec3 p) {
+	float k = 6.2831853 / wave_length;
+	float w = wave_speed * k;
+	float t = ultra_wave_time;
+	return wave_height * (0.6 * sin(k * p.x + w * t) + 0.4 * sin(k * 0.73 * p.z - w * 1.27 * t + 1.3));
+}
+
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	float h = wave(world_pos);
+	VERTEX.y += h;
+	world_pos.y += h;
+	float e = 0.1;
+	float hx = wave(world_pos + vec3(e, 0.0, 0.0)) - h;
+	float hz = wave(world_pos + vec3(0.0, 0.0, e)) - h;
+	NORMAL = normalize(vec3(-hx / e, 1.0, -hz / e));
 }
 
 void fragment() {

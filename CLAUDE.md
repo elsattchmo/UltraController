@@ -82,6 +82,18 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - FP eye: follows the head's yaw only, never its pitch (pitch swung the eye out in front of the
   body exactly when looking down at it).
 - Modified bone poses are only readable during `skeleton_updated` (tests: sample there).
+- Gait: `MovementProfile.default_gait` WALK (default: full input = walk 1.35 m/s, Shift =
+  sprint) or JOG. The blend space has a "walk_brisk" point (the walk cycle at 1.75x) so walk
+  speeds never pull in the jog's 2.8 m stride. Hips warp toward travel from ~1.35 m/s.
+- Stepping down a stair keeps you grounded (`UltraMotor._snap_down`, a ray under the capsule's
+  centre); the fall clip waits 0.15 s of real air before showing.
+- Hard landings (> hard_land_speed) crumple into RAGDOLL and get up; Land_Three_Point is unused.
+- Pistol grip is fitted to the posed fingers (`UltraGripFit`, run by tools/build_items.gd);
+  reloads override the gun hand by IK (gun level, rolled, free hand to the mag well).
+- Water waves: `UltraWater.wave(p)` (shared clock `wave_time`, global shader uniform
+  `ultra_wave_time`) move the surface mesh and float props (`set_meta("buoyancy", k)` tunes how
+  deep a prop sits). Swimmers don't collide with loose props (prediction-safe).
+- Demo playground has infinite ammo (`UltraActionLayer.infinite_ammo`; `--limited-ammo` off).
 - `teleport()` drops any traversal state (else a scripted move drags you back).
 - FP eye is swept from the capsule axis (`CameraRig._fp_guard`): the head bone dips into ledges.
 

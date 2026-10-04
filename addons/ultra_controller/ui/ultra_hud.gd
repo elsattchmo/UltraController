@@ -171,7 +171,7 @@ func _process(delta: float) -> void:
 	var def := character.held_def()
 	if def and def.kind == ItemDefinition.Kind.FIREARM:
 		var reserve := character.inventory.count_of(StringName(def.stat("ammo", "")))
-		var txt := "%d / %d" % [s.mag, reserve]
+		var txt := "%d / %s" % [s.mag, "∞" if UltraActionLayer.infinite_ammo else str(reserve)]
 		if s.action == UltraActionLayer.Action.RELOADING:
 			txt = "reloading…  " + txt
 		_ammo.text = txt

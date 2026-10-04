@@ -13,6 +13,11 @@ class Goal:
 	var weight := 0.0
 	var use_rotation := true
 	var speed := 8.0             ## 1/s blend rate
+	## Line goal (world direction, non-zero): the hand keeps its animated position along this
+	## line through target.origin and is only pulled onto it (climbing a rope or pole), within
+	## line_range metres of target.origin.
+	var line_dir := Vector3.ZERO
+	var line_range := Vector2(-0.8, 0.8)
 
 var goals := [Goal.new(), Goal.new()]
 var last_error := [0.0, 0.0]
@@ -40,10 +45,19 @@ func _resolve() -> void:
 ## Reach `hand` to `world_xform` (the hand bone's desired world transform).
 func set_goal(hand: int, world_xform: Transform3D, weight := 1.0, use_rotation := true, speed := 8.0) -> void:
 	var g: Goal = goals[hand]
+	g.line_dir = Vector3.ZERO
 	g.target = world_xform
 	g.want_weight = clampf(weight, 0.0, 1.0)
 	g.use_rotation = use_rotation
 	g.speed = speed
+
+
+## Hand on a line (rope, pole): keeps the animation's motion along it.
+func set_line_goal(hand: int, point: Vector3, dir: Vector3, range_m := Vector2(-0.8, 0.8), weight := 1.0, speed := 10.0) -> void:
+	set_goal(hand, Transform3D(Basis(), point), weight, false, speed)
+	var g: Goal = goals[hand]
+	g.line_dir = dir.normalized()
+	g.line_range = range_m
 
 
 func release(hand: int, speed := 6.0) -> void:
@@ -70,6 +84,11 @@ func _process_modification_with_delta(delta: float) -> void:
 			continue
 		var t_sk := inv * g.target
 		var arm: Array = _arms[i]
+		if g.line_dir != Vector3.ZERO:
+			var ld := (inv.basis * g.line_dir).normalized()
+			var hp := sk.get_bone_global_pose(arm[2]).origin
+			var along := clampf((hp - t_sk.origin).dot(ld), g.line_range.x, g.line_range.y)
+			t_sk.origin = t_sk.origin + ld * along
 		# Out of reach? Roll the clavicle toward the target first (shoulders come forward when
 		# you push a pistol out), up to ~25°.
 		var clav := sk.get_bone_parent(arm[0])

@@ -17,15 +17,20 @@ enum View { FIRST_PERSON, THIRD_PERSON }
 @export var tp_rotation := Rotation.FACE_MOVE_UNTIL_AIM
 @export var camera: UltraCameraProfile = UltraCameraProfile.new()
 
+enum Gait { WALK, JOG }
+
 @export_group("Speeds")
-@export_range(0.5, 4, 0.05) var walk_speed := 1.55
+## What full movement input does without Sprint: WALK (walk / sprint, the default) or JOG
+## (walk on a light stick, jog at full deflection, sprint).
+@export var default_gait := Gait.WALK
+@export_range(0.5, 4, 0.05) var walk_speed := 1.35
 @export_range(1, 8, 0.05) var jog_speed := 3.6
 @export_range(2, 12, 0.05) var sprint_speed := 6.2
 @export_range(0.3, 4, 0.05) var crouch_speed := 1.5
 @export_range(0.1, 2, 0.05) var crawl_speed := 0.75
 @export_range(0.2, 1, 0.01) var back_mult := 0.62
 @export_range(0.2, 1, 0.01) var strafe_mult := 0.85
-## Below this stick deflection the player walks; above it they jog (analog sticks).
+## Analog sticks: below this deflection speed scales up to a walk; above it, the default gait.
 @export_range(0.1, 1, 0.01) var walk_deflection := 0.55
 
 @export_group("Inertia")

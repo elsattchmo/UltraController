@@ -17,6 +17,7 @@ var tp_blend := 0.0              ## 0 = first person, 1 = third person
 
 var _eye_lp := Vector3.ZERO      ## low-passed eye, character-local
 var _eye_lp_ready := false
+var _aim_frame_w := 1.0
 var _land := UltraSpring.new(0.0, 2.0, 0.55)
 var _roll := UltraSpring.new(0.0, 3.0, 0.8)
 var _lean := UltraSpring.new(0.0, 4.0, 0.9)
@@ -162,10 +163,22 @@ func _process(delta: float) -> void:
 	_eye_lp = _eye_lp.lerp(eye_local, 1.0 - exp(-cam_profile.eye_height_sharpness * delta))
 	var bob := (eye_local - _eye_lp) * cam_profile.fp_bob_amount
 	var fp_local := _eye_lp.lerp(eye_local, cam_profile.fp_head_follow) + bob * (1.0 - cam_profile.fp_head_follow)
+	# Standing / moving, the eye's offset from the body axis follows where you look, not where
+	# the body faces: when the feet shuffle round (turn in place) the view just pivots instead
+	# of the eye orbiting the capsule. Ladders, ropes, swimming etc. keep the head-based eye.
+	var Id := MotorState.Id
+	var upright := character.state.state in [Id.IDLE, Id.MOVE, Id.CROUCH, Id.CRAWL, Id.LAND, Id.TURN_IN_PLACE, Id.JUMP, Id.FALL, Id.SLIDE]
+	_aim_frame_w = move_toward(_aim_frame_w, 1.0 if upright else 0.0, delta * 3.0)
+	var aim_basis := Basis(Vector3.UP, src.live_yaw)
+	var e_world := vis * fp_local
+	var d := aim_basis.inverse() * (e_world - vis.origin)
+	# Side-to-side (in the aim frame): stay on the body's axis, keeping a little of the sway.
+	var lat := cam_profile.fp_lateral_follow * lerpf(1.0, 0.35, smoothstep(deg_to_rad(15.0), deg_to_rad(60.0), -src.live_pitch))
+	d.x *= lat
+	var fp_base := e_world.lerp(vis.origin + aim_basis * d, _aim_frame_w)
 	# Look down: ease forward along the aim so the torso never blocks the view.
 	var down := smoothstep(deg_to_rad(25.0), deg_to_rad(80.0), -pitch)
-	var aim_fwd_local := vis.basis.inverse() * Vector3(-sin(yaw), 0, -cos(yaw))
-	fp_local += aim_fwd_local * cam_profile.fp_lookdown_shift * down
+	var shift := Vector3(-sin(yaw), 0, -cos(yaw)) * cam_profile.fp_lookdown_shift * down
 	# Lean.
 	var lean_in := 0.0
 	if character.profile.enable_lean:
@@ -173,11 +186,11 @@ func _process(delta: float) -> void:
 		if character.last_input.has(InputFrame.B_LEAN_R): lean_in += 1.0
 	_lean.target = lean_in
 	_lean.step(delta)
-	var right_local := vis.basis.inverse() * Vector3(cos(yaw), 0, -sin(yaw))
-	fp_local += right_local * cam_profile.lean_offset * float(_lean.value)
+	shift += Vector3(cos(yaw), 0, -sin(yaw)) * cam_profile.lean_offset * float(_lean.value)
 	_land.step(delta)
-	fp_local.y += float(_land.value)
-	var fp_pos := _fp_guard(vis, vis * fp_local) if t < 0.99 else vis * fp_local
+	shift.y += float(_land.value)
+	var fp_raw := fp_base + shift
+	var fp_pos := _fp_guard(vis, fp_raw) if t < 0.99 else fp_raw
 	# Swimming at the surface: keep the eye just above the water line (never half-submerged).
 	if character.state.state == MotorState.Id.SWIM and character.motor and character.motor.water:
 		fp_pos.y = maxf(fp_pos.y, character.motor.water.surface_y(TickPlatform.current_tick) + 0.12)

@@ -1,5 +1,6 @@
 extends Node
-## Builds item definitions. The pistol's grip comes from the Blender fit (art_src/pistol_fit.json:
+## Builds item definitions. The pistol's grip is fitted to the posed hand (UltraGripFit); the
+## Blender fit (art_src/pistol_fit.json) only placed the model originally. (Old note:
 ## the gun's pose in model space while the mannequin plays Pistol_Idle), re-expressed in Godot's
 ## retargeted RightHand frame, so it sits exactly where it was fitted.
 ## Run: godot --headless --path . res://tools/tool_runner.tscn -- --tool=res://tools/build_items.gd
@@ -89,19 +90,16 @@ func _keys() -> void:
 
 
 func _pistol(skel: Skeleton3D, lib: AnimationLibrary) -> void:
-	var fit: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://art_src/pistol_fit.json")) if FileAccess.file_exists("res://art_src/pistol_fit.json") else {}
-	var gun_model := Transform3D.IDENTITY
-	if fit.has("gun_in_model_space_rows"):
-		var r: Array = fit["gun_in_model_space_rows"]
-		gun_model = Transform3D(
-			Basis(Vector3(r[0][0], r[1][0], r[2][0]), Vector3(r[0][1], r[1][1], r[2][1]), Vector3(r[0][2], r[1][2], r[2][2])),
-			Vector3(r[0][3], r[1][3], r[2][3]))
-	else:
-		push_warning("art_src/pistol_fit.json missing (art_src is not copied to verify); keeping existing offsets")
-		return
-	UltraPoseSampler.pose(lib.get_animation(fit.get("clip", "Pistol_Idle")), skel, float(fit.get("time", 0.0)))
+	# Grip from the hand itself (UltraGripFit): the handle through the curled fingers, the
+	# trigger finger along the frame, in the aiming pose. The support hand keeps where the
+	# aiming clip puts it relative to the gun.
+	UltraPoseSampler.pose(lib.get_animation("Pistol_Aim_Neutral"), skel, 0.1)
+	var gun_node := (load("res://assets/items/pistol/pistol.glb") as PackedScene).instantiate() as Node3D
 	var rh := UltraPoseSampler.global_pose(skel, skel.find_bone("RightHand"))
 	var lh := UltraPoseSampler.global_pose(skel, skel.find_bone("LeftHand"))
+	var grip := UltraGripFit.fit(skel, gun_node)
+	gun_node.free()
+	var gun_model := rh * grip
 	var d := ItemDefinition.new()
 	d.id = &"pistol"
 	d.display_name = "Pistol"
@@ -112,7 +110,7 @@ func _pistol(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	d.equip_scene = load("res://assets/items/pistol/pistol.glb")
 	d.world_scene = load("res://assets/items/pistol/pistol_world.tscn") if ResourceLoader.exists("res://assets/items/pistol/pistol_world.tscn") else null
 	d.equip_slots = ItemDefinition.EquipSlot.MAIN_HAND | ItemDefinition.EquipSlot.HIP
-	d.grip_offset = rh.affine_inverse() * gun_model
+	d.grip_offset = grip
 	d.support_offset = gun_model.affine_inverse() * lh
 	d.two_handed = true
 	# Right hip holster: in the Hips bone frame; barrel down, grip back and up.

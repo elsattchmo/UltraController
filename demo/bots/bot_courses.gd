@@ -34,7 +34,7 @@ static func get_course(name: String) -> Array:
 		"parkour":
 			# Hop at the wall ahead until up (mantle / ledge grab + climb), stand, then step off the back.
 			var out := [{"ticks": 20}]
-			for i in 14:
+			for i in 30:
 				out.append({"ticks": 8, "move": Vector2(0, 1)})
 				out.append({"ticks": 2, "move": Vector2(0, 1), "tap": InputFrame.B_JUMP})
 			out.append({"ticks": 60})
