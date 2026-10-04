@@ -82,6 +82,17 @@ static func _cap_surface(arr: Array) -> Array:
 	var bones: PackedInt32Array = arr[Mesh.ARRAY_BONES] if arr[Mesh.ARRAY_BONES] != null else PackedInt32Array()
 	var weights: PackedFloat32Array = arr[Mesh.ARRAY_WEIGHTS] if arr[Mesh.ARRAY_WEIGHTS] != null else PackedFloat32Array()
 	var per := bones.size() / maxi(verts.size(), 1)
+	# The cap takes the mesh's most common colour (the skin of a palette-textured body).
+	var skin_uv := Vector2.ZERO
+	if not uvs.is_empty():
+		var counts := {}
+		var best := 0
+		for uv in uvs:
+			var k := uv.snappedf(0.01)
+			counts[k] = int(counts.get(k, 0)) + 1
+			if counts[k] > best:
+				best = counts[k]
+				skin_uv = uv
 	var o_v := PackedVector3Array()
 	var o_n := PackedVector3Array()
 	var o_uv := PackedVector2Array()
@@ -90,7 +101,7 @@ static func _cap_surface(arr: Array) -> Array:
 	var add := func(p: Vector3, n: Vector3, src: int) -> void:
 		o_v.append(p)
 		o_n.append(n)
-		o_uv.append(uvs[src] if uvs.size() > src else Vector2.ZERO)
+		o_uv.append(skin_uv)
 		for j in per:
 			o_b.append(bones[src * per + j])
 			o_w.append(weights[src * per + j])

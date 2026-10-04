@@ -379,7 +379,7 @@ func move(s: MotorState, allow_step: bool) -> void:
 	body.move_and_slide()
 	_push_bodies()
 	var grounded := body.is_on_floor()
-	if not grounded and allow_step and was_grounded and body.velocity.y <= 0.5:
+	if not grounded and allow_step and was_grounded and body.velocity.y <= 0.5 and s.platform_id == 0:
 		grounded = _snap_down()
 	s.set_flag(MotorState.F_WAS_GROUNDED, was_grounded)
 	s.set_flag(MotorState.F_GROUNDED, grounded)
@@ -405,6 +405,8 @@ func _snap_down() -> bool:
 	var hit := body.get_world_3d().direct_space_state.intersect_ray(q)
 	if hit.is_empty() or (hit.normal as Vector3).y < cos(body.floor_max_angle):
 		return false
+	if hit.collider is TickPlatform:
+		return false                 # moving platforms: the engine's floor snap carries riders
 	var gap := p.y - (hit.position as Vector3).y
 	if gap > 0.002:
 		var mv := Vector3.DOWN * gap

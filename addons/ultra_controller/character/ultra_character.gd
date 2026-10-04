@@ -123,8 +123,20 @@ func _build_visual() -> void:
 	head_mesh = body_node.find_child(body_profile.head_mesh_name, true, false) as MeshInstance3D
 	# First person hides the head: close the neck opening it leaves in the body.
 	var bm := body_node.find_child(body_profile.body_mesh_name, true, false) as MeshInstance3D
-	if bm and bm.mesh is ArrayMesh:
-		bm.mesh = UltraMeshCap.capped(bm.mesh as ArrayMesh)
+	for capme: MeshInstance3D in [bm, head_mesh]:
+		if capme and capme.mesh is ArrayMesh:
+			capme.mesh = UltraMeshCap.capped(capme.mesh as ArrayMesh)
+	# Anything of the body closer to a camera than a few cm dissolves (dithered), so no view
+	# ever looks into the body: inside the neck or shoulders, through a lying body's face...
+	for mi: MeshInstance3D in [bm, head_mesh]:
+		if mi == null or mi.mesh == null:
+			continue
+		for si in mi.mesh.get_surface_count():
+			var m := mi.get_active_material(si) as BaseMaterial3D
+			if m == null:
+				continue
+			var nm := _near_fade_mat(m)
+			mi.set_surface_override_material(si, nm)
 	var player := body_node.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if player and skeleton:
 		anim = UltraAnimDriver.new()
@@ -157,6 +169,20 @@ func _build_visual() -> void:
 
 
 ## Hide our own head from the camera of local viewport `idx` (shadow still cast).
+static var _fade_mats := {}
+
+
+static func _near_fade_mat(m: BaseMaterial3D) -> BaseMaterial3D:
+	if _fade_mats.has(m):
+		return _fade_mats[m]
+	var nm := m.duplicate() as BaseMaterial3D
+	nm.distance_fade_mode = BaseMaterial3D.DISTANCE_FADE_PIXEL_DITHER
+	nm.distance_fade_min_distance = 0.15
+	nm.distance_fade_max_distance = 0.27
+	_fade_mats[m] = nm
+	return nm
+
+
 ## Presentation of a hit (every machine): hit clip, flinch on the hit bone.
 func react_to_hit(region: int, dir: Vector3, amount: float) -> void:
 	if body_fx:

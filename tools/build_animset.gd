@@ -23,7 +23,7 @@ const ROLES := {
 	&"consume": "Consume", &"open_chest": "Chest_Open", &"kick_door": "Kick_Breach",
 	&"pistol_idle": "Pistol_Idle", &"pistol_aim_up": "Pistol_Aim_Up", &"pistol_aim_neutral": "Pistol_Aim_Neutral",
 	&"pistol_aim_down": "Pistol_Aim_Down", &"pistol_shoot": "Pistol_Shoot", &"pistol_reload": "Pistol_Reload",
-	&"hit_chest": "Hit_Chest", &"hit_head": "Hit_Head", &"get_up": "LayToIdle",
+	&"hit_chest": "Hit_Chest", &"hit_head": "Hit_Head", &"get_up": "LayToIdle", &"get_up_front": "mixamo/GetUp_Prone",
 	&"death_a": "Death_A", &"death_b": "Death_B", &"death_c": "Death_C", &"death_d": "Death_D",
 	&"tired": "Tired_Hunched",
 }
@@ -37,7 +37,7 @@ func _init() -> void:
 	var skel := scene.find_child("GeneralSkeleton", true, false) as Skeleton3D
 	var set := AnimationSet.new()
 	for r: StringName in ROLES:
-		if lib.has_animation(StringName(ROLES[r])):
+		if lib.has_animation(StringName(ROLES[r])) or String(ROLES[r]).contains("/"):
 			set.roles[r] = ROLES[r]
 		else:
 			push_warning("missing clip for role %s: %s" % [r, ROLES[r]])

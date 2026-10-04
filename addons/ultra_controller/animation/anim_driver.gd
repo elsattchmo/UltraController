@@ -85,6 +85,8 @@ var _lean_vel := Vector2.ZERO
 var _warp := 0.0
 var _turn_blend := 0.0
 var _backwards := false
+var _side_step := false             ## walking: side-step cycle (vs forward walk) in use
+var _side_g := 0.0
 var _foot_w := 0.0
 
 
@@ -128,7 +130,7 @@ func setup(p_player: AnimationPlayer, p_skeleton: Skeleton3D) -> void:
 
 func _clip(role: StringName) -> StringName:
 	var c := anim_set.clip(role)
-	if library_name != &"" and c != &"":
+	if library_name != &"" and c != &"" and not String(c).contains("/"):
 		return StringName("%s/%s" % [library_name, c])
 	return c
 
@@ -137,7 +139,10 @@ const BRISK_RATE := 1.75
 ## Face-down get-up: Death_A from where it lies on its front (3.85 s) back to standing (1.6 s).
 const FRONT_GETUP_FROM := 1.6
 const FRONT_GETUP_LEN := 2.25
-const GETUP_TIME := 1.7          ## keep in step with ragdoll_state.gd GET_UP_TIME
+const GETUP_TIME := 2.8          ## keep in step with ragdoll_state.gd GET_UP_TIME
+## Face-down get-up from the Mixamo clip: from the start of the push-up to standing (s).
+const FRONT_GETUP_SEG := Vector2(1.4, 5.3)
+var _front_len := FRONT_GETUP_LEN
 
 
 func _clip_len(role: StringName, fallback: float) -> float:
@@ -160,9 +165,9 @@ func _read_speeds() -> void:
 	# Convex hull of the locomotion blend space (x = right, y = forward), for clamping.
 	_hull = PackedVector2Array([
 		Vector2(0, _sprint_speed),
-		Vector2(anim_set.speed_of(&"strafe_l", 0.69) if strafe_r_mirror else anim_set.speed_of(&"strafe_r", 0.85), 0),
+		Vector2((anim_set.speed_of(&"strafe_l", 0.69) if strafe_r_mirror else anim_set.speed_of(&"strafe_r", 0.85)) * BRISK_RATE, 0),
 		Vector2(0, -_back_speed),
-		Vector2(-anim_set.speed_of(&"strafe_l", 0.69), 0),
+		Vector2(-anim_set.speed_of(&"strafe_l", 0.69) * BRISK_RATE, 0),
 	])
 
 
@@ -233,8 +238,17 @@ func _build() -> AnimationNodeBlendTree:
 	var sr := _anim(&"strafe_l") if strafe_r_mirror else _anim(&"strafe_r")
 	if strafe_r_mirror:
 		sr.animation = _mirrored(sr.animation)
-	bs.add_blend_point(sr, _hull[1], -1, &"strafe_r")
-	bs.add_blend_point(_anim(&"strafe_l"), _hull[3], -1, &"strafe_l")
+	bs.add_blend_point(sr, _hull[1] / BRISK_RATE, -1, &"strafe_r")
+	bs.add_blend_point(_anim(&"strafe_l"), _hull[3] / BRISK_RATE, -1, &"strafe_l")
+	# Brisk side-steps (the same cycles faster): walking sideways at full walk speed steps
+	# sideways, instead of twisting the hips 90 deg over a forward walk.
+	for spec: Array in [[sr, _hull[1], &"strafe_r_brisk"], [_anim(&"strafe_l"), _hull[3], &"strafe_l_brisk"]]:
+		var b := (spec[0] as AnimationNodeAnimation).duplicate() as AnimationNodeAnimation
+		if b.timeline_length > 0.0:
+			b.timeline_length /= BRISK_RATE
+			b.stretch_time_scale = true
+			b.start_offset /= BRISK_RATE
+		bs.add_blend_point(b, spec[1], -1, spec[2])
 	ground.add_node("move", bs, Vector2(0, 0))
 	ground.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
 	ground.connect_node("rate", 0, "move")
@@ -346,17 +360,26 @@ func _build() -> AnimationNodeBlendTree:
 	dive.connect_node("output", 0, "rate")
 	loco.add_node("dive", dive, Vector2(1200, 500))
 	# --- down and up again (the ragdoll covers the fall; this is the pose it fades into)
-	# Both get-ups last GET_UP_TIME (the motor's): face up = LayToIdle; face down = the end of
-	# Death_A (falling onto the front) played backwards: push up, kneel, stand.
+	# Both get-ups last GETUP_TIME (the motor's GET_UP_TIME), played at their own speed:
+	# face up = LayToIdle after lying still for the rest of the time; face down = Mixamo's
+	# "Getting Up (from prone)" (role get_up_front), or Death_A's fall reversed as a fallback.
 	var gu := AnimationNodeBlendTree.new()
-	gu.add_node("clip", _anim(&"get_up", false), Vector2(0, 0))
+	var ua := AnimationNodeAnimation.new()
+	var up_len := _clip_len(&"get_up", 1.5)
+	ua.animation = _segment(_clip(&"get_up"), 0.0, up_len, maxf(GETUP_TIME - up_len, 0.0))
+	gu.add_node("clip", ua, Vector2(0, 0))
 	gu.add_node("speed", AnimationNodeTimeScale.new(), Vector2(200, 0))
 	gu.connect_node("speed", 0, "clip")
 	gu.connect_node("output", 0, "speed")
 	loco.add_node("getup", gu, Vector2(1400, 400))
 	var gf := AnimationNodeBlendTree.new()
 	var fa := AnimationNodeAnimation.new()
-	fa.animation = _reversed(_clip(&"death_a"), FRONT_GETUP_FROM, FRONT_GETUP_FROM + FRONT_GETUP_LEN)
+	if _role_anim(&"get_up_front"):
+		_front_len = FRONT_GETUP_SEG.y - FRONT_GETUP_SEG.x
+		fa.animation = _segment(_clip(&"get_up_front"), FRONT_GETUP_SEG.x, FRONT_GETUP_SEG.y)
+	else:
+		_front_len = FRONT_GETUP_LEN
+		fa.animation = _reversed(_clip(&"death_a"), FRONT_GETUP_FROM, FRONT_GETUP_FROM + FRONT_GETUP_LEN)
 	gf.add_node("clip", fa, Vector2(0, 0))
 	gf.add_node("speed", AnimationNodeTimeScale.new(), Vector2(200, 0))
 	gf.connect_node("speed", 0, "clip")
@@ -554,8 +577,8 @@ func _drive_state(speed: float) -> void:
 		tree.set(LOCO + "climb/speed/scale", 0.6 / maxf(climb_duration, 0.2))
 	if want.begins_with("getup") and _cur_loco != want:
 		var dur := GETUP_TIME
-		tree.set(LOCO + "getup/speed/scale", _clip_len(&"get_up", 1.5) / dur)
-		tree.set(LOCO + "getup_front/speed/scale", FRONT_GETUP_LEN / dur)
+		tree.set(LOCO + "getup/speed/scale", maxf(_clip_len(&"get_up", 1.5), GETUP_TIME) / dur)
+		tree.set(LOCO + "getup_front/speed/scale", _front_len / dur)
 		_loco.start(want, true)
 		_cur_loco = want
 		if inertial:
@@ -587,16 +610,33 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	var backwards := _backwards
 	# Past the strafe clips' own speed the forward cycle plays and the hips turn toward travel
 	# (the strafe/diagonal clips would skate at a brisk walk).
-	var warp_w := smoothstep(_walk_speed * 1.0, _walk_speed * 1.45, speed)
+	# Forward / sideways the blend space covers walking speeds (brisk walk + brisk side-steps);
+	# only runs turn the hips. Backwards the side-steps blend badly, so it warps sooner.
 	var target_warp := 0.0
 	var blend_dir := theta
 	if moving:
 		var base := PI if backwards else 0.0
 		var rel := angle_difference(base, theta)
-		# Backwards, the legs only turn a little (looking down you'd see them cross under
-		# you); the back + side-step clips blend for the rest of the angle.
-		var lim := deg_to_rad(back_warp_deg) if backwards else PI * 0.5
-		target_warp = clampf(rel, -lim, lim) * warp_w
+		if backwards:
+			# Backwards the legs only turn a little (looking down you'd see them cross under
+			# you); the back + side-step clips blend for the rest of the angle.
+			var lim := deg_to_rad(back_warp_deg)
+			target_warp = clampf(rel, -lim, lim) * smoothstep(_walk_speed * 1.0, _walk_speed * 1.45, speed)
+		else:
+			# Walking: never blend the walk with a side-step (diagonals skate). Below ~45 deg
+			# off forward play the walk with the hips turned toward travel; beyond it play the
+			# side-step with the hips turned back. Running: the forward cycle, hips turned.
+			var a2 := absf(rel)
+			if _side_step and a2 < deg_to_rad(38.0):
+				_side_step = false
+			elif not _side_step and a2 > deg_to_rad(52.0):
+				_side_step = true
+			_side_g = move_toward(_side_g, 1.0 if _side_step else 0.0, delta * 4.0)
+			var g := smoothstep(0.0, 1.0, _side_g)
+			var walk_warp := signf(rel) * (a2 - g * PI * 0.5)
+			var run_w := smoothstep(2.2, 3.2, speed)
+			var walk_w := smoothstep(_walk_speed * 0.6, _walk_speed * 1.2, speed)
+			target_warp = lerpf(walk_warp * walk_w, clampf(rel, -PI * 0.5, PI * 0.5), run_w)
 		blend_dir = theta - target_warp
 	_warp = lerp_angle(_warp, target_warp, 1.0 - exp(-10.0 * delta))
 	var bp := Vector2(sin(blend_dir), cos(blend_dir)) * speed
@@ -764,6 +804,20 @@ func _hips_yaw(clip: StringName) -> float:
 			var z := Basis(q).z
 			return atan2(z.x, z.z)
 	return NAN
+
+
+## A forward segment of a clip (first frame held `hold` s), made once, kept in its library.
+func _segment(clip: StringName, from: float, to: float, hold := 0.0) -> StringName:
+	var s := String(clip)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var clip_name := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	if l == null or not l.has_animation(clip_name):
+		return clip
+	var rname := "%s_seg_%d_%d_%d" % [clip_name, int(from * 100), int(to * 100), int(hold * 100)]
+	if not l.has_animation(rname):
+		l.add_animation(rname, UltraAnimMirror.segment(l.get_animation(clip_name), from, to, hold))
+	return StringName((lib + "/" if lib != "" else "") + rname)
 
 
 ## A reversed segment of a clip, made once and kept in the same library.

@@ -21,8 +21,11 @@ func _init() -> void:
 	_clip = String(args.get("clip", "Pistol_Reload"))
 	_n = int(args.get("n", "6"))
 	_side = float(args.get("side", "1"))
-	var lib: AnimationLibrary = load("res://assets/characters/mannequin/anims/ual.res")
+	var lib: AnimationLibrary = load(String(args.get("lib", "res://assets/characters/mannequin/anims/ual.res")))
 	_anim = lib.get_animation(_clip)
+	_from = float(args.get("from", "0"))
+	_to = float(args.get("to", str(_anim.length)))
+	_gun = not args.has("nogun")
 	var def: Resource = load("res://assets/items/pistol/pistol_item.tres")
 	var w := Node3D.new()
 	root.add_child(w)
@@ -46,9 +49,10 @@ func _init() -> void:
 	var att := BoneAttachment3D.new()
 	att.bone_name = "RightHand"
 	_sk.add_child(att)
-	var gun := (def.get("equip_scene") as PackedScene).instantiate() as Node3D
-	att.add_child(gun)
-	gun.transform = def.get("grip_offset")
+	if _gun:
+		var gun := (def.get("equip_scene") as PackedScene).instantiate() as Node3D
+		att.add_child(gun)
+		gun.transform = def.get("grip_offset")
 	_cam = Camera3D.new()
 	_cam.fov = 30
 	w.add_child(_cam)
@@ -56,16 +60,19 @@ func _init() -> void:
 
 
 var _cam: Camera3D
+var _from := 0.0
+var _to := 1.0
+var _gun := true
 
 
 func _tick() -> void:
 	_frames += 1
 	if _frames % 3 == 1:
-		UltraPoseSampler.pose(_anim, _sk, _anim.length * _i / maxf(_n - 1, 1))
-		var chest := _sk.global_transform * UltraPoseSampler.global_pose(_sk, _sk.find_bone("Chest")).origin
+		UltraPoseSampler.pose(_anim, _sk, lerpf(_from, _to, _i / maxf(_n - 1, 1)))
+		var chest := _sk.global_transform * Vector3(0, 0.6, 0.1)
 		var fwd := (_sk.global_basis * Vector3(0, 0, 1)).normalized()
 		var right := (_sk.global_basis * Vector3(-1, 0, 0)).normalized()
-		var h := chest.distance_to(_sk.global_transform * UltraPoseSampler.global_pose(_sk, _sk.find_bone("LeftFoot")).origin)
+		var h := 1.5
 		_cam.global_position = chest + (fwd * 1.3 + right * 1.0 * _side) * h + Vector3.UP * 0.35 * h
 		_cam.look_at(chest + fwd * 0.15 * h + Vector3.UP * 0.25 * h, Vector3.UP)
 	elif _frames % 3 == 0:

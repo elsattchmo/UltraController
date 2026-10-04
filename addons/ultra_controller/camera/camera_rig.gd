@@ -18,6 +18,10 @@ var tp_blend := 0.0              ## 0 = first person, 1 = third person
 var _eye_lp := Vector3.ZERO      ## low-passed eye, character-local
 var _eye_lp_ready := false
 var _aim_frame_w := 1.0
+var _head_eye_cached := Vector3.ZERO
+var _head_look_cached := Basis()
+var _down_w := 0.0                  ## knocked down / dead / getting up: the view is the head's
+var _down_q := Quaternion.IDENTITY
 var _neck_bone := -1
 var _neck_cached := Vector3.INF
 ## The eye stays this far above / in front of the neck joint (crouching or running bends the
@@ -138,6 +142,11 @@ func _on_skeleton_updated() -> void:
 	var vis_inv := character.visual_root.global_transform.affine_inverse()
 	# Stored relative to the visual root so it stays valid when the root moves next frame.
 	_eye_sk_cached = vis_inv * (sk.global_transform * head_sk.origin) + yaw_v * character.body_profile.eye_offset
+	# The real eye (full head rotation) and where the head looks, for when the body is down.
+	var vis_b_inv := character.visual_root.global_basis.orthonormalized().inverse()
+	var head_world_b := sk.global_basis.orthonormalized() * rot_sk
+	_head_eye_cached = vis_inv * (sk.global_transform * head_sk.origin) + vis_b_inv * (head_world_b * (to_sk * character.body_profile.eye_offset))
+	_head_look_cached = vis_b_inv * head_world_b * Basis(Vector3.UP, PI)     # model +Z forward -> camera -Z
 	if _neck_bone < 0:
 		_neck_bone = sk.find_bone("Neck")
 	if _neck_bone >= 0:
@@ -188,7 +197,9 @@ func _process(delta: float) -> void:
 	if _neck_cached != Vector3.INF:
 		var nd := aim_basis.inverse() * (vis.basis * _neck_cached)
 		d.y = maxf(d.y, nd.y + EYE_ABOVE_NECK)
-		d.z = minf(d.z, nd.z - EYE_AHEAD_OF_NECK)
+		# Looking straight down the collar would sit right under the eye: get further ahead.
+		var steep := smoothstep(deg_to_rad(40.0), deg_to_rad(80.0), -src.live_pitch)
+		d.z = minf(d.z, nd.z - EYE_AHEAD_OF_NECK - 0.09 * steep)
 	var fp_base := e_world.lerp(vis.origin + aim_basis * d, _aim_frame_w)
 	# Look down: ease forward along the aim so the torso never blocks the view.
 	var down := smoothstep(deg_to_rad(25.0), deg_to_rad(80.0), -pitch)
@@ -236,8 +247,34 @@ func _process(delta: float) -> void:
 	_fov.target = cam_profile.sprint_fov_kick if character.state.has(MotorState.F_SPRINTING) and character.state.vel.length() > character.profile.jog_speed else 0.0
 	_fov.step(delta)
 
+	# Down (ragdoll, dead, getting up): first person looks out of the head's real eye, the way
+	# the head faces (smoothed a little so a tumbling head doesn't shake the view to pieces).
+	var Id2 := MotorState.Id
+	var is_down := character.state.state in [Id2.RAGDOLL, Id2.DEAD, Id2.GET_UP] and _have_eye
+	_down_w = move_toward(_down_w, 1.0 if is_down else 0.0, delta * (6.0 if is_down else 2.0))
+	var cam_basis := rot * Basis(Vector3.BACK, roll)
+	if _down_w > 0.001:
+		var head_q := _tame_view((vis.basis.orthonormalized() * _head_look_cached).get_rotation_quaternion())
+		_down_q = head_q if _down_w < 0.02 else _down_q.slerp(head_q, 1.0 - exp(-14.0 * delta))
+		var dw := smoothstep(0.0, 1.0, _down_w)
+		# Out in front of the face: a tucked head puts the real eye right against the collar.
+		var face := Basis(_down_q) * Vector3.FORWARD
+		fp_pos = fp_pos.lerp(vis * _head_eye_cached + face * 0.15, dw)
+		# Never look back down into our own neck / chest (a tucked chin while getting up).
+		if _neck_cached != Vector3.INF:
+			var to_neck := (vis * _neck_cached - vis * _head_eye_cached).normalized()
+			var look := Basis(_down_q) * Vector3.FORWARD
+			var lim := cos(deg_to_rad(60.0))
+			if look.dot(to_neck) > lim:
+				var axis := to_neck.cross(look)
+				if axis.length() > 0.001:
+					var ang := acos(clampf(look.dot(to_neck), -1.0, 1.0))
+					_down_q = Quaternion(axis.normalized(), deg_to_rad(60.0) - ang) * _down_q
+		cam_basis = Basis(cam_basis.get_rotation_quaternion().slerp(_down_q, dw))
+	else:
+		_down_q = cam_basis.get_rotation_quaternion()
 	global_position = fp_pos.lerp(tp_pos, t)
-	camera.global_transform = Transform3D(rot * Basis(Vector3.BACK, roll), global_position)
+	camera.global_transform = Transform3D(cam_basis.slerp(rot * Basis(Vector3.BACK, roll), t) if t > 0.0 else cam_basis, global_position)
 	var eq := _equipment()
 	var ads := eq.ads if eq else 0.0
 	if eq:
@@ -248,6 +285,7 @@ func _process(delta: float) -> void:
 		(src as LocalInputSource).sens_mult = lerpf(1.0, UltraInputSettings.f("ads_sensitivity_mult"), ads)
 	camera.near = lerpf(cam_profile.near, 0.08, t)
 	var first_person := tp_blend < 0.15
+	# (The eye sits inside the head mesh: our own head stays hidden in first person, always.)
 	camera.cull_mask = UltraLayers.camera_cull_mask(view_index, first_person)
 	_underwater_fx()
 
@@ -308,6 +346,19 @@ func _fp_guard(vis: Transform3D, eye: Vector3) -> Vector3:
 	q.motion = eye - origin
 	var r := space.cast_motion(q)
 	return origin + (eye - origin) * r[0]
+
+
+## Keep the knocked-down eye view watchable: no more than 50 deg down (face down you'd stare
+## along your own arms into the floor) and at most 35 deg of roll.
+static func _tame_view(q: Quaternion) -> Quaternion:
+	var b := Basis(q)
+	var f := -b.z
+	var yaw := atan2(-f.x, -f.z)
+	var pitch := clampf(asin(clampf(f.y, -1.0, 1.0)), deg_to_rad(-50.0), deg_to_rad(70.0))
+	var up := b.y
+	var flat_r := Vector3(cos(yaw), 0, -sin(yaw))
+	var roll := clampf(atan2(-up.dot(flat_r), up.y), deg_to_rad(-35.0), deg_to_rad(35.0))
+	return (Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch) * Basis(Vector3.BACK, roll)).get_rotation_quaternion()
 
 
 func _arm_collide(pivot: Vector3, shoulder_pt: Vector3, desired: Vector3) -> float:

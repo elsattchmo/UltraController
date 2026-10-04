@@ -82,9 +82,17 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   pose at the moment of the knock-down, blending to a brace pose (Death_A 3.3 s), fading from
   `tone_start` to `tone_down` (`tone_dead` when dead); damping rises once down so it settles.
   A damped pull keeps the body near the deterministic capsule for the first ~1.2 s.
-- Get-up picks the clip from how the ragdoll lies: face up = LayToIdle, face down = Death_A
-  1.6-3.85 s reversed (`UltraAnimMirror.reversed_segment`); the body starts at the ragdoll's
-  hips and yaw (`ragdoll_offset`, `ragdoll_yaw`) and eases onto the capsule. GET_UP_TIME 1.7.
+- Get-up picks the clip from how the ragdoll lies: face up = LayToIdle (after holding its
+  lying frame), face down = Mixamo GetUp_Prone 1.4-5.3 s (role `get_up_front`; fallback
+  Death_A reversed). Clips are cut/held at runtime (`UltraAnimMirror.segment`). The body
+  starts at the ragdoll's hips and yaw and eases onto the capsule. GET_UP_TIME 2.8.
+- First person while down (RAGDOLL/DEAD/GET_UP): the camera is the head's real eye pushed
+  15 cm out of the face, view pitch >= -50 deg and roll <= 35 deg (`_tame_view`).
+- Body materials dither away within 0.15-0.27 m of any camera (`_near_fade_mat`); the body and
+  head meshes are both capped (`UltraMeshCap`, skin-coloured).
+- Walking never blends the walk with a side-step: below ~45 deg off forward the walk plays with
+  the hips turned, beyond it the side-step (hysteresis 38/52 deg). Brisk side-step points
+  (1.75x) cover sideways walking speed. Runs warp the hips from 2.2 m/s.
 - `knock_down` / death set state.vel from the push (they run outside a motor step).
 - Upper-body item clips can be mirrored at runtime (`UltraAnimMirror`; the skeleton is mirror
   symmetric). `BodyDynamicsModifier.item_hips_yaw` turns the spine by the item clip's own hips
@@ -99,7 +107,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   side-step clips blend the rest. The right side-step point is a mirrored Strafe_Left
   (Strafe_Right skates ~0.8 m/s when blended with Walk_Backwards). back_mult 0.82, strafe 0.95.
 - Stepping down a stair keeps you grounded (`UltraMotor._snap_down`, a ray under the capsule's
-  centre); the fall clip waits 0.15 s of real air before showing.
+  centre; never on a TickPlatform - a raycast can see its pose a frame stale during replay);
+  the fall clip waits 0.15 s of real air before showing.
 - Hard landings (> hard_land_speed) crumple into RAGDOLL and get up; Land_Three_Point is unused.
 - Pistol grip is fitted to the posed fingers (`UltraGripFit`, run by tools/build_items.gd);
   the reload plays as authored in third person; in first person both hands' clip motion is
@@ -166,5 +175,11 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   writes `intake/blender/*.glb` -> `blender/` library via the same intake. Also `mirror`,
   `make-pistol`, `mixamo-test` (a Mixamo-named FBX for testing without an account).
 - Round-trip test (m1_import.test_intake_roundtrip): Blender path exact, Mixamo FBX path < 5 cm.
+- Mixamo names bones per character (`mixamorig:`, `mixamorig1:` ...): the intake detects the
+  prefix and makes a matching bone map (`mixamo_humanoid_<prefix>.tres`). A clip that imports
+  with 0 tracks means the bone map didn't match.
+- Mixamo downloads (logged-in browser): the site's own API (`/api/v1/products?query=`,
+  `/animations/export` + `/characters/<id>/monitor`) from the page's session; the S3 link
+  lasts 5 min, fetch it with curl. Export FBX, no skin, 30 fps, not in-place.
 - Tools that touch autoload-dependent scripts run through `res://tools/tool_runner.tscn -- --tool=...`
   (a `--script` SceneTree has no autoloads). Builders: build_items.gd, build_playground.gd, intake.gd.

@@ -30,6 +30,36 @@ static func mirror(src: Animation) -> Animation:
 	return a
 
 
+## A segment of a clip (forwards), its first frame held for `hold` seconds before it plays.
+static func segment(src: Animation, from: float, to: float, hold := 0.0, fps := 30.0) -> Animation:
+	var a := Animation.new()
+	var seg := to - from
+	a.length = hold + seg
+	a.loop_mode = Animation.LOOP_NONE
+	var n := maxi(int(ceil(seg * fps)), 1)
+	for t in src.get_track_count():
+		var ty := src.track_get_type(t)
+		if ty != Animation.TYPE_ROTATION_3D and ty != Animation.TYPE_POSITION_3D and ty != Animation.TYPE_SCALE_3D:
+			continue
+		var nt := a.add_track(ty)
+		a.track_set_path(nt, src.track_get_path(t))
+		var times: Array[float] = []
+		if hold > 0.0:
+			times.append(0.0)
+		for k in n + 1:
+			times.append(hold + minf(k / fps, seg))
+		for tt in times:
+			var st := from + maxf(tt - hold, 0.0)
+			match ty:
+				Animation.TYPE_ROTATION_3D:
+					a.rotation_track_insert_key(nt, tt, src.rotation_track_interpolate(t, st))
+				Animation.TYPE_POSITION_3D:
+					a.position_track_insert_key(nt, tt, src.position_track_interpolate(t, st))
+				Animation.TYPE_SCALE_3D:
+					a.scale_track_insert_key(nt, tt, src.scale_track_interpolate(t, st))
+	return a
+
+
 ## A segment of a clip played backwards, as its own clip (resampled at `fps`).
 static func reversed_segment(src: Animation, from: float, to: float, fps := 30.0) -> Animation:
 	var a := Animation.new()

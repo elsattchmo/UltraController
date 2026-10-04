@@ -5,7 +5,7 @@ extends MotorStateHandler
 
 const Id := MotorState.Id
 const LIE_HEIGHT := 0.5
-const GET_UP_TIME := 1.7
+const GET_UP_TIME := 2.8
 
 
 func enter(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:

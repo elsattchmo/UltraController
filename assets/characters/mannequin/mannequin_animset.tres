@@ -32,6 +32,7 @@ roles = {
 &"dodge_left": "Dodge_left_RM",
 &"dodge_right": "Dodge_right_RM",
 &"get_up": "LayToIdle",
+&"get_up_front": "mixamo/GetUp_Prone",
 &"hit_chest": "Hit_Chest",
 &"hit_head": "Hit_Head",
 &"idle": "Idle_A",
