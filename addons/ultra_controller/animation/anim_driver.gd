@@ -19,6 +19,9 @@ const LOCO := "parameters/loco/"
 var tree: AnimationTree
 var player: AnimationPlayer
 var modifier: BodyDynamicsModifier
+var foot_ik: FootIKModifier
+var hand_ik: HandIKModifier
+var look: LookModifier
 var skeleton: Skeleton3D
 
 ## Presentation inputs, written by the character every frame.
@@ -32,6 +35,13 @@ var turning := false
 var rm_clip: int = -1
 var hard_landing := false
 var land_impact := 0.0
+var on_platform := false
+## 1 when the body faces the aim (first person, aiming): spine carries aim yaw/pitch.
+## 0 in free third-person movement: only the head glances (LookModifier).
+var aim_weight := 1.0
+var _aim_w := 1.0
+## Scales all IK (e.g. 0 while ragdolled).
+var ik_scale := 1.0
 var accel := Vector3.ZERO
 
 var _loco: AnimationNodeStateMachinePlayback
@@ -48,6 +58,7 @@ var _lean_vel := Vector2.ZERO
 var _warp := 0.0
 var _turn_blend := 0.0
 var _backwards := false
+var _foot_w := 0.0
 
 
 func setup(p_player: AnimationPlayer, p_skeleton: Skeleton3D) -> void:
@@ -67,9 +78,19 @@ func setup(p_player: AnimationPlayer, p_skeleton: Skeleton3D) -> void:
 	tree.tree_root = _build()
 	tree.active = true
 	_loco = tree.get(LOCO + "playback")
+	# Modifier order = processing order: pose shaping, then grounding, then hands, then gaze.
 	modifier = BodyDynamicsModifier.new()
 	modifier.name = "BodyDynamics"
 	skeleton.add_child(modifier)
+	foot_ik = FootIKModifier.new()
+	foot_ik.name = "FootIK"
+	skeleton.add_child(foot_ik)
+	hand_ik = HandIKModifier.new()
+	hand_ik.name = "HandIK"
+	skeleton.add_child(hand_ik)
+	look = LookModifier.new()
+	look.name = "Look"
+	skeleton.add_child(look)
 
 
 func _clip(role: StringName) -> StringName:
@@ -425,11 +446,30 @@ func _drive_body(delta: float) -> void:
 	var c := 2.0 * sqrt(k) * 0.7
 	_lean_vel += ((target - _lean) * k - _lean_vel * c) * delta
 	_lean += _lean_vel * delta
+	# Feet: full grounding when standing / walking, easing off at a run, off in the air.
+	var foot_w := 0.0
+	var Id := MotorState.Id
+	if state in [Id.IDLE, Id.MOVE, Id.CROUCH, Id.LAND, Id.TURN_IN_PLACE]:
+		var sp := Vector2(velocity.x, velocity.z).length()
+		foot_w = lerpf(1.0, 0.55, smoothstep(2.0, 6.5, sp))
+	_foot_w = move_toward(_foot_w, foot_w * ik_scale, delta * (10.0 if foot_w < _foot_w else 4.0))
+	if foot_ik:
+		foot_ik.weight = _foot_w
+		foot_ik.lock_weight = 0.0 if on_platform else 1.0
 	modifier.lean_roll = _lean.x
 	modifier.lean_pitch = _lean.y
 	modifier.warp_yaw = _warp
-	modifier.aim_pitch = aim_pitch
-	modifier.aim_yaw = angle_difference(body_yaw, aim_yaw) * -1.0
+	_aim_w = move_toward(_aim_w, aim_weight, delta * 4.0)
+	var yaw_off := clampf(-angle_difference(body_yaw, aim_yaw), -deg_to_rad(80.0), deg_to_rad(80.0))
+	modifier.aim_pitch = clampf(aim_pitch, -1.35, 1.35) * _aim_w
+	modifier.aim_yaw = yaw_off * _aim_w
+	if look and skeleton:
+		# Free third person: the head (not the spine) follows where the player looks.
+		var head_w := (1.0 - _aim_w) * 0.85
+		var dir := Vector3(-sin(aim_yaw) * cos(aim_pitch), sin(aim_pitch), -cos(aim_yaw) * cos(aim_pitch))
+		var head_pos := skeleton.global_transform * skeleton.get_bone_global_pose(skeleton.find_bone("Head")).origin
+		look.glance_target = head_pos + dir * 8.0
+		look.glance_weight = head_w
 	if state == MotorState.Id.ROOT_MOTION:
 		modifier.aim_yaw = 0.0
 		modifier.aim_pitch *= 0.3

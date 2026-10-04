@@ -71,9 +71,6 @@ func test_foot_slide_gaits() -> void:
 	for cs: Array in cases:
 		var r: Array = await _toe_slide(cs[1], cs[2])
 		info("%-8s speed %.2f m/s  planted toe median %.2f m/s  p75 %.2f" % [cs[0], r[2], r[0], r[1]])
-		# Walk_Backwards' feet drift sideways in the source clip itself (speed along travel
-		# matches); foot locking in M3 removes that, then this tolerance tightens to the rest.
+		# (Walk_Backwards' feet drift sideways in the source clip; foot locking removes it.)
 		var tol := maxf(0.3, r[2] * 0.12)
-		if String(cs[0]).begins_with("back"):
-			tol = maxf(0.45, r[2] * 0.4)
 		check(r[0] < tol, "%s: planted foot doesn't skate (median %.2f at %.2f m/s)" % [cs[0], r[0], r[2]])

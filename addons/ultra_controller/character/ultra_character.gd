@@ -99,6 +99,7 @@ func _build_visual() -> void:
 		anim.library = body_profile.library
 		add_child(anim)
 		anim.setup(player, skeleton)
+		anim.foot_ik.exclude = [get_rid()]
 	set_view_index(view_index)
 	_sync_visual(1.0)
 
@@ -206,6 +207,8 @@ func _process(delta: float) -> void:
 		anim.rm_clip = state.rm_clip
 		anim.hard_landing = state.has(MotorState.F_HARD_LANDING)
 		anim.land_impact = state.land_impact
+		anim.on_platform = state.platform_id != 0
+		anim.aim_weight = 1.0 if faces_aim() else 0.0
 		anim.accel = _accel
 
 
@@ -221,6 +224,18 @@ func _sync_visual(alpha: float) -> void:
 			and absf(angle_difference(state.body_yaw, last_input.yaw)) < 0.05:
 		yaw = input_source.live_yaw
 	visual_root.global_transform = Transform3D(Basis(Vector3.UP, yaw), p)
+
+
+## Does the body turn to face the aim right now? (first person, or TP aiming modes)
+func faces_aim() -> bool:
+	if not last_input.has(InputFrame.B_VIEW_TP):
+		return true
+	match profile.tp_rotation:
+		MovementProfile.Rotation.FACE_AIM:
+			return true
+		MovementProfile.Rotation.FACE_MOVE_UNTIL_AIM:
+			return last_input.has(InputFrame.B_SECONDARY)
+	return false
 
 
 func is_first_person() -> bool:
