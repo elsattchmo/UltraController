@@ -121,6 +121,19 @@ static func bake_root_motion(anim: Animation, clip: StringName, root_track_path:
 				var last: float = c.yaws[c.yaws.size() - 1]
 				yaw = last + angle_difference(last, yaw)
 		c.yaws.append(yaw)
+	# Some clips snap the root back to the start at the very end (ClimbUp_1m_RM): if the path
+	# ends far short of its furthest point, crop it at the peak so the motor never sees it.
+	var far_i := 0
+	var far_d := 0.0
+	for k in c.positions.size():
+		var d := c.positions[k].length()
+		if d > far_d:
+			far_d = d
+			far_i = k
+	if far_d > 0.5 and c.positions[c.positions.size() - 1].length() < far_d * 0.3:
+		c.positions.resize(far_i + 1)
+		c.yaws.resize(far_i + 1)
+		c.length = float(far_i) / c.sample_rate
 	return c
 
 

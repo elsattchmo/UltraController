@@ -52,6 +52,9 @@ var anim: UltraAnimDriver
 
 ## Visual-only offset that absorbs teleport-free corrections and step pops (decays to zero).
 var visual_offset := Vector3.ZERO
+## Interpolated feet position this frame (before any presentation offset such as hanging behind a rope).
+var visual_feet := Vector3.ZERO
+const ROPE_CHEST_GAP := 0.16
 var _prev_pos := Vector3.ZERO
 var _prev_yaw := 0.0
 var _prev_vel := Vector3.ZERO
@@ -60,6 +63,7 @@ var _shape: CollisionShape3D
 
 
 func _ready() -> void:
+	add_to_group(&"ultra_character")
 	if profile == null:
 		profile = MovementProfile.new()
 	collision_layer = UltraLayers.CHARACTER
@@ -116,6 +120,10 @@ func _build_visual() -> void:
 		eq.name = "Equipment"
 		add_child(eq)
 		eq.setup(self)
+		var tv := UltraTraversalVisual.new()
+		tv.name = "TraversalHands"
+		add_child(tv)
+		tv.setup(self)
 		item_event.connect(func(kind: StringName, _d: Dictionary) -> void: anim.item_event(kind))
 	set_view_index(view_index)
 	_sync_visual(1.0)
@@ -137,6 +145,11 @@ func set_input_source(src: InputSource) -> void:
 func teleport(pos: Vector3, yaw: float = NAN) -> void:
 	state.pos = pos
 	state.vel = Vector3.ZERO
+	# Drop out of anything that pins us to the world (a scripted move, a ladder, a rope...).
+	if state.state >= MotorState.Id.MANTLE and state.state <= MotorState.Id.ROPE:
+		state.state = MotorState.Id.FALL
+		state.state_time = 0.0
+		state.trav_id = 0
 	if not is_nan(yaw):
 		state.body_yaw = yaw
 		if input_source:
@@ -251,6 +264,18 @@ func _process(delta: float) -> void:
 		anim.hard_landing = state.has(MotorState.F_HARD_LANDING)
 		anim.land_impact = state.land_impact
 		anim.on_platform = state.platform_id != 0
+		match state.state:
+			MotorState.Id.LADDER:
+				anim.climb_speed = state.vel.y
+				var lad := UltraLadder.find(state.trav_id)
+				anim.climb_kind = 1 if lad and lad.kind == UltraLadder.Kind.PIPE else 0
+			MotorState.Id.WALL_CLIMB, MotorState.Id.ROPE:
+				anim.climb_speed = state.vel.y if state.state == MotorState.Id.WALL_CLIMB else -state.vel.y * 0.0 + (last_input.move.y if state.state == MotorState.Id.ROPE else 0.0)
+			MotorState.Id.LEDGE_HANG:
+				anim.climb_speed = last_input.move.x * 0.9
+			_:
+				anim.climb_speed = 0.0
+		anim.climb_duration = state.trav_dur
 		anim.aim_weight = 1.0 if faces_aim() else 0.0
 		anim.held_def = UltraGrab.CARRY_DEF if state.held_id != 0 else held_def()
 		anim.item_action = state.action
@@ -273,7 +298,18 @@ func _sync_visual(alpha: float) -> void:
 			and not state.has(UltraMotor.F_TURNING) and state.state != MotorState.Id.ROOT_MOTION \
 			and absf(angle_difference(state.body_yaw, last_input.yaw)) < 0.05:
 		yaw = input_source.live_yaw
-	visual_root.global_transform = Transform3D(Basis(Vector3.UP, yaw), p)
+	visual_feet = p
+	var basis := Basis(Vector3.UP, yaw)
+	if state.state == MotorState.Id.ROPE:
+		# Hang along the rope (pivot at the hands) with the rope just in front of the chest.
+		var rope := UltraRope.find(state.trav_id)
+		if rope:
+			var up := (rope.anchor() - p).normalized()
+			var fwd := (basis * Vector3.FORWARD)
+			fwd = (fwd - up * fwd.dot(up)).normalized()
+			basis = Basis(up.cross(-fwd).normalized(), up, -fwd)
+			p -= fwd * ROPE_CHEST_GAP
+	visual_root.global_transform = Transform3D(basis, p)
 
 
 ## Authority only. Characters take damage here (limb damage arrives in M8).

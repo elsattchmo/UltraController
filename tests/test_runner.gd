@@ -23,6 +23,10 @@ func _ready() -> void:
 	print("== UltraController tests: suite=%s files=%s" % [suite, files])
 	for f in files:
 		var scr := load("res://tests/suites/" + f) as Script
+		if scr == null or not scr.can_instantiate():
+			print("FAIL %s (does not compile)" % f)
+			failures += 1
+			continue
 		var t: UltraTestSuite = scr.new()
 		t.name = f.get_basename()
 		add_child(t)

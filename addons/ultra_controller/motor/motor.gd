@@ -16,6 +16,13 @@ const STATE_SCRIPTS := {
 	MotorState.Id.FALL: preload("states/air_state.gd"),
 	MotorState.Id.ROOT_MOTION: preload("states/root_motion_state.gd"),
 	MotorState.Id.DEAD: preload("states/dead_state.gd"),
+	MotorState.Id.MANTLE: preload("states/traversal_move_state.gd"),
+	MotorState.Id.VAULT: preload("states/traversal_move_state.gd"),
+	MotorState.Id.LEDGE_CLIMB: preload("states/traversal_move_state.gd"),
+	MotorState.Id.LEDGE_HANG: preload("states/ledge_hang_state.gd"),
+	MotorState.Id.LADDER: preload("states/climb_state.gd"),
+	MotorState.Id.WALL_CLIMB: preload("states/climb_state.gd"),
+	MotorState.Id.ROPE: preload("states/rope_state.gd"),
 }
 
 const F_TURNING := 1 << 8       ## idle feet turning toward aim (anim plays a turn)
@@ -71,6 +78,7 @@ func _init(p_body: CharacterBody3D, p_shape: CollisionShape3D, p_profile: Moveme
 	body.platform_wall_layers = 0
 	body.platform_on_leave = CharacterBody3D.PLATFORM_ON_LEAVE_DO_NOTHING
 	_state_scripts = STATE_SCRIPTS.duplicate()
+	transition_hooks.append(UltraTraversal.hook)
 	for id: int in _state_scripts:
 		var scr: Script = _state_scripts[id]
 		if not _handlers.has(scr):

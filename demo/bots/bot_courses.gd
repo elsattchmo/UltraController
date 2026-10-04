@@ -31,6 +31,16 @@ static func get_course(name: String) -> Array:
 				{"ticks": 30},
 				{"ticks": 60, "move": Vector2(0, -0.6)},
 			]
+		"parkour":
+			# Hop at the wall ahead until up (mantle / ledge grab + climb), stand, then step off the back.
+			var out := [{"ticks": 20}]
+			for i in 14:
+				out.append({"ticks": 8, "move": Vector2(0, 1)})
+				out.append({"ticks": 2, "move": Vector2(0, 1), "tap": InputFrame.B_JUMP})
+			out.append({"ticks": 60})
+			out.append({"ticks": 60, "move": Vector2(0, 0.6), "yaw_rate": 1.6})
+			out.append({"ticks": 120})
+			return out
 		"walk_short":
 			# Ride whatever we spawned on: stand, shuffle a little, jump once.
 			return [{"ticks": 240}, {"ticks": 30, "move": Vector2(0, 0.3)}, {"ticks": 2, "tap": InputFrame.B_JUMP}, {"ticks": 300}]

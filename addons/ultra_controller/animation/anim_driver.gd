@@ -38,6 +38,10 @@ var rm_clip: int = -1
 var hard_landing := false
 var land_impact := 0.0
 var on_platform := false
+## Traversal presentation: signed climb speed (m/s), pipe vs ladder, scripted move duration.
+var climb_speed := 0.0
+var climb_kind := 0
+var climb_duration := 0.6
 ## Held item presentation (set by the character).
 var held_def: ItemDefinition
 var item_action := 0
@@ -258,6 +262,26 @@ func _build() -> AnimationNodeBlendTree:
 	slide.add_transition("Start", "start", sl_in)
 	loco.add_node("slide", slide, Vector2(800, 0))
 
+	# --- traversal: climb-up (seekable), vault, hang, ladder / pipe / wall cycles, rope
+	var climb := AnimationNodeBlendTree.new()
+	var ca := AnimationNodeAnimation.new()
+	ca.animation = _clip(&"climb_up_1m")
+	climb.add_node("clip", ca, Vector2(0, 0))
+	climb.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+	climb.add_node("speed", AnimationNodeTimeScale.new(), Vector2(400, 0))
+	climb.connect_node("seek", 0, "clip")
+	climb.connect_node("speed", 0, "seek")
+	climb.connect_node("output", 0, "speed")
+	loco.add_node("climb", climb, Vector2(800, 400))
+	loco.add_node("vault", _anim_from(&"run_jump", 0.15), Vector2(800, 500))
+	for spec: Array in [["hang", &"ledge_hang"], ["ladder", &"ladder_climb"], ["pipe", &"pipe_climb"], ["wall", &"wall_climb"], ["rope", &"pipe_climb"]]:
+		var bt := AnimationNodeBlendTree.new()
+		bt.add_node("clip", _anim(spec[1]), Vector2(0, 0))
+		bt.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
+		bt.connect_node("rate", 0, "clip")
+		bt.connect_node("output", 0, "rate")
+		loco.add_node(spec[0], bt, Vector2(1000, 400))
+
 	# --- root motion one-shots (clip swapped at runtime); two slots so back-to-back moves blend
 	for n in ["rm_a", "rm_b"]:
 		var a := AnimationNodeAnimation.new()
@@ -265,7 +289,7 @@ func _build() -> AnimationNodeBlendTree:
 		loco.add_node(n, a, Vector2(800, 200))
 
 	# Fully connected so travel() always crossfades directly.
-	var names := ["ground", "crouch", "crawl", "air", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b"]
+	var names := ["ground", "crouch", "crawl", "air", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b", "climb", "vault", "hang", "ladder", "pipe", "wall", "rope"]
 	for a_name in names:
 		for b_name in names:
 			if a_name == b_name:
@@ -390,6 +414,18 @@ func _drive_state(speed: float) -> void:
 			want = "crawl"
 		Id.ROOT_MOTION:
 			want = "rm"
+		Id.MANTLE, Id.LEDGE_CLIMB:
+			want = "climb"
+		Id.VAULT:
+			want = "vault"
+		Id.LEDGE_HANG:
+			want = "hang"
+		Id.LADDER:
+			want = "pipe" if climb_kind == 1 else "ladder"
+		Id.WALL_CLIMB:
+			want = "wall"
+		Id.ROPE:
+			want = "rope"
 	if want == "rm":
 		if rm_clip != _cur_rm:
 			var curve := anim_set.rm_curve(rm_clip)
@@ -404,6 +440,10 @@ func _drive_state(speed: float) -> void:
 	_cur_rm = -1
 	if want == "land" and stance != MotorState.Stance.STAND:
 		want = "crouch"
+	if want == "climb" and _cur_loco != "climb":
+		# A ledge climb-up starts with the hands already high (about a third into the clip).
+		tree.set(LOCO + "climb/seek/seek_request", 0.22 if state == MotorState.Id.LEDGE_CLIMB else 0.0)
+		tree.set(LOCO + "climb/speed/scale", 0.6 / maxf(climb_duration, 0.2))
 	if want != _cur_loco:
 		if want in ["air", "land", "land_heavy"]:
 			_loco.travel(want)
@@ -452,6 +492,13 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	tree.set(LOCO + "ground/turn/blend_amount", _turn_blend)
 	tree.set(LOCO + "ground/turn_rate/scale", 1.8)
 	tree.set(LOCO + "land/speed/scale", lerpf(2.4, 1.0, clampf((land_impact - 3.0) / 6.0, 0.0, 1.0)))
+	# Climbing cycles run at the speed you climb (and hold still when you stop).
+	var cr := climb_speed / 0.6
+	tree.set(LOCO + "ladder/rate/scale", cr)
+	tree.set(LOCO + "pipe/rate/scale", cr)
+	tree.set(LOCO + "wall/rate/scale", climb_speed / 0.5)
+	tree.set(LOCO + "hang/rate/scale", 0.6 + absf(climb_speed) * 1.5)
+	tree.set(LOCO + "rope/rate/scale", climb_speed / 0.6)
 	# Crouch / crawl cycles: forward clip, warped toward travel direction, rate-matched.
 	var crouch_rate := clampf(speed / _crouch_speed, 0.3, 2.2) * (-1.0 if backwards else 1.0)
 	tree.set(LOCO + "crouch/rate/scale", crouch_rate)

@@ -154,7 +154,7 @@ func _process(delta: float) -> void:
 	fp_local += right_local * cam_profile.lean_offset * float(_lean.value)
 	_land.step(delta)
 	fp_local.y += float(_land.value)
-	var fp_pos := vis * fp_local
+	var fp_pos := _fp_guard(vis, vis * fp_local) if t < 0.99 else vis * fp_local
 
 	# --- third-person shoulder
 	var pivot_target := character.visual_root.global_position + Vector3.UP * (character.state.height * 0.86)
@@ -189,6 +189,26 @@ func _process(delta: float) -> void:
 	camera.near = lerpf(cam_profile.near, 0.08, t)
 	var first_person := tp_blend < 0.15
 	camera.cull_mask = UltraLayers.camera_cull_mask(view_index, first_person)
+
+
+## Keep the first-person eye out of walls: the head bone can dip into a ledge while mantling
+## or into the wall while hanging. Sweep from the capsule axis (at eye height) to the eye.
+func _fp_guard(vis: Transform3D, eye: Vector3) -> Vector3:
+	var space := get_world_3d().direct_space_state
+	var h := clampf((vis.affine_inverse() * eye).y, 0.3, maxf(character.state.height - 0.12, 0.3))
+	var origin := vis.origin + vis.basis.y.normalized() * h
+	var sphere := SphereShape3D.new()
+	sphere.radius = maxf(cam_profile.near * 2.5, 0.08)
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = sphere
+	q.transform = Transform3D(Basis(), origin)
+	q.collision_mask = UltraLayers.WORLD_STATIC | UltraLayers.CLIMBABLE
+	q.exclude = _ray_excl
+	if not space.intersect_shape(q, 1).is_empty():
+		return eye                       # axis itself inside geometry: nothing sensible to do
+	q.motion = eye - origin
+	var r := space.cast_motion(q)
+	return origin + (eye - origin) * r[0]
 
 
 func _arm_collide(pivot: Vector3, shoulder_pt: Vector3, desired: Vector3) -> float:

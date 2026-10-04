@@ -31,6 +31,8 @@ static func _summ(p: NetPlayer) -> Dictionary:
 
 var _shots := 0
 var _hooked := {}
+var _max_y := -INF                  # highest the (predicted) local player got: traversal checks
+var _trav_states := {}
 
 
 func _on_snapshot(_tick: int) -> void:
@@ -49,6 +51,10 @@ func _on_snapshot(_tick: int) -> void:
 	for p in UltraNet.local_players:
 		if p.role == NetPlayer.Role.PREDICTED:
 			_depths.append(p.server_queue_depth)
+		if is_instance_valid(p.character):
+			_max_y = maxf(_max_y, p.character.state.pos.y)
+			if p.character.state.state >= MotorState.Id.MANTLE:
+				_trav_states[MotorState.Id.keys()[p.character.state.state]] = true
 
 
 var _done := false
@@ -94,6 +100,12 @@ func _finish() -> void:
 				if p.character.inventory.count_of(&"pistol") != 1:
 					print("NETREPORT FAIL client never received its inventory")
 					ok = false
+		var climb := UltraArgs.get_float("expect-climb", 0.0)
+		if climb > 0.0:
+			print("NETREPORT climb max_y=%.2f states=%s" % [_max_y, ",".join(_trav_states.keys())])
+			if _max_y < climb or _trav_states.is_empty():
+				print("NETREPORT FAIL never got up (max y %.2f, want %.2f)" % [_max_y, climb])
+				ok = false
 		var want_remotes := UltraArgs.get_int("expect-remotes", 0)
 		var seen := 0
 		for id: int in _path:

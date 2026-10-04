@@ -126,6 +126,9 @@ fi
 if [ "$SUITE" = "m5" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
 	SERVER_ARGS="--spawn=sandbox --no-kit" CLIENT_BOT="carry" net_case carry 1 --lag=120 --jitter=20 --loss=2 --max-correction=0.35
 fi
+if [ "$SUITE" = "m6" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
+	SERVER_ARGS="--spawn=ledge_150 --no-kit" CLIENT_BOT="parkour" net_case parkour 1 --lag=120 --jitter=20 --loss=2 --max-correction=0.05 --expect-climb=1.45
+fi
 if [ "$SUITE" = "m4" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
 	SERVER_ARGS="--spawn=range" CLIENT_BOT="gunplay" net_case gunplay 1 --lag=120 --jitter=20 --loss=2 --expect-shots=12
 fi

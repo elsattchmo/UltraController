@@ -30,6 +30,7 @@ func _ready() -> void:
 	_gallery()
 	(load("res://demo/maps/playground/zones_m4.gd") as Script).new(self).build()
 	(load("res://demo/maps/playground/zones_m5.gd") as Script).new(self).build()
+	(load("res://demo/maps/playground/zones_m6.gd") as Script).new(self).build()
 	var ps := PackedScene.new()
 	var err := ps.pack(scene_root)
 	if err == OK:

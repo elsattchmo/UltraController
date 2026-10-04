@@ -54,6 +54,14 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Characters collide SOFTly by default (`MovementProfile.character_collision`): prediction against
   a remote player you see ~100 ms late can't be exact; soft separation keeps errors small.
 
+- **Traversal is a motor transition hook** (`UltraTraversal.hook`): pure physics queries on the
+  state, so client and server pick the same move. Scripted moves (MANTLE/VAULT/LEDGE_CLIMB) are
+  `trav_from -> trav_to` over `trav_dur`; hang/ladder/rope keep their anchor in `trav_*` fields.
+  Ropes are a pendulum in MotorState (`trav_from` = swing velocity); the verlet rope is cosmetic.
+  Hands on rope/ledge are presentation (`UltraTraversalVisual`, IK priority 111 > equipment 110).
+- `teleport()` drops any traversal state (else a scripted move drags you back).
+- FP eye is swept from the capsule axis (`CameraRig._fp_guard`): the head bone dips into ledges.
+
 ## Godot 4.7 facts (probed)
 - All IK nodes exist: TwoBoneIK3D, FABRIK3D, CCDIK3D, JacobianIK3D, SplineIK3D, ChainIK3D,
   LookAtModifier3D, AimModifier3D, CopyTransformModifier3D, BoneTwistDisperser3D,

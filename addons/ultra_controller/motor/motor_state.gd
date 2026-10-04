@@ -58,6 +58,14 @@ var hp: float = 100.0
 var throw_charge: float = 0.0      ## 0..1 while the throw button is held with a prop
 var held_grip: int = -1            ## team lift: which grip point we hold
 var team_share: float = 1.0        ## team lift: our share of the load (server)
+## Traversal (mantle / vault / ledge / ladder / wall / rope).
+var trav_from := Vector3.ZERO      ## scripted move: start position (rope: swing velocity)
+var trav_to := Vector3.ZERO        ## scripted move: end position
+var trav_t: float = 0.0            ## scripted move: elapsed
+var trav_dur: float = 0.0          ## scripted move: duration
+var trav_id: int = 0               ## ladder / rope id
+var trav_s: float = 0.0            ## ladder height / rope grip distance
+var trav_kind: int = 0             ## UltraTraversal.Move
 
 
 func has(f: int) -> bool:
@@ -92,6 +100,8 @@ func copy_from(o: MotorState) -> void:
 	held_uid = o.held_uid; equipped = o.equipped; action = o.action; action_t = o.action_t
 	fire_cd = o.fire_cd; mag = o.mag; fire_seq = o.fire_seq; hp = o.hp
 	throw_charge = o.throw_charge; held_grip = o.held_grip; team_share = o.team_share
+	trav_from = o.trav_from; trav_to = o.trav_to; trav_t = o.trav_t; trav_dur = o.trav_dur
+	trav_id = o.trav_id; trav_s = o.trav_s; trav_kind = o.trav_kind
 
 
 ## Error metric used by reconciliation (metres, plus a penalty for discrete mismatches).
@@ -142,6 +152,13 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_8(held_grip)
 	buf.put_u8(clampi(int(roundf(team_share * 255.0)), 0, 255))
 	buf.put_u16(clampi(int(roundf(carry_mult * 1000.0)), 0, 65535))
+	for v in [trav_from, trav_to]:
+		buf.put_float(v.x); buf.put_float(v.y); buf.put_float(v.z)
+	buf.put_u16(clampi(int(roundf(trav_t * 1000.0)), 0, 65535))
+	buf.put_u16(clampi(int(roundf(trav_dur * 1000.0)), 0, 65535))
+	buf.put_u16(trav_id)
+	buf.put_float(trav_s)
+	buf.put_u8(trav_kind)
 
 
 func decode(buf: StreamPeerBuffer) -> void:
@@ -181,6 +198,13 @@ func decode(buf: StreamPeerBuffer) -> void:
 	held_grip = buf.get_8()
 	team_share = buf.get_u8() / 255.0
 	carry_mult = buf.get_u16() / 1000.0
+	trav_from = Vector3(buf.get_float(), buf.get_float(), buf.get_float())
+	trav_to = Vector3(buf.get_float(), buf.get_float(), buf.get_float())
+	trav_t = buf.get_u16() / 1000.0
+	trav_dur = buf.get_u16() / 1000.0
+	trav_id = buf.get_u16()
+	trav_s = buf.get_float()
+	trav_kind = buf.get_u8()
 
 
 ## Round-trip through the codec, so a predicting client and the server hold the same bits.

@@ -5,6 +5,8 @@ extends Node
 ##   "t": seconds to hold this step   "move": Vector2   "yaw"/"pitch": degrees (absolute)
 ##   "buttons": int   "tap": int   "view_tp": bool   "teleport": marker name
 ##   "shot": file name (captured at the END of the step)   "call": Callable
+##   "until": Callable -> bool, ends the step early (then "t" is a timeout); "after": extra
+##   seconds to wait once "until" fires (to catch a pose part-way through a move)
 ## Real-time based (not frame counts), so it behaves the same at any frame rate.
 
 var main: Node
@@ -81,7 +83,12 @@ func _process(_delta: float) -> void:
 	if _i < 0 or _i >= steps.size():
 		return
 	var s: Dictionary = steps[_i]
-	if _now() - _t0 >= float(s.get("t", 0.5)):
+	if s.has("until") and not s.has("_hit") and (s["until"] as Callable).call():
+		s["_hit"] = _now()
+	var end := _now() - _t0 >= float(s.get("t", 0.5))
+	if s.has("_hit"):
+		end = _now() - float(s["_hit"]) >= float(s.get("after", 0.0))
+	if end:
 		if s.has("shot"):
 			await RenderingServer.frame_post_draw
 			var img := get_viewport().get_texture().get_image()
