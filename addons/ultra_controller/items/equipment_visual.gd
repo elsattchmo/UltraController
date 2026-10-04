@@ -209,52 +209,39 @@ func _drive_hands(delta: float) -> void:
 	_drive_reload(delta)
 
 
-## Reload: the clip twists the gun hand until the barrel points at your face. Instead hold the
-## gun level in front of the chest (or below the view in first person), rolled a little so the
-## magazine well faces the other hand, and bring that hand to the well while the new magazine
-## goes in. The clip still drives the arms; IK only sets where the gun is.
+## Reload. Third person: the clip as authored (with the fitted grip it reads right: gun up by
+## the chin, tilted to the off hand, which meets the grip). First person that happens inside
+## the camera, so move the clip's hand motion - both hands together, untouched otherwise - out
+## in front of and below the eye, where you can watch it.
 func _drive_reload(delta: float) -> void:
 	var anim := character.anim
 	var s := character.state
-	var reloading := held_node != null and held_def != null and held_def.kind == ItemDefinition.Kind.FIREARM 		and s.action == UltraActionLayer.Action.RELOADING
+	var reloading := held_node != null and held_def != null and held_def.kind == ItemDefinition.Kind.FIREARM 		and s.action == UltraActionLayer.Action.RELOADING and camera != null
+	var was := _reload_w > 0.001
 	_reload_w = move_toward(_reload_w, 1.0 if reloading else 0.0, delta * 5.0)
-	var gun_hand := HandIKModifier.Hand.RIGHT if _side == 1 else HandIKModifier.Hand.LEFT
-	var other := HandIKModifier.Hand.LEFT if _side == 1 else HandIKModifier.Hand.RIGHT
 	if _reload_w <= 0.001:
+		if was:
+			for h in [HandIKModifier.Hand.LEFT, HandIKModifier.Hand.RIGHT]:
+				if _owns[h] and not (h == HandIKModifier.Hand.LEFT and ready_support()):
+					anim.hand_ik.release(h, 8.0)
+					_owns[h] = false
 		return
+	var sk := character.skeleton
+	var cam := camera.global_transform
+	var flat := Vector3(-cam.basis.z.x, 0, -cam.basis.z.z)
+	flat = flat.normalized() if flat.length() > 0.1 else -character.visual_root.global_basis.z
+	var left := Vector3.UP.cross(flat).normalized()
+	var shift := flat * 0.18 + Vector3.DOWN * 0.08 + left * 0.07 * _side
 	var w := smoothstep(0.0, 1.0, _reload_w)
-	var vis := character.visual_root.global_transform
-	var fwd := -vis.basis.z.normalized()
-	var right := vis.basis.x.normalized()
-	var pos: Vector3
-	if camera:
-		var cam := camera.global_transform
-		var cf := -cam.basis.z
-		var flat := Vector3(cf.x, 0, cf.z).normalized() if Vector2(cf.x, cf.z).length() > 0.1 else fwd
-		pos = cam.origin + flat * 0.36 + Vector3.DOWN * 0.24 + cam.basis.x * 0.07 * _side
-		fwd = flat
-		right = Vector3.UP.cross(-fwd).normalized()
-	else:
-		pos = vis.origin + Vector3.UP * (character.state.height * 0.66) + fwd * 0.34 + right * 0.06 * _side
-	# Barrel forward and a little down, top of the gun rolled outward (well toward the other hand).
-	var barrel := (fwd * cos(deg_to_rad(18.0)) + Vector3.DOWN * sin(deg_to_rad(18.0))).normalized()
-	var gb := Basis.looking_at(barrel, Vector3.UP)
-	gb = Basis(barrel, deg_to_rad(-35.0) * _side) * gb
-	var target_gun := Transform3D(gb, pos)
-	anim.hand_ik.set_goal(gun_hand, target_gun * grip().affine_inverse(), w, true, 14.0)
-	_owns[gun_hand] = true
-	# The free hand meets the magazine well while the magazine goes in.
-	var t := s.action_t / maxf(UltraInjury.reload_mult(s, character.damage_profile), 0.01)
-	var commit := float(held_def.stat("reload_commit", 1.5))
-	var lw := smoothstep(commit - 0.75, commit - 0.45, t) * (1.0 - smoothstep(commit - 0.05, commit + 0.2, t))
-	if reloading and UltraInjury.two_hands(s) and lw > 0.01:
-		var well := target_gun * UltraPoseSampler.marker(held_node, "M_MagWell").origin
-		var below := well + gb.y * -0.07
-		anim.hand_ik.set_goal(other, Transform3D(Basis(Vector3.UP, character.state.body_yaw), below), lw * w, false, 12.0)
-		_owns[other] = true
-	elif _owns[other] and not (ready_support()):
-		anim.hand_ik.release(other, 6.0)
-		_owns[other] = false
+	# Bone poses read in _process are the clip's (before IK), so this follows the animation.
+	for h in [HandIKModifier.Hand.LEFT, HandIKModifier.Hand.RIGHT]:
+		var b := anim.hand_ik.hand_bone(h)
+		if b < 0:
+			continue
+		var xf := sk.global_transform * sk.get_bone_global_pose(b)
+		xf.origin += shift
+		anim.hand_ik.set_goal(h, xf, w, true, 20.0)
+		_owns[h] = true
 
 
 func ready_support() -> bool:

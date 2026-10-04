@@ -63,8 +63,14 @@ func _process_modification_with_delta(_delta: float) -> void:
 		if _hips < 0:
 			return
 	# Hips: warp yaw, lean, offset. Rotations are applied in skeleton space about the hips.
+	_measure_head(sk, _delta)
 	var hips_g := sk.get_bone_global_pose(_hips)
 	var hips_anim_yaw := atan2(hips_g.basis.z.x, hips_g.basis.z.z)
+	# Sideways sway: keep the slow part, cut most of the step-to-step wobble.
+	if is_nan(_hip_x_lp):
+		_hip_x_lp = hips_g.origin.x
+	_hip_x_lp = lerpf(_hip_x_lp, hips_g.origin.x, 1.0 - exp(-2.0 * maxf(_delta, 0.0)))
+	hips_g.origin.x -= (hips_g.origin.x - _hip_x_lp) * hip_sway_damp * sway_weight
 	var r_hips := Basis(Vector3.UP, -warp_yaw) * Basis(Vector3.BACK, lean_roll * 0.35) * Basis(Vector3.RIGHT, lean_pitch * 0.25)
 	hips_g.basis = r_hips * hips_g.basis
 	hips_g.origin += pelvis_offset
@@ -89,3 +95,48 @@ func _process_modification_with_delta(_delta: float) -> void:
 		# Rotate about this bone's own origin.
 		g.basis = r * g.basis
 		sk.set_bone_global_pose(b, g)
+	_stabilize_head(sk)
+
+
+## People keep their head steady while the shoulders swing (the sprint clip turns the head
+## ~45 deg side to side). Remove most of the fast yaw / roll swing of the head, keeping slow,
+## deliberate turns (aiming, looking around).
+@export_range(0, 1, 0.01) var head_stabilize := 0.95
+## Sideways hip sway removed at speed (the walk cycle played briskly wobbles the body).
+@export_range(0, 1, 0.01) var hip_sway_damp := 0.6
+## 0..1 how much of hip_sway_damp applies (the driver raises it with speed; 0 standing).
+var sway_weight := 0.0
+var _hip_x_lp := NAN
+var _head_ref := Vector3.ZERO
+var _head_dev := 0.0
+var _head_yaw_lp := NAN
+
+
+## Measure the clip's own head yaw (before aim / warp / lean are added) and track its slow part.
+func _measure_head(sk: Skeleton3D, delta: float) -> void:
+	var head := _chain[4] if _chain.size() > 4 else -1
+	if head < 0:
+		return
+	if _head_ref == Vector3.ZERO:
+		_head_ref = sk.get_bone_global_rest(head).basis.orthonormalized().inverse() * Vector3(0, 0, 1)
+	var f := sk.get_bone_global_pose(head).basis.orthonormalized() * _head_ref
+	var yaw := atan2(f.x, f.z)
+	if is_nan(_head_yaw_lp):
+		_head_yaw_lp = yaw
+	_head_yaw_lp = lerp_angle(_head_yaw_lp, yaw, 1.0 - exp(-1.5 * maxf(delta, 0.0)))
+	_head_dev = angle_difference(_head_yaw_lp, yaw)
+
+
+## Take most of that swing back out (split over neck and head so the neck doesn't kink).
+func _stabilize_head(sk: Skeleton3D) -> void:
+	if head_stabilize == 0.0 or _chain.size() < 5:
+		return
+	# (Skeleton space is the model's mirrored frame: undo the swing by turning the same way.)
+	var dy := _head_dev * head_stabilize
+	for pair: Array in [[_chain[3], 0.4], [_chain[4], 0.6]]:
+		var b: int = pair[0]
+		if b < 0:
+			continue
+		var gb := sk.get_bone_global_pose(b)
+		gb.basis = Basis(Vector3.UP, dy * pair[1]) * gb.basis
+		sk.set_bone_global_pose(b, gb)

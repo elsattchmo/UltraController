@@ -638,6 +638,8 @@ func _drive_body(delta: float) -> void:
 	modifier.lean_roll = _lean.x
 	modifier.lean_pitch = _lean.y
 	modifier.hunch = injury_hunch
+	var gsp := Vector2(velocity.x, velocity.z).length()
+	modifier.sway_weight = smoothstep(0.3, 1.2, gsp) if state in [MotorState.Id.MOVE, MotorState.Id.IDLE, MotorState.Id.CROUCH] else 0.0
 	modifier.warp_yaw = _warp
 	_aim_w = move_toward(_aim_w, aim_weight, delta * 4.0)
 	var yaw_off := clampf(-angle_difference(body_yaw, aim_yaw), -deg_to_rad(80.0), deg_to_rad(80.0))

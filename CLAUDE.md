@@ -89,7 +89,10 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   centre); the fall clip waits 0.15 s of real air before showing.
 - Hard landings (> hard_land_speed) crumple into RAGDOLL and get up; Land_Three_Point is unused.
 - Pistol grip is fitted to the posed fingers (`UltraGripFit`, run by tools/build_items.gd);
-  reloads override the gun hand by IK (gun level, rolled, free hand to the mag well).
+  the reload plays as authored in third person; in first person both hands' clip motion is
+  shifted out in front of the eye by IK (`_drive_reload`). Don't IK the gun to a fixed pose.
+- Head stabiliser (`BodyDynamicsModifier.head_stabilize`): removes most of the clip's own fast
+  head yaw swing (jog/sprint whip the head ~30-50 deg); hip side-sway damped at speed.
 - Water waves: `UltraWater.wave(p)` (shared clock `wave_time`, global shader uniform
   `ultra_wave_time`) move the surface mesh and float props (`set_meta("buoyancy", k)` tunes how
   deep a prop sits). Swimmers don't collide with loose props (prediction-safe).
