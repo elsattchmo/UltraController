@@ -9,7 +9,7 @@ extends Node
 
 var main: Node
 var steps: Array = []
-var out_dir := "C:/Dev/verify/ultra/review/m1"
+var out_dir := "C:/Dev/verify/ultra/review/m1"   ## subclasses replace "/m1"; --out overrides
 
 var _i := -1
 var _t0 := 0.0
@@ -18,11 +18,12 @@ var _slot := 0
 
 
 func _ready() -> void:
-	out_dir = String(main.args.get("out", out_dir))
-	DirAccess.make_dir_recursive_absolute(out_dir)
 	_bot = main.player.input_source as BotInputSource
 	_bot.driver = _drive
 	_build()
+	if main.args.has("out"):
+		out_dir = String(main.args["out"])
+	DirAccess.make_dir_recursive_absolute(out_dir)
 	_next()
 
 

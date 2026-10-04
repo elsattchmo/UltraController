@@ -26,6 +26,7 @@ var player: UltraCharacter          ## first local player (tours, single-player 
 var effects: UltraEffects
 var headless := false
 var _title_t := 0.0
+var _pause: Node
 
 
 func _ready() -> void:
@@ -192,12 +193,15 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if menu:
+	if menu or (_pause and is_instance_valid(_pause)):
 		return
 	if event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	elif event.is_action_pressed(UltraInput.action(&"pause")):
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif event.is_action_pressed(UltraInput.action(&"pause")) and _pause == null:
+		_pause = (load("res://demo/ui/pause_menu.gd") as Script).new()
+		_pause.resumed.connect(func() -> void: _pause = null)
+		add_child(_pause)
+		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed(UltraInput.action(&"debug_slowmo")):
 		Engine.time_scale = 0.25 if Engine.time_scale > 0.5 else 1.0
 
