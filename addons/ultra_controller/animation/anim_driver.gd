@@ -15,6 +15,8 @@ const LOCO := "parameters/loco/"
 @export var anim_set: AnimationSet
 @export var library: AnimationLibrary
 @export var library_name: StringName = &""
+## Extra libraries by prefix (Mixamo / Blender intake): roles can name "mixamo/Clip".
+var extra_libraries: Dictionary = {}
 
 var tree: AnimationTree
 var player: AnimationPlayer
@@ -73,6 +75,9 @@ func setup(p_player: AnimationPlayer, p_skeleton: Skeleton3D) -> void:
 	skeleton = p_skeleton
 	if library and not player.has_animation_library(library_name):
 		player.add_animation_library(library_name, library)
+	for k: String in extra_libraries:
+		if not player.has_animation_library(k):
+			player.add_animation_library(k, extra_libraries[k])
 	_read_speeds()
 	tree = AnimationTree.new()
 	tree.name = "AnimationTree"
@@ -123,13 +128,25 @@ func _read_speeds() -> void:
 	])
 
 
+## The Animation behind a role, from the main or an extra ("lib/clip") library.
+func _role_anim(role: StringName) -> Animation:
+	var c := String(anim_set.clip(role))
+	if c == "":
+		return null
+	if c.contains("/"):
+		var parts := c.split("/", true, 1)
+		var lib: AnimationLibrary = extra_libraries.get(parts[0])
+		return lib.get_animation(parts[1]) if lib and lib.has_animation(parts[1]) else null
+	return library.get_animation(c) if library and library.has_animation(c) else null
+
+
 func _anim(role: StringName, loop := true) -> AnimationNodeAnimation:
 	var a := AnimationNodeAnimation.new()
 	a.animation = _clip(role)
 	if loop:
 		a.use_custom_timeline = true
 		a.loop_mode = Animation.LOOP_LINEAR
-		var lib_anim := library.get_animation(anim_set.clip(role)) if library and anim_set.clip(role) != &"" else null
+		var lib_anim := _role_anim(role)
 		if lib_anim:
 			a.timeline_length = lib_anim.length
 			# Align every cycle so the left foot plants at phase 0 (keeps synced blends in step).

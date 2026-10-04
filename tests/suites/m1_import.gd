@@ -70,3 +70,40 @@ func test_animation_set() -> void:
 	var j := s.speed_of(&"jog_f", 0)
 	var sp := s.speed_of(&"sprint_f", 0)
 	check(w > 0.4 and w < j and j < sp, "authored speeds ordered walk %.2f < jog %.2f < sprint %.2f" % [w, j, sp])
+
+
+## Mixamo-named FBX and Blender-exported GLB, retargeted through the intake, must reproduce
+## the original clip on the mannequin (same motion, only the rig naming differed).
+func test_intake_roundtrip() -> void:
+	var pairs := [["mixamo", "Mixamo_Jog", "Jog"], ["blender", "Sprint", "Sprint"]]
+	var scene := (load(DIR + "mannequin.glb") as PackedScene).instantiate()
+	add_child(scene)
+	var sk := scene.find_child("GeneralSkeleton", true, false) as Skeleton3D
+	var ual: AnimationLibrary = load(DIR + "anims/ual.res")
+	for p: Array in pairs:
+		var lib_path := DIR + "anims/%s.res" % p[0]
+		if not ResourceLoader.exists(lib_path):
+			info("no %s library yet (run tools/intake.sh)" % p[0])
+			continue
+		var lib: AnimationLibrary = load(lib_path)
+		if not check(lib.has_animation(p[1]), "%s/%s imported" % [p[0], p[1]]):
+			continue
+		var a := lib.get_animation(p[1])
+		var b := ual.get_animation(p[2])
+		var worst := 0.0
+		for i in 8:
+			var t := b.length * i / 8.0
+			var got := {}
+			for pass_i in 2:
+				UltraPoseSampler.pose(a if pass_i == 0 else b, sk, t)
+				for bone in ["LeftFoot", "RightFoot", "LeftHand", "RightHand", "Head"]:
+					var pos := UltraPoseSampler.global_pose(sk, sk.find_bone(bone)).origin
+					if pass_i == 0:
+						got[bone] = pos
+					else:
+						worst = maxf(worst, pos.distance_to(got[bone]))
+		info("%s/%s vs %s: worst end-effector difference %.3f m" % [p[0], p[1], p[2], worst])
+		# FBX is baked/resampled (24 -> 30 fps): allow a little more there.
+		var tol := 0.05 if p[0] == "mixamo" else 0.02
+		check(worst < tol, "%s round trip reproduces %s (%.3f m)" % [p[0], p[2], worst])
+	scene.queue_free()

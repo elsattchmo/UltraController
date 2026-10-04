@@ -87,3 +87,16 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Turn_* clips do not rotate (feet step in place); the motor turns the body procedurally.
 - Measured authored speeds (m/s): walk 0.80, back 0.97, jog 4.83, sprint 7.12, crouch 0.59.
   Walk_Backwards' planted feet drift sideways in the source clip (foot lock in M3 fixes it).
+
+## Animation expansion
+- **Mixamo:** drop FBX into `intake/mixamo/` (`Name_loop.fbx` loops, `Name_RM.fbx` keeps root
+  motion as a baked curve), then `bash tools/intake.sh` (or Project > Tools > Ultra > Process
+  animation intake). Clips land in the `mixamo/` library; use them in AnimationSet roles as
+  `"mixamo/Name"`. Bone map `bone_maps/mixamo_humanoid.tres`; fix_silhouette is off (T-pose rigs).
+- **Blender:** `blender --background --python tools/blender/ultra_blender.py -- make-edit` gives
+  `art_src/mannequin_edit.blend`; author actions, then `-- export-actions --blend art_src/mannequin_edit.blend --actions "A,B"`
+  writes `intake/blender/*.glb` -> `blender/` library via the same intake. Also `mirror`,
+  `make-pistol`, `mixamo-test` (a Mixamo-named FBX for testing without an account).
+- Round-trip test (m1_import.test_intake_roundtrip): Blender path exact, Mixamo FBX path < 5 cm.
+- Tools that touch autoload-dependent scripts run through `res://tools/tool_runner.tscn -- --tool=...`
+  (a `--script` SceneTree has no autoloads). Builders: build_items.gd, build_playground.gd, intake.gd.

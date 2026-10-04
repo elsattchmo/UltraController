@@ -11,7 +11,12 @@ func _ready() -> void:
 		push_error("tool_runner: pass --tool=res://path/to/tool.gd")
 		get_tree().quit(2)
 		return
-	var tool: Node = (load(path) as Script).new()
+	var scr := load(path) as Script
+	if scr == null or not scr.can_instantiate():
+		push_error("tool_runner: cannot load %s" % path)
+		get_tree().quit(3)
+		return
+	var tool: Node = scr.new()
 	add_child(tool)
 	await get_tree().process_frame
 	get_tree().quit(0)

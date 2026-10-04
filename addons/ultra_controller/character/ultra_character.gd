@@ -108,6 +108,7 @@ func _build_visual() -> void:
 		anim.name = "AnimDriver"
 		anim.anim_set = body_profile.anim_set
 		anim.library = body_profile.library
+		anim.extra_libraries = body_profile.extra_libraries
 		add_child(anim)
 		anim.setup(player, skeleton)
 		anim.foot_ik.exclude = [get_rid()]

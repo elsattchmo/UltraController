@@ -23,6 +23,7 @@ func _enter_tree() -> void:
 	_menu = PopupMenu.new()
 	_menu.add_item("Seed missing input actions", 0)
 	_menu.add_item("Reset player rebinds (user://)", 1)
+	_menu.add_item("Process animation intake (Mixamo / Blender)", 3)
 	_menu.add_separator("Launch instances")
 	var presets := UltraLauncher.presets()
 	for i in presets.size():
@@ -46,7 +47,24 @@ func _on_menu(id: int) -> void:
 			UltraInput.reset_user_rebinds()
 		2:
 			print("UltraController: closed %d instances" % UltraLauncher.kill_all())
+		3:
+			_process_intake()
 		_:
 			var presets := UltraLauncher.presets()
 			if id >= 100 and id - 100 < presets.size():
 				UltraLauncher.launch(presets[id - 100])
+
+
+## Editor path of tools/intake.sh: configure, reimport, register the libraries.
+func _process_intake() -> void:
+	var intake: Script = load("res://tools/intake.gd")
+	intake.call("prepare")
+	var files := PackedStringArray()
+	for dir in ["res://intake/mixamo/", "res://intake/blender/"]:
+		if DirAccess.dir_exists_absolute(dir):
+			for f in DirAccess.get_files_at(dir):
+				if f.get_extension().to_lower() in ["fbx", "glb", "gltf"]:
+					files.append(dir + f)
+	EditorInterface.get_resource_filesystem().reimport_files(files)
+	intake.call("finalize")
+	print("UltraController: intake processed %d files" % files.size())

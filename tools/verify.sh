@@ -42,7 +42,7 @@ mkdir -p "$DST"
 for item in "$SRC"/* "$SRC"/.gitattributes; do
 	name="$(basename "$item")"
 	case "$name" in
-		art_src|verify|export|builds) continue ;;
+		verify|export|builds) continue ;;
 	esac
 	cp -r "$item" "$DST/"
 done
