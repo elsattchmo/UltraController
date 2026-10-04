@@ -67,6 +67,9 @@ func test_foot_slide_gaits() -> void:
 		["back_mid", Vector2(0, -0.75), 0],
 		["back", Vector2(0, -1), 0],
 		["strafe", Vector2(1, 0), 0],
+		["strafe_l", Vector2(-1, 0), 0],
+		["back_diag_r", Vector2(0.7071, -0.7071), 0],
+		["back_diag_l", Vector2(-0.7071, -0.7071), 0],
 	]
 	for cs: Array in cases:
 		var r: Array = await _toe_slide(cs[1], cs[2])

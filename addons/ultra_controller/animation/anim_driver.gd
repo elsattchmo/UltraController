@@ -133,6 +133,11 @@ func _clip(role: StringName) -> StringName:
 
 
 const BRISK_RATE := 1.75
+## Most the legs turn toward travel when walking backwards on a diagonal.
+var back_warp_deg := 35.0
+## The mannequin's Strafe_Right doesn't blend with Walk_Backwards (back-right diagonals skate
+## ~0.8 m/s); a mirrored Strafe_Left does.
+static var strafe_r_mirror := true
 
 
 func _read_speeds() -> void:
@@ -145,7 +150,7 @@ func _read_speeds() -> void:
 	# Convex hull of the locomotion blend space (x = right, y = forward), for clamping.
 	_hull = PackedVector2Array([
 		Vector2(0, _sprint_speed),
-		Vector2(anim_set.speed_of(&"strafe_r", 0.85), 0),
+		Vector2(anim_set.speed_of(&"strafe_l", 0.69) if strafe_r_mirror else anim_set.speed_of(&"strafe_r", 0.85), 0),
 		Vector2(0, -_back_speed),
 		Vector2(-anim_set.speed_of(&"strafe_l", 0.69), 0),
 	])
@@ -215,7 +220,10 @@ func _build() -> AnimationNodeBlendTree:
 	bs.add_blend_point(_anim(&"jog_f"), Vector2(0, anim_set.speed_of(&"jog_f", 4.7)), -1, &"jog")
 	bs.add_blend_point(_anim(&"sprint_f"), Vector2(0, _sprint_speed), -1, &"sprint")
 	bs.add_blend_point(_anim(&"walk_b"), Vector2(0, -_back_speed), -1, &"back")
-	bs.add_blend_point(_anim(&"strafe_r"), _hull[1], -1, &"strafe_r")
+	var sr := _anim(&"strafe_l") if strafe_r_mirror else _anim(&"strafe_r")
+	if strafe_r_mirror:
+		sr.animation = _mirrored(sr.animation)
+	bs.add_blend_point(sr, _hull[1], -1, &"strafe_r")
 	bs.add_blend_point(_anim(&"strafe_l"), _hull[3], -1, &"strafe_l")
 	ground.add_node("move", bs, Vector2(0, 0))
 	ground.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
@@ -557,7 +565,10 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	if moving:
 		var base := PI if backwards else 0.0
 		var rel := angle_difference(base, theta)
-		target_warp = clampf(rel, -PI * 0.5, PI * 0.5) * warp_w
+		# Backwards, the legs only turn a little (looking down you'd see them cross under
+		# you); the back + side-step clips blend for the rest of the angle.
+		var lim := deg_to_rad(back_warp_deg) if backwards else PI * 0.5
+		target_warp = clampf(rel, -lim, lim) * warp_w
 		blend_dir = theta - target_warp
 	_warp = lerp_angle(_warp, target_warp, 1.0 - exp(-10.0 * delta))
 	var bp := Vector2(sin(blend_dir), cos(blend_dir)) * speed

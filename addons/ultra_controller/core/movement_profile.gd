@@ -28,8 +28,8 @@ enum Gait { WALK, JOG }
 @export_range(2, 12, 0.05) var sprint_speed := 6.2
 @export_range(0.3, 4, 0.05) var crouch_speed := 1.5
 @export_range(0.1, 2, 0.05) var crawl_speed := 0.75
-@export_range(0.2, 1, 0.01) var back_mult := 0.62
-@export_range(0.2, 1, 0.01) var strafe_mult := 0.85
+@export_range(0.2, 1, 0.01) var back_mult := 0.82
+@export_range(0.2, 1, 0.01) var strafe_mult := 0.95
 ## Analog sticks: below this deflection speed scales up to a walk; above it, the default gait.
 @export_range(0.1, 1, 0.01) var walk_deflection := 0.55
 

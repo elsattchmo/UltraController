@@ -85,6 +85,9 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Gait: `MovementProfile.default_gait` WALK (default: full input = walk 1.35 m/s, Shift =
   sprint) or JOG. The blend space has a "walk_brisk" point (the walk cycle at 1.75x) so walk
   speeds never pull in the jog's 2.8 m stride. Hips warp toward travel from ~1.35 m/s.
+- Backpedal diagonals: legs turn at most `back_warp_deg` (35) toward travel, the back +
+  side-step clips blend the rest. The right side-step point is a mirrored Strafe_Left
+  (Strafe_Right skates ~0.8 m/s when blended with Walk_Backwards). back_mult 0.82, strafe 0.95.
 - Stepping down a stair keeps you grounded (`UltraMotor._snap_down`, a ray under the capsule's
   centre); the fall clip waits 0.15 s of real air before showing.
 - Hard landings (> hard_land_speed) crumple into RAGDOLL and get up; Land_Three_Point is unused.
