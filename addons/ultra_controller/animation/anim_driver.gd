@@ -36,6 +36,13 @@ var rm_clip: int = -1
 var hard_landing := false
 var land_impact := 0.0
 var on_platform := false
+## Held item presentation (set by the character).
+var held_def: ItemDefinition
+var item_action := 0
+var item_ready_pose := 1.0          ## 1 = weapon up, 0 = lowered (sprinting, busy)
+var _held_roles_for: ItemDefinition
+var _item_w := 0.0
+var _pose_w := 0.0
 ## 1 when the body faces the aim (first person, aiming): spine carries aim yaw/pitch.
 ## 0 in free third-person movement: only the head glances (LookModifier).
 var aim_weight := 1.0
@@ -260,7 +267,32 @@ func _build() -> AnimationNodeBlendTree:
 	for b in _upper_body_bones():
 		upper.set_filter_path(NodePath("%GeneralSkeleton:" + b), true)
 	root.add_node("upper", upper, Vector2(300, 0))
-	root.add_node("upper_src", _anim(&"idle"), Vector2(150, 200))
+	# Held-item layer: lowered / aimed pose, plus fire and reload one-shots. Clip names are
+	# swapped in from the item's anim_roles when it changes (see _set_item_clips).
+	var item := AnimationNodeBlendTree.new()
+	item.add_node("low", _anim(&"idle"), Vector2(0, 0))
+	item.add_node("aim", _anim(&"idle"), Vector2(0, 150))
+	item.add_node("pose", AnimationNodeBlend2.new(), Vector2(200, 50))
+	item.connect_node("pose", 0, "low")
+	item.connect_node("pose", 1, "aim")
+	var fire := AnimationNodeOneShot.new()
+	fire.fadein_time = 0.02
+	fire.fadeout_time = 0.12
+	item.add_node("fire", fire, Vector2(400, 50))
+	var fire_clip := AnimationNodeAnimation.new()
+	item.add_node("fire_clip", fire_clip, Vector2(200, 200))
+	item.connect_node("fire", 0, "pose")
+	item.connect_node("fire", 1, "fire_clip")
+	var reload := AnimationNodeOneShot.new()
+	reload.fadein_time = 0.12
+	reload.fadeout_time = 0.2
+	item.add_node("reload", reload, Vector2(600, 50))
+	var reload_clip := AnimationNodeAnimation.new()
+	item.add_node("reload_clip", reload_clip, Vector2(400, 200))
+	item.connect_node("reload", 0, "fire")
+	item.connect_node("reload", 1, "reload_clip")
+	item.connect_node("output", 0, "reload")
+	root.add_node("upper_src", item, Vector2(150, 200))
 	root.connect_node("upper", 0, "loco")
 	root.connect_node("upper", 1, "upper_src")
 
@@ -446,6 +478,7 @@ func _drive_body(delta: float) -> void:
 	var c := 2.0 * sqrt(k) * 0.7
 	_lean_vel += ((target - _lean) * k - _lean_vel * c) * delta
 	_lean += _lean_vel * delta
+	_drive_item(delta)
 	# Feet: full grounding when standing / walking, easing off at a run, off in the air.
 	var foot_w := 0.0
 	var Id := MotorState.Id
@@ -473,6 +506,47 @@ func _drive_body(delta: float) -> void:
 	if state == MotorState.Id.ROOT_MOTION:
 		modifier.aim_yaw = 0.0
 		modifier.aim_pitch *= 0.3
+
+
+func _drive_item(delta: float) -> void:
+	if held_def != _held_roles_for:
+		_held_roles_for = held_def
+		if held_def and not held_def.anim_roles.is_empty():
+			_set_item_clips(held_def.anim_roles)
+	var has_layer := held_def != null and not held_def.anim_roles.is_empty()
+	var want := 0.0
+	if has_layer:
+		match item_action:
+			UltraActionLayer.Action.EQUIPPING, UltraActionLayer.Action.READY, UltraActionLayer.Action.RELOADING:
+				want = 1.0
+	if state in [MotorState.Id.ROOT_MOTION, MotorState.Id.SLIDE, MotorState.Id.CRAWL]:
+		want = 0.0
+	_item_w = move_toward(_item_w, want, delta * 5.0)
+	_pose_w = move_toward(_pose_w, item_ready_pose, delta * 6.0)
+	tree.set("parameters/upper/blend_amount", _item_w)
+	tree.set("parameters/upper_src/pose/blend_amount", _pose_w)
+	if modifier:
+		modifier.weapon_aim = _item_w * _pose_w
+
+
+func _set_item_clips(roles: Dictionary) -> void:
+	var item := (tree.tree_root as AnimationNodeBlendTree).get_node("upper_src") as AnimationNodeBlendTree
+	var pairs := {"low": "idle", "aim": "aim", "fire_clip": "fire", "reload_clip": "reload"}
+	for node_name: String in pairs:
+		var role := StringName(roles.get(pairs[node_name], ""))
+		if role != &"":
+			(item.get_node(node_name) as AnimationNodeAnimation).animation = _clip(role)
+
+
+## Item events from the action layer (predicted locally, from snapshots remotely).
+func item_event(kind: StringName) -> void:
+	match kind:
+		&"fire":
+			tree.set("parameters/upper_src/fire/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+		&"reload":
+			tree.set("parameters/upper_src/reload/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+		&"reload_cancel":
+			tree.set("parameters/upper_src/reload/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
 
 
 func play_hit(role: StringName) -> void:

@@ -31,6 +31,8 @@ const DEFAULT_PORT := 7777
 
 var mode: int = Mode.NONE
 var lag := UltraLagSim.new()
+## Objects, props, events, inventories, lag compensation.
+var world := UltraWorldNet.new(self)
 var server_tick: int = 0
 var players := {}                         ## id -> NetPlayer
 var local_players: Array[NetPlayer] = []
@@ -94,6 +96,7 @@ func join(address: String, port := DEFAULT_PORT, local_count := 1, names := Pack
 		return err
 	multiplayer.multiplayer_peer = peer
 	mode = Mode.CLIENT
+	world.apply_client_mode()
 	_local_count = local_count
 	_local_names = names
 	multiplayer.connected_to_server.connect(_on_connected, CONNECT_ONE_SHOT)
@@ -111,6 +114,7 @@ func stop() -> void:
 			p.character.queue_free()
 	players.clear()
 	local_players.clear()
+	world.clear_dynamic()
 	if multiplayer.peer_connected.is_connected(_on_peer_connected):
 		multiplayer.peer_connected.disconnect(_on_peer_connected)
 	if multiplayer.peer_disconnected.is_connected(_on_peer_disconnected):
@@ -188,6 +192,7 @@ func _c2s_hello(local_count: int, names: PackedStringArray) -> void:
 	# Late join: tell the newcomer about everyone already here.
 	for p: NetPlayer in players.values():
 		_send_reliable(peer, _s2c_spawn, [p.id, p.peer_id, p.local_index, p.display_name, _state_bytes(p.character.state)])
+	world.send_world_to(peer)
 	for i in clampi(local_count, 0, 4):
 		_server_add_player(peer, i, names[i] if i < names.size() else "Player %d.%d" % [peer % 1000, i + 1])
 
@@ -217,12 +222,14 @@ func _server_add_player(peer_id: int, local_index: int, pname: String) -> NetPla
 	p.role = NetPlayer.Role.AUTHORITY_LOCAL if peer_id == multiplayer.get_unique_id() else NetPlayer.Role.AUTHORITY_REMOTE
 	_make_character(p)
 	p.character.state.quantize()                 # clients start from these exact bits
+	p.character.inventory_dirty.connect(func() -> void: world.send_inventory(p))
 	players[p.id] = p
 	if p.role == NetPlayer.Role.AUTHORITY_LOCAL:
 		local_players.append(p)
 	for peer in _remote_peers():
 		_send_reliable(peer, _s2c_spawn, [p.id, p.peer_id, p.local_index, p.display_name, _state_bytes(p.character.state)])
 	player_added.emit(p)
+	world.send_inventory(p)
 	return p
 
 
@@ -325,6 +332,8 @@ func _server_step(dt: float) -> void:
 
 				p.last_processed_tick = f.tick
 				p.processed += 1
+	world.record_history(server_tick)
+	world.flush_dirty()
 	if server_tick % SNAPSHOT_EVERY == 0:
 		for peer in _remote_peers():
 			_send_unreliable(peer, _s2c_snapshot, [_build_snapshot(peer)])
@@ -363,6 +372,11 @@ func _build_snapshot(peer: int) -> PackedByteArray:
 			b.put_16(clampi(int(s.land_impact * 100.0), -32767, 32767))
 			b.put_u32(li.buttons)
 			b.put_u16(s.platform_id)
+			b.put_u16(s.equipped)
+			b.put_u8(s.action)
+			b.put_u8(s.fire_seq)
+			b.put_u16(clampi(int(s.hp * 10.0), 0, 65535))
+	world.write_props(b)
 	return b.data_array
 
 
@@ -505,10 +519,15 @@ func _s2c_snapshot(bytes: PackedByteArray) -> void:
 			e.land_impact = b.get_16() / 100.0
 			e.buttons = b.get_u32()
 			e.platform = b.get_u16()
+			e.equipped = b.get_u16()
+			e.action = b.get_u8()
+			e.fire_seq = b.get_u8()
+			e.hp = b.get_u16() / 10.0
 			if p:
 				p.snaps.append(e)
 				if p.snaps.size() > 40:
 					p.snaps.pop_front()
+	world.read_props(b, st)
 	snapshot_received.emit(st)
 
 
@@ -595,7 +614,7 @@ func _interpolate_remotes(delta: float) -> void:
 				var lb: Vector3 = plat.pose_at(int(b.tick)).affine_inverse() * b.pos
 				pos = plat.global_transform * la.lerp(lb, t)
 		var src: Dictionary = b if rt >= float(b.tick) - 1.0 else a
-		p.character.apply_remote(pos, vel, yaw, src.aim_yaw, src.pitch, src.state, src.stance, src.flags, src.height, src.rm_clip, src.land_impact, src.buttons)
+		p.character.apply_remote(pos, vel, yaw, src)
 
 
 static func _hermite(p0: Vector3, m0: Vector3, p1: Vector3, m1: Vector3, t: float) -> Vector3:
@@ -622,6 +641,7 @@ func _make_character(p: NetPlayer) -> void:
 		c.position = xf.origin
 		c.rotation.y = xf.basis.get_euler().y
 	c.net_role = p.role
+	c.net_id = p.id
 	c.quantize_state = true
 	(world_root if world_root else get_tree().current_scene).add_child(c)
 	p.character = c
@@ -657,6 +677,63 @@ func _physics_process(dt: float) -> void:
 func _process(delta: float) -> void:
 	if mode == Mode.CLIENT:
 		_interpolate_remotes(delta)
+		world.interpolate_props(server_tick_est - INTERP_DELAY_TICKS)
+
+
+func peer_rtt_ms(peer_id: int) -> float:
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet == null:
+		return 0.0
+	var pp := enet.get_peer(peer_id)
+	return pp.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME) + lag.latency_ms if pp else 0.0
+
+
+## Ask the server to change our inventory (move/split/drop/use). Applied at once on a server.
+func request_inventory(player_id: int, op: String, args: Array) -> void:
+	var p: NetPlayer = players.get(player_id)
+	if p == null:
+		return
+	if is_server():
+		world.inventory_op(p, op, args)
+	else:
+		_send_reliable(1, _c2s_inventory_op, [player_id, op, args])
+
+
+@rpc("any_peer", "reliable", "call_remote", 0)
+func _c2s_inventory_op(player_id: int, op: String, args: Array) -> void:
+	var p: NetPlayer = players.get(player_id)
+	if p and p.peer_id == multiplayer.get_remote_sender_id():
+		world.inventory_op(p, op, args)
+
+
+@rpc("authority", "reliable", "call_remote", 0)
+func _s2c_inventory(player_id: int, bytes: PackedByteArray) -> void:
+	var p: NetPlayer = players.get(player_id)
+	if p and is_instance_valid(p.character):
+		p.character.inventory.from_bytes(bytes)
+
+
+@rpc("authority", "reliable", "call_remote", 0)
+func _s2c_spawn_object(id: int, scene_path: String, xf: Transform3D, extra: Dictionary, state: Dictionary) -> void:
+	world.client_spawn(id, scene_path, xf, extra, state)
+
+
+@rpc("authority", "reliable", "call_remote", 0)
+func _s2c_despawn_object(id: int) -> void:
+	world.despawn(id)
+
+
+@rpc("authority", "reliable", "call_remote", 0)
+func _s2c_object_state(id: int, state: Dictionary) -> void:
+	var o := world.get_object(id)
+	if o:
+		o.apply_state(state)
+	world.emit_local(&"object_state", [id, state])
+
+
+@rpc("authority", "unreliable", "call_remote", 2)
+func _s2c_event(event_name: StringName, args: Array) -> void:
+	world.emit_local(event_name, args)
 
 
 func _update_rtt() -> void:

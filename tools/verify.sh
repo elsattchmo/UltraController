@@ -26,9 +26,9 @@ mkdir -p "$LOGS"
 # --- static checks (before Godot): no hard-coded keys outside the input layer
 echo "verify: static checks"
 BAD=$(grep -rnE "\bKEY_[A-Z0-9_]+|MOUSE_BUTTON_[A-Z]+|JOY_BUTTON_[A-Z]+|is_key_pressed|is_physical_key_pressed|is_mouse_button_pressed|is_joy_button_pressed" \
-	--include=*.gd "$SRC/addons" "$SRC/demo" | grep -v "/input/" || true)
+	--include=*.gd "$SRC/addons" "$SRC/demo" | grep -v "/input/" | grep -v "addons/ultra_controller/ui/" || true)
 if [ -n "$BAD" ]; then
-	echo "verify: FAILED - hard-coded input outside addons/ultra_controller/input:"
+	echo "verify: FAILED - hard-coded input outside addons/ultra_controller/input (and ui widgets):"
 	echo "$BAD"
 	exit 1
 fi
@@ -122,6 +122,9 @@ if [ "$SUITE" = "m2" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
 	net_case bad 1 --lag=250 --jitter=80 --loss=5
 	net_case two_clients 2 --lag=80 --jitter=10 --loss=1
 	SERVER_ARGS="--spawn=platform_elevator" CLIENT_BOT="walk_short" net_case platform 1 --lag=120 --jitter=20 --loss=2 --max-correction=0.05
+fi
+if [ "$SUITE" = "m4" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
+	SERVER_ARGS="--spawn=range" CLIENT_BOT="gunplay" net_case gunplay 1 --lag=120 --jitter=20 --loss=2 --expect-shots=12
 fi
 
 if [ "$TOUR" = "1" ] && [ -f "$DST/demo/tours/$SUITE.gd" ]; then

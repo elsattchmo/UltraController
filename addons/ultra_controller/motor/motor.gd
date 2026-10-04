@@ -15,6 +15,7 @@ const STATE_SCRIPTS := {
 	MotorState.Id.JUMP: preload("states/air_state.gd"),
 	MotorState.Id.FALL: preload("states/air_state.gd"),
 	MotorState.Id.ROOT_MOTION: preload("states/root_motion_state.gd"),
+	MotorState.Id.DEAD: preload("states/dead_state.gd"),
 }
 
 const F_TURNING := 1 << 8       ## idle feet turning toward aim (anim plays a turn)
@@ -121,7 +122,7 @@ func step(s: MotorState, input: InputFrame, p_dt: float) -> void:
 	s.pos = body.global_position
 	s.vel = body.velocity
 	s.state_time += dt
-	s.prev_buttons = input.buttons
+	# (prev_buttons is advanced by the character after the action layer has seen the edges)
 
 
 func change_state(s: MotorState, input: InputFrame, nxt: int) -> void:
@@ -202,6 +203,10 @@ func target_ground_speed(s: MotorState, input: InputFrame) -> float:
 			else:
 				speed = lerpf(profile.walk_speed, profile.jog_speed, (mag - profile.walk_deflection) / (1.0 - profile.walk_deflection))
 	if not (input.has(InputFrame.B_SPRINT) and s.stance == MotorState.Stance.STAND):
+		s.set_flag(MotorState.F_SPRINTING, false)
+	# Aiming down sights with a weapon: careful steps.
+	if s.equipped != 0 and input.has(InputFrame.B_SECONDARY):
+		speed = minf(speed, profile.walk_speed * 1.15)
 		s.set_flag(MotorState.F_SPRINTING, false)
 	# Direction penalty only when the body faces the aim (strafing / backpedalling).
 	var faces_aim := not input.has(InputFrame.B_VIEW_TP) or profile.tp_rotation == MovementProfile.Rotation.FACE_AIM \

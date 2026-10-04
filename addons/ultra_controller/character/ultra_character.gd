@@ -10,6 +10,13 @@ extends CharacterBody3D
 
 signal landed(impact_speed: float)
 signal state_changed(old_state: int, new_state: int)
+## Presentation events from the action layer: &"fire", &"reload", &"mag_in", &"dry_fire"...
+signal item_event(kind: StringName, data: Dictionary)
+## The authority changed this character's inventory (UltraNet sends it to the owner).
+signal inventory_dirty
+## Authority: damage was applied (see UltraCombat.DamageInfo).
+signal damaged(info: UltraCombat.DamageInfo)
+signal died
 
 @export var profile: MovementProfile
 @export var body_profile: BodyProfile
@@ -25,7 +32,11 @@ var quantize_state := false
 var input_source: InputSource
 ## NetPlayer.Role this character plays on this machine (set by UltraNet).
 const ROLE_PREDICTED := 2
+const ROLE_INTERPOLATED := 3
 var net_role: int = 0
+## NetPlayer id (0 when not in a session). Seeds deterministic weapon spread.
+var net_id: int = 0
+var inventory := Inventory.new()
 var motor: UltraMotor
 var state := MotorState.new()
 var tick := 0
@@ -100,6 +111,11 @@ func _build_visual() -> void:
 		add_child(anim)
 		anim.setup(player, skeleton)
 		anim.foot_ik.exclude = [get_rid()]
+		var eq := UltraEquipmentVisual.new()
+		eq.name = "Equipment"
+		add_child(eq)
+		eq.setup(self)
+		item_event.connect(func(kind: StringName, _d: Dictionary) -> void: anim.item_event(kind))
 	set_view_index(view_index)
 	_sync_visual(1.0)
 
@@ -148,6 +164,10 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	motor.apply_pushes = net_role != ROLE_PREDICTED and not replaying   # only the authority shoves props
 	motor.platform_tick = platform_tick
 	motor.step(state, input, delta)
+	UltraActionLayer.step(self, state, input, delta, replaying)
+	if is_authority() and not replaying and input.target_id != 0 and UltraMotor.pressed_edge(state, input, InputFrame.B_INTERACT):
+		UltraItems.interact(self, input.target_id)
+	state.prev_buttons = input.buttons
 	# Every machine continues from exactly what a snapshot can carry, so a client rebased
 	# onto server state and the server itself compute identical futures.
 	if quantize_state:
@@ -167,7 +187,27 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 
 
 ## Client view of somebody else's character: interpolated snapshot values, every frame.
-func apply_remote(pos: Vector3, vel: Vector3, yaw: float, aim_yaw: float, pitch: float, st: int, stance: int, flags: int, height: float, rm_clip: int, land_impact: float, buttons: int) -> void:
+## `e` is the newest snapshot entry (discrete fields), pos/vel/yaw are interpolated.
+func apply_remote(pos: Vector3, vel: Vector3, yaw: float, e: Dictionary) -> void:
+	var aim_yaw: float = e.aim_yaw
+	var pitch: float = e.pitch
+	var st: int = e.state
+	var stance: int = e.stance
+	var flags: int = e.flags
+	var height: float = e.height
+	var rm_clip: int = e.rm_clip
+	var land_impact: float = e.land_impact
+	var buttons: int = e.buttons
+	var seq: int = e.get("fire_seq", state.fire_seq)
+	if seq != state.fire_seq:
+		var def := ItemDB.by_index(int(e.get("equipped", 0)))
+		item_event.emit(&"fire", {"remote": true})
+		if def == null:
+			pass
+	state.fire_seq = seq
+	state.equipped = int(e.get("equipped", 0))
+	state.action = int(e.get("action", 0))
+	state.hp = float(e.get("hp", state.hp))
 	var old := state.state
 	var dt := maxf(get_process_delta_time(), 0.001)
 	_accel = _accel.lerp((vel - state.vel) / dt, 0.2)
@@ -209,6 +249,10 @@ func _process(delta: float) -> void:
 		anim.land_impact = state.land_impact
 		anim.on_platform = state.platform_id != 0
 		anim.aim_weight = 1.0 if faces_aim() else 0.0
+		anim.held_def = held_def()
+		anim.item_action = state.action
+		var sprinting := state.has(MotorState.F_SPRINTING) and Vector2(state.vel.x, state.vel.z).length() > profile.jog_speed * 0.9
+		anim.item_ready_pose = 0.0 if sprinting or state.action != UltraActionLayer.Action.READY else 1.0
 		anim.accel = _accel
 
 
@@ -226,8 +270,47 @@ func _sync_visual(alpha: float) -> void:
 	visual_root.global_transform = Transform3D(Basis(Vector3.UP, yaw), p)
 
 
+## Authority only. Characters take damage here (limb damage arrives in M8).
+func apply_damage(info: UltraCombat.DamageInfo) -> void:
+	if not is_authority() or state.state == MotorState.Id.DEAD:
+		return
+	state.hp = maxf(state.hp - info.amount, 0.0)
+	UltraNet.world.broadcast(&"hit", [net_id, info.point, info.dir, info.amount, info.attacker_id], false)
+	damaged.emit(info)
+	if state.hp <= 0.0:
+		motor.change_state(state, last_input, MotorState.Id.DEAD)
+		UltraNet.world.broadcast(&"died", [net_id, info.attacker_id], true)
+		died.emit()
+
+
+func respawn(at: Transform3D) -> void:
+	state.hp = 100.0
+	state.state = MotorState.Id.IDLE
+	state.action = 0
+	teleport(at.origin, at.basis.get_euler().y)
+
+
+func is_authority() -> bool:
+	return net_role == 0 or net_role == 1
+
+
+func emit_item_event(kind: StringName, data: Dictionary, replaying: bool) -> void:
+	if not replaying:
+		item_event.emit(kind, data)
+
+
+func inventory_changed_by_server() -> void:
+	inventory_dirty.emit()
+
+
+func held_def() -> ItemDefinition:
+	return ItemDB.by_index(state.equipped)
+
+
 ## Does the body turn to face the aim right now? (first person, or TP aiming modes)
 func faces_aim() -> bool:
+	if state.equipped != 0 and state.action == UltraActionLayer.Action.READY:
+		return true                       # holding a weapon ready: always face the aim
 	if not last_input.has(InputFrame.B_VIEW_TP):
 		return true
 	match profile.tp_rotation:

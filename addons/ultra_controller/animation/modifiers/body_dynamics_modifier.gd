@@ -18,12 +18,16 @@ var lean_roll: float = 0.0       ## + = lean right
 var lean_pitch: float = 0.0      ## + = lean forward
 var pelvis_offset := Vector3.ZERO
 var hunch: float = 0.0           ## + = bend forward (injury / carry)
+## 0..1: a weapon is up. Aim pitch then lives in the spine so the arms track the crosshair.
+var weapon_aim: float = 0.0
 
 ## Distribution weights over [Spine, Chest, UpperChest, Neck, Head].
 @export var aim_pitch_weights := PackedFloat32Array([0.18, 0.22, 0.25, 0.17, 0.18])
 ## Looking down is mostly neck and head; bending the chest would put it under the eye.
 @export var aim_pitch_down_weights := PackedFloat32Array([0.05, 0.07, 0.1, 0.36, 0.42])
 @export var aim_yaw_weights := PackedFloat32Array([0.15, 0.2, 0.25, 0.2, 0.2])
+@export var weapon_pitch_weights := PackedFloat32Array([0.24, 0.3, 0.34, 0.06, 0.06])
+@export var weapon_yaw_weights := PackedFloat32Array([0.25, 0.3, 0.35, 0.05, 0.05])
 @export var warp_counter_weights := PackedFloat32Array([0.3, 0.35, 0.35, 0.0, 0.0])
 
 var _hips := -1
@@ -67,8 +71,10 @@ func _process_modification_with_delta(_delta: float) -> void:
 			continue
 		var g := sk.get_bone_global_pose(b)
 		# Counter-rotate the warp (children inherit the hips turn) so the chest keeps facing aim.
-		var yaw := -warp_yaw * warp_counter_weights[k] + aim_yaw * aim_yaw_weights[k]
+		var yw := lerpf(aim_yaw_weights[k], weapon_yaw_weights[k], weapon_aim)
+		var yaw := -warp_yaw * warp_counter_weights[k] + aim_yaw * yw
 		var pw := aim_pitch_weights[k] if aim_pitch >= 0.0 else aim_pitch_down_weights[k]
+		pw = lerpf(pw, weapon_pitch_weights[k], weapon_aim)
 		var pitch := aim_pitch * pw - (hunch * (0.4 if k < 3 else 0.1))
 		var roll := lean_roll * (0.25 if k < 3 else 0.0)
 		var fwd_lean := lean_pitch * (0.2 if k < 2 else 0.0)

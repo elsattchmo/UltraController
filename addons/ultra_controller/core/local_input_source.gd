@@ -11,6 +11,8 @@ const TRACKED: Array[StringName] = [
 	&"look_left", &"look_right", &"look_up", &"look_down",
 	&"jump", &"crouch", &"sprint", &"walk", &"interact", &"primary", &"secondary",
 	&"throw", &"drop", &"reload", &"lean_left", &"lean_right", &"toggle_view", &"dodge", &"leave",
+	&"hotbar_1", &"hotbar_2", &"hotbar_3", &"hotbar_4", &"hotbar_5", &"hotbar_6", &"hotbar_7", &"hotbar_8", &"hotbar_9",
+	&"hotbar_next", &"hotbar_prev", &"inventory",
 ]
 
 ## Empty = accept every device (single local player).
@@ -21,6 +23,13 @@ var enabled := true
 var require_mouse_capture := true
 ## Multiplier used while aiming down sights.
 var sens_mult := 1.0
+## Hotbar slot the player wants in hand (1..9, 0 = empty hands). Persistent intent, so a lost
+## packet can't drop a weapon swap.
+var want_slot := 0
+## Returns the net id of the object under the crosshair (UltraInteractionScanner).
+var target_provider: Callable
+## Optional: is a hotbar slot occupied? (for next/previous cycling)
+var slot_filled: Callable
 
 var active_device := "kbm"
 var _strength := {}            # device -> {action -> strength}
@@ -124,6 +133,22 @@ func _process(delta: float) -> void:
 		_last_crouch_press = now
 	if _just_pressed(&"sprint") and UltraInputSettings.b("toggle_sprint"):
 		_sprint_toggled = not _sprint_toggled
+	for n in 9:
+		if _just_pressed(StringName("hotbar_%d" % (n + 1))):
+			want_slot = 0 if want_slot == n + 1 else n + 1
+	for dir in [[&"hotbar_next", 1], [&"hotbar_prev", -1]]:
+		if _just_pressed(dir[0]):
+			want_slot = _cycle(want_slot, int(dir[1]))
+
+
+func _cycle(cur: int, dir: int) -> int:
+	# 0 (holstered) is part of the cycle so you can put things away from the pad.
+	var s := cur
+	for _i in 10:
+		s = posmod(s + dir, 10)
+		if s == 0 or not slot_filled.is_valid() or bool(slot_filled.call(s - 1)):
+			return s
+	return cur
 
 
 func sample(tick: int) -> InputFrame:
@@ -131,6 +156,9 @@ func sample(tick: int) -> InputFrame:
 	f.tick = tick
 	f.yaw = live_yaw
 	f.pitch = live_pitch
+	f.want_slot = want_slot
+	if target_provider.is_valid():
+		f.target_id = int(target_provider.call())
 	if not enabled:
 		return f.quantize()
 	var mv := Vector2(strength(&"move_right") - strength(&"move_left"), strength(&"move_forward") - strength(&"move_back"))

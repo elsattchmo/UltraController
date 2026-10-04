@@ -29,7 +29,17 @@ static func _summ(p: NetPlayer) -> Dictionary:
 	return {"id": p.id, "role": p.role, "processed": p.processed, "misses": p.misses, "pos": pos}
 
 
+var _shots := 0
+var _hooked := {}
+
+
 func _on_snapshot(_tick: int) -> void:
+	for p in UltraNet.local_players:
+		if not _hooked.has(p.id):
+			_hooked[p.id] = true
+			p.character.item_event.connect(func(kind: StringName, _d: Dictionary) -> void:
+				if kind == &"fire":
+					_shots += 1)
 	for p: NetPlayer in UltraNet.players.values():
 		if p.role == NetPlayer.Role.INTERPOLATED and not p.snaps.is_empty():
 			var pos: Vector3 = p.snaps[p.snaps.size() - 1].pos
@@ -74,6 +84,16 @@ func _finish() -> void:
 			if UltraArgs.has("expect-no-corrections") and p.corrections > 0:
 				print("NETREPORT FAIL expected an exact match with the server, got %d corrections" % p.corrections)
 				ok = false
+		var want_shots := UltraArgs.get_int("expect-shots", 0)
+		if want_shots > 0:
+			for p in UltraNet.local_players:
+				print("NETREPORT shots_seen=%d mag=%d inventory_rev=%d" % [_shots, p.character.state.mag, p.character.inventory.revision])
+				if _shots < want_shots:
+					print("NETREPORT FAIL only %d predicted shots (want %d)" % [_shots, want_shots])
+					ok = false
+				if p.character.inventory.count_of(&"pistol") != 1:
+					print("NETREPORT FAIL client never received its inventory")
+					ok = false
 		var want_remotes := UltraArgs.get_int("expect-remotes", 0)
 		var seen := 0
 		for id: int in _path:

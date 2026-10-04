@@ -23,6 +23,7 @@ var map: Node3D
 var locals: UltraLocalPlayers
 var menu: Control
 var player: UltraCharacter          ## first local player (tours, single-player tools)
+var effects: UltraEffects
 var headless := false
 var _title_t := 0.0
 
@@ -53,6 +54,9 @@ func _ready() -> void:
 	UltraNet.verbose = args.has("verbose-net")
 	UltraNet.lag.configure(UltraArgs.get_float("lag"), UltraArgs.get_float("jitter"), UltraArgs.get_float("loss"))
 	UltraNet.player_added.connect(_on_player_added)
+	effects = UltraEffects.new()
+	effects.name = "Effects"
+	add_child(effects)
 	UltraNet.session_ended.connect(func(reason: String) -> void:
 		push_warning("session ended: " + reason)
 		if args.has("quit-on-end"):
@@ -154,6 +158,12 @@ func _make_hud(c: UltraCharacter) -> Node:
 
 
 func _on_player_added(p: NetPlayer) -> void:
+	if p.character.build_visuals:
+		effects.watch(p.character)
+	if p.is_local():
+		effects.local_ids.append(p.id)
+	if UltraNet.is_server():
+		_give_starting_kit(p.character)
 	if p.is_local() and player == null:
 		player = p.character
 	if p.is_local() and args.get("view", "") == "tp" and p.character.input_source:
@@ -163,6 +173,15 @@ func _on_player_added(p: NetPlayer) -> void:
 	if menu:
 		menu.queue_free()
 		menu = null
+
+
+## Playground loadout: a pistol and some ammo (the server grants it; owners get it replicated).
+func _give_starting_kit(c: UltraCharacter) -> void:
+	if args.has("no-kit"):
+		return
+	UltraItems.give(c, &"pistol", 1)
+	UltraItems.give(c, &"ammo_9mm", 36)
+	UltraItems.give(c, &"medkit", 1)
 
 
 func _process(delta: float) -> void:

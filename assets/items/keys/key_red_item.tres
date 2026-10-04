@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDefinition" format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/items/item_definition.gd" id="1_eonpm"]
+[ext_resource type="PackedScene" path="res://assets/items/keys/key_red_world.tscn" id="2_58ljb"]
+
+[resource]
+script = ExtResource("1_eonpm")
+id = &"key_red"
+display_name = "Red key"
+description = "Opens the vault."
+kind = 3
+mass = 0.05
+world_scene = ExtResource("2_58ljb")
+key_id = &"red"

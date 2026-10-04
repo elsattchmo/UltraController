@@ -8,6 +8,18 @@ static func get_course(name: String) -> Array:
 	match name:
 		"idle":
 			return [{"ticks": 60}]
+		"gunplay":
+			# Draw, fire a magazine while strafing, reload, holster, repeat.
+			var out := [{"ticks": 30, "slot": 1}]
+			for i in 12:
+				out.append({"ticks": 2, "slot": 1, "tap": InputFrame.B_PRIMARY, "move": Vector2(0.6 if i % 4 < 2 else -0.6, 0)})
+				out.append({"ticks": 10, "slot": 1, "move": Vector2(0.6 if i % 4 < 2 else -0.6, 0), "yaw_rate": 0.4})
+			out.append({"ticks": 2, "slot": 1, "tap": InputFrame.B_RELOAD})
+			out.append({"ticks": 150, "slot": 1})
+			out.append({"ticks": 40, "slot": 1, "buttons": InputFrame.B_SECONDARY, "move": Vector2(0, 0.5)})
+			out.append({"ticks": 2, "slot": 1, "buttons": InputFrame.B_SECONDARY, "tap": InputFrame.B_PRIMARY})
+			out.append({"ticks": 40, "slot": 0})
+			return out
 		"walk_short":
 			# Ride whatever we spawned on: stand, shuffle a little, jump once.
 			return [{"ticks": 240}, {"ticks": 30, "move": Vector2(0, 0.3)}, {"ticks": 2, "tap": InputFrame.B_JUMP}, {"ticks": 300}]

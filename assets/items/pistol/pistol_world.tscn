@@ -1,0 +1,16 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/items/world_item.gd" id="1_2bkr4"]
+[ext_resource type="PackedScene" path="res://assets/items/pistol/pistol.glb" id="2_n6h7d"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_dorts"]
+size = Vector3(0.04, 0.14, 0.2)
+
+[node name="Pistol" type="RigidBody3D" unique_id=2110171665]
+script = ExtResource("1_2bkr4")
+item_id = &"pistol"
+
+[node name="Visual" type="Node3D" parent="." unique_id=1190384000 instance=ExtResource("2_n6h7d")]
+
+[node name="Shape" type="CollisionShape3D" parent="." unique_id=154378991]
+shape = SubResource("BoxShape3D_dorts")

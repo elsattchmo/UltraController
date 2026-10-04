@@ -14,6 +14,7 @@ var out_dir := "C:/Dev/verify/ultra/review/m1"
 var _i := -1
 var _t0 := 0.0
 var _bot: BotInputSource
+var _slot := 0
 
 
 func _ready() -> void:
@@ -64,11 +65,14 @@ func _drive(tick: int, _src: BotInputSource) -> InputFrame:
 		var s: Dictionary = steps[_i]
 		f.move = s.get("move", Vector2.ZERO)
 		f.buttons = int(s.get("buttons", 0))
+		if s.has("slot"):
+			_slot = int(s["slot"])
 		if s.has("tap") and _now() - _t0 < 0.05:
 			f.buttons |= int(s["tap"])
 		_bot.live_yaw += deg_to_rad(float(s.get("yaw_rate", 0.0))) / Engine.physics_ticks_per_second
 	if _bot.view_tp:
 		f.buttons |= InputFrame.B_VIEW_TP
+	f.want_slot = _slot
 	return f
 
 

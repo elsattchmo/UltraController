@@ -20,7 +20,7 @@ const B_VIEW_TP := 1 << 12      ## state bit: player is in third person (affects
 const B_CRAWL := 1 << 13        ## state bit: toggled crawl (double-tap crouch)
 const B_DODGE := 1 << 14
 
-const ENCODED_SIZE := 16
+const ENCODED_SIZE := 17
 
 var tick: int = 0
 var move := Vector2.ZERO        ## x = right, y = forward; length <= 1
@@ -28,6 +28,7 @@ var yaw: float = 0.0            ## absolute aim yaw (radians, 0 = -Z)
 var pitch: float = 0.0          ## absolute aim pitch (radians, + = up)
 var buttons: int = 0
 var target_id: int = 0          ## interaction / grab target net id (0 = none)
+var want_slot: int = 0          ## hotbar slot the player wants in hand (1..9), 0 = empty hands
 
 
 func has(bit: int) -> bool:
@@ -65,6 +66,7 @@ func copy() -> InputFrame:
 	f.pitch = pitch
 	f.buttons = buttons
 	f.target_id = target_id
+	f.want_slot = want_slot
 	return f
 
 
@@ -76,7 +78,8 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_16(int(roundf(clampf(pitch, -1.55, 1.55) * 20000.0)))
 	buf.put_u32(buttons)
 	buf.put_u16(target_id)
-	# 4+1+1+2+2+4+2 = ENCODED_SIZE (16) bytes
+	buf.put_u8(want_slot)
+	# 4+1+1+2+2+4+2+1 = ENCODED_SIZE (17) bytes
 
 
 static func decode(buf: StreamPeerBuffer) -> InputFrame:
@@ -87,4 +90,5 @@ static func decode(buf: StreamPeerBuffer) -> InputFrame:
 	f.pitch = buf.get_16() / 20000.0
 	f.buttons = buf.get_u32()
 	f.target_id = buf.get_u16()
+	f.want_slot = buf.get_u8()
 	return f

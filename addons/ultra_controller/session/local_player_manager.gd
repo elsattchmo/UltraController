@@ -15,6 +15,8 @@ signal layout_changed(count: int)
 @export var join_enabled := false
 ## Per-player UI: Callable(character) -> Node (a CanvasLayer), put in that player's pane.
 var hud_factory: Callable
+## Crosshair / prompt / ammo / hotbar / inventory. Turn off to bring your own UI.
+@export var use_builtin_hud := true
 
 var slots: Array[Dictionary] = []    ## {index, devices, rig, pane, viewport, hud, player}
 var _root_ui: Control
@@ -78,6 +80,25 @@ func _on_player_added(p: NetPlayer) -> void:
 	s.rig = rig
 	add_child(rig)
 	rig.attach(p.character)
+	# What's under the crosshair -> prompt + InputFrame.target_id; hotbar knows the inventory.
+	var scanner := UltraInteractionScanner.new()
+	scanner.name = "Scanner_%d" % p.local_index
+	scanner.character = p.character
+	scanner.camera = rig.camera
+	add_child(scanner)
+	s.scanner = scanner
+	var src := p.character.input_source as LocalInputSource
+	if src:
+		src.target_provider = scanner.target_id
+		var inv := p.character.inventory
+		src.slot_filled = func(i: int) -> bool: return inv.get_slot(i) != null
+	if use_builtin_hud:
+		var hud := UltraHUD.new()
+		hud.name = "HUD_%d" % p.local_index
+		hud.character = p.character
+		hud.scanner = scanner
+		s.builtin_hud = hud
+		add_child(hud)
 	if hud_factory.is_valid():
 		var hud: Node = hud_factory.call(p.character)
 		s.hud = hud
@@ -88,10 +109,11 @@ func _on_player_added(p: NetPlayer) -> void:
 func _on_player_removed(p: NetPlayer) -> void:
 	for s in slots:
 		if s.get("player") == p:
-			for k in ["rig", "hud", "pane"]:
+			for k in ["rig", "hud", "pane", "scanner", "builtin_hud"]:
 				if s.has(k) and is_instance_valid(s[k]):
 					(s[k] as Node).queue_free()
-			s.erase("player"); s.erase("rig"); s.erase("hud"); s.erase("pane"); s.erase("viewport")
+			for k in ["player", "rig", "hud", "pane", "viewport", "scanner", "builtin_hud"]:
+				s.erase(k)
 	_rebuild.call_deferred()
 
 
@@ -105,6 +127,7 @@ func _rebuild() -> void:
 	for s in active:
 		var rig: UltraCameraRig = s.rig
 		var hud: Node = s.get("hud")
+		var bhud: Node = s.get("builtin_hud")
 		if split and not s.has("pane"):
 			var pane := SubViewportContainer.new()
 			pane.stretch = true
@@ -118,12 +141,16 @@ func _rebuild() -> void:
 			rig.reparent(vp, false)
 			if hud:
 				hud.reparent(vp, false)
+			if bhud:
+				bhud.reparent(vp, false)
 			s.pane = pane
 			s.viewport = vp
 		elif not split and s.has("pane"):
 			rig.reparent(self, false)
 			if hud:
 				hud.reparent(self, false)
+			if bhud:
+				bhud.reparent(self, false)
 			(s.pane as Node).queue_free()
 			s.erase("pane")
 			s.erase("viewport")

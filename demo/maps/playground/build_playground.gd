@@ -1,7 +1,7 @@
-extends SceneTree
+extends Node
 ## Builds demo/maps/playground.tscn from code, so the playground is reproducible and every
 ## measurement in it is exact. Each zone is a function; later milestones add zones here.
-## Run: godot --headless --path . --script res://demo/maps/playground/build_playground.gd
+## Run: godot --headless --path . res://tools/tool_runner.tscn -- --tool=res://demo/maps/playground/build_playground.gd
 
 const OUT := "res://demo/maps/playground.tscn"
 
@@ -13,7 +13,7 @@ var grid_ice: ShaderMaterial
 var markers: Node3D
 
 
-func _init() -> void:
+func _ready() -> void:
 	scene_root = Node3D.new()
 	scene_root.name = "Playground"
 	scene_root.set_script(load("res://demo/maps/playground/playground.gd"))
@@ -29,12 +29,13 @@ func _init() -> void:
 	_platforms()
 	_props()
 	_gallery()
+	(load("res://demo/maps/playground/zones_m4.gd") as Script).new(self).build()
 	var ps := PackedScene.new()
 	var err := ps.pack(scene_root)
 	if err == OK:
 		err = ResourceSaver.save(ps, OUT)
 	print("playground saved: ", err)
-	quit()
+	scene_root.free()
 
 
 # ------------------------------------------------------------------ helpers

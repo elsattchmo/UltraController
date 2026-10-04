@@ -70,6 +70,23 @@ func _process_modification_with_delta(delta: float) -> void:
 			continue
 		var t_sk := inv * g.target
 		var arm: Array = _arms[i]
+		# Out of reach? Roll the clavicle toward the target first (shoulders come forward when
+		# you push a pistol out), up to ~25°.
+		var clav := sk.get_bone_parent(arm[0])
+		if clav >= 0:
+			var sh := sk.get_bone_global_pose(arm[0]).origin
+			var reach := sh.distance_to(sk.get_bone_global_pose(arm[1]).origin) + sk.get_bone_global_pose(arm[1]).origin.distance_to(sk.get_bone_global_pose(arm[2]).origin)
+			var short := sh.distance_to(t_sk.origin) - reach * 0.93
+			if short > 0.0:
+				var cg := sk.get_bone_global_pose(clav)
+				var from := sh - cg.origin
+				var to := t_sk.origin - cg.origin
+				var r := UltraIK._rot_between(from, to)
+				var ang := minf(r.get_rotation_quaternion().get_angle(), deg_to_rad(25.0)) * clampf(short / 0.025, 0.0, 1.0) * w
+				var axis := from.cross(to)
+				if axis.length() > 1e-5:
+					cg.basis = Basis(axis.normalized(), ang) * cg.basis
+					sk.set_bone_global_pose(clav, cg)
 		var pole := Vector3(1.0 if i == 0 else -1.0, -0.6, -0.3)   # skeleton space: out & down
 		var basis: Variant = t_sk.basis.orthonormalized() if g.use_rotation else null
 		last_error[i] = UltraIK.two_bone(sk, arm[0], arm[1], arm[2], t_sk.origin, w, basis, pole)

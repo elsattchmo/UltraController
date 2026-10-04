@@ -46,6 +46,15 @@ var trav_normal := Vector3.ZERO
 var trav_height: float = 0.0
 var platform_id: int = 0
 var platform_local := Vector3.ZERO
+## Held item / action layer (items, weapons, interaction). See UltraActionLayer.
+var held_uid: int = 0              ## ItemInstance uid in hand (0 = empty hands)
+var equipped: int = 0              ## ItemDB index of the held item
+var action: int = 0                ## UltraActionLayer.Action
+var action_t: float = 0.0
+var fire_cd: float = 0.0
+var mag: int = 0
+var fire_seq: int = 0              ## +1 per shot (remote clients play effects on change)
+var hp: float = 100.0
 
 
 func has(f: int) -> bool:
@@ -77,6 +86,8 @@ func copy_from(o: MotorState) -> void:
 	injury_bits = o.injury_bits
 	trav_point = o.trav_point; trav_normal = o.trav_normal; trav_height = o.trav_height
 	platform_id = o.platform_id; platform_local = o.platform_local
+	held_uid = o.held_uid; equipped = o.equipped; action = o.action; action_t = o.action_t
+	fire_cd = o.fire_cd; mag = o.mag; fire_seq = o.fire_seq; hp = o.hp
 
 
 ## Error metric used by reconciliation (metres, plus a penalty for discrete mismatches).
@@ -84,6 +95,9 @@ func diff(o: MotorState) -> float:
 	var d := pos.distance_to(o.pos) + vel.distance_to(o.vel) * 0.05
 	if state != o.state or stance != o.stance or held_id != o.held_id:
 		d += 1.0
+	if held_uid != o.held_uid or action != o.action or mag != o.mag or fire_seq != o.fire_seq:
+		d += 1.0
+	d += absf(action_t - o.action_t) + absf(hp - o.hp) * 0.01
 	return d
 
 
@@ -112,6 +126,14 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_float(trav_height)
 	buf.put_u16(platform_id)
 	buf.put_float(platform_local.x); buf.put_float(platform_local.y); buf.put_float(platform_local.z)
+	buf.put_u32(held_uid)
+	buf.put_u16(equipped)
+	buf.put_u8(action)
+	buf.put_u16(clampi(int(roundf(action_t * 1000.0)), 0, 65535))
+	buf.put_u16(clampi(int(roundf(fire_cd * 1000.0)), 0, 65535))
+	buf.put_u8(clampi(mag, 0, 255))
+	buf.put_u8(fire_seq & 255)
+	buf.put_u16(clampi(int(roundf(hp * 10.0)), 0, 65535))
 
 
 func decode(buf: StreamPeerBuffer) -> void:
@@ -139,6 +161,14 @@ func decode(buf: StreamPeerBuffer) -> void:
 	trav_height = buf.get_float()
 	platform_id = buf.get_u16()
 	platform_local = Vector3(buf.get_float(), buf.get_float(), buf.get_float())
+	held_uid = buf.get_u32()
+	equipped = buf.get_u16()
+	action = buf.get_u8()
+	action_t = buf.get_u16() / 1000.0
+	fire_cd = buf.get_u16() / 1000.0
+	mag = buf.get_u8()
+	fire_seq = buf.get_u8()
+	hp = buf.get_u16() / 10.0
 
 
 ## Round-trip through the codec, so a predicting client and the server hold the same bits.

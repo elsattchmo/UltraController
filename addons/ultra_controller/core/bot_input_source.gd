@@ -16,6 +16,7 @@ var goal_radius := 1.5
 var goal_sprint_distance := 6.0
 var body: Node3D                   ## for goal seeking
 var loop := false
+var want_slot := 0
 
 var _step := 0
 var _step_tick := 0
@@ -61,6 +62,9 @@ func sample(tick: int) -> InputFrame:
 			live_pitch = float(s["pitch"])
 		f.move = s.get("move", Vector2.ZERO)
 		f.buttons = int(s.get("buttons", 0))
+		if s.has("slot"):
+			want_slot = int(s["slot"])
+		f.target_id = int(s.get("target", 0))
 		if _step_tick == 0:
 			f.buttons |= int(s.get("tap", 0))
 		_step_tick += 1
@@ -77,4 +81,5 @@ func sample(tick: int) -> InputFrame:
 		f.buttons |= InputFrame.B_VIEW_TP
 	f.yaw = live_yaw
 	f.pitch = live_pitch
+	f.want_slot = want_slot
 	return f.quantize()

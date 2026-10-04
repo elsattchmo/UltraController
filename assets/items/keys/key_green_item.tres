@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDefinition" format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/items/item_definition.gd" id="1_dwvyb"]
+[ext_resource type="PackedScene" path="res://assets/items/keys/key_green_world.tscn" id="2_m8gcl"]
+
+[resource]
+script = ExtResource("1_dwvyb")
+id = &"key_green"
+display_name = "Green key"
+description = "Opens the high storeroom."
+kind = 3
+mass = 0.05
+world_scene = ExtResource("2_m8gcl")
+key_id = &"green"

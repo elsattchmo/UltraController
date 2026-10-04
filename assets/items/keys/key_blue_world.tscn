@@ -1,0 +1,28 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/items/world_item.gd" id="1_t5kly"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_h2m17"]
+albedo_color = Color(0.15, 0.35, 0.95, 1)
+metallic = 0.3
+roughness = 0.5
+emission_enabled = true
+emission = Color(0.15, 0.35, 0.95, 1)
+emission_energy_multiplier = 0.6
+
+[sub_resource type="BoxMesh" id="BoxMesh_sysbx"]
+size = Vector3(0.09, 0.025, 0.035)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_4pyjh"]
+size = Vector3(0.09, 0.03, 0.04)
+
+[node name="KeyBlue" type="RigidBody3D" unique_id=1539609443]
+script = ExtResource("1_t5kly")
+item_id = &"key_blue"
+
+[node name="Visual" type="MeshInstance3D" parent="." unique_id=1600438154]
+material_override = SubResource("StandardMaterial3D_h2m17")
+mesh = SubResource("BoxMesh_sysbx")
+
+[node name="Shape" type="CollisionShape3D" parent="." unique_id=1016623605]
+shape = SubResource("BoxShape3D_4pyjh")

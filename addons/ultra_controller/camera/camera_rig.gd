@@ -48,6 +48,7 @@ func attach(c: UltraCharacter) -> void:
 	_land.damping = cam_profile.land_spring_damping
 	c.set_view_index(view_index)
 	c.landed.connect(_on_landed)
+	c.item_event.connect(_on_item_event)
 	_ray_excl = [c.get_rid()]
 	tp_blend = 1.0 if c.profile.default_view == MovementProfile.View.THIRD_PERSON else 0.0
 	if c.input_source:
@@ -71,6 +72,26 @@ func _on_landed(impact: float) -> void:
 ## Camera kick (recoil, hits): radians of pitch/yaw that spring back.
 func kick(pitch: float, yaw: float) -> void:
 	_kick.impulse(Vector2(yaw, pitch) * 30.0)
+
+
+## Recoil: ~30 % stays in the aim (you have to pull down), the rest springs back.
+func _on_item_event(kind: StringName, _data: Dictionary) -> void:
+	if kind != &"fire" or character.input_source == null:
+		return
+	var def := character.held_def()
+	if def == null:
+		return
+	var ads := _equipment().ads if _equipment() else 0.0
+	var p := deg_to_rad(float(def.stat("recoil_pitch_deg", 2.0))) * lerpf(1.0, 0.6, ads)
+	var y := deg_to_rad(float(def.stat("recoil_yaw_deg", 0.5))) * randf_range(-1.0, 1.0)
+	character.input_source.add_aim_offset(y * 0.3, p * 0.3)
+	kick(p * 0.7, y * 0.7)
+	if character.input_source is LocalInputSource:
+		(character.input_source as LocalInputSource).rumble(0.3, 0.15, 0.08)
+
+
+func _equipment() -> UltraEquipmentVisual:
+	return character.get_node_or_null("Equipment") as UltraEquipmentVisual
 
 
 var _eye_sk_cached := Vector3.ZERO
@@ -157,7 +178,14 @@ func _process(delta: float) -> void:
 
 	global_position = fp_pos.lerp(tp_pos, t)
 	camera.global_transform = Transform3D(rot * Basis(Vector3.BACK, roll), global_position)
-	camera.fov = cam_profile.fov + float(_fov.value)
+	var eq := _equipment()
+	var ads := eq.ads if eq else 0.0
+	if eq:
+		eq.camera = camera if t < 0.5 else null
+	var ads_fov := float(character.held_def().stat("ads_fov", cam_profile.fov)) if character.held_def() else cam_profile.fov
+	camera.fov = lerpf(cam_profile.fov + float(_fov.value), ads_fov, smoothstep(0.0, 1.0, ads))
+	if src is LocalInputSource:
+		(src as LocalInputSource).sens_mult = lerpf(1.0, UltraInputSettings.f("ads_sensitivity_mult"), ads)
 	camera.near = lerpf(cam_profile.near, 0.08, t)
 	var first_person := tp_blend < 0.15
 	camera.cull_mask = UltraLayers.camera_cull_mask(view_index, first_person)

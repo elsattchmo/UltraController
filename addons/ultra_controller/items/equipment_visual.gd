@@ -1,0 +1,166 @@
+class_name UltraEquipmentVisual
+extends Node
+## Shows what a character holds and carries: the held item in the right hand (at its fitted
+## grip), a firearm that isn't drawn on the hip holster, the left hand on the support grip,
+## and aim-down-sights (moves the gun so its sights line up with the camera, first person).
+## Presentation only; reads MotorState + Inventory, never writes them.
+
+var character: UltraCharacter
+var hand_attach: BoneAttachment3D
+var hip_attach: BoneAttachment3D
+var held_node: Node3D                 ## instance of the held item's equip_scene
+var holster_node: Node3D
+var held_def: ItemDefinition
+var ads := 0.0                        ## 0..1, presentation blend
+var camera: Camera3D                  ## set for the local first-person viewer
+
+var _held_uid := -1
+var _holster_uid := -1
+var _slide_kick := 0.0
+var _mag_hidden := false
+var _recoil := UltraSpring.new(Vector3.ZERO, 6.0, 0.55)
+var _fp_w := 0.0
+var _owns := [false, false]          ## hand IK goals we set (never release someone else's)
+
+
+func setup(c: UltraCharacter) -> void:
+	character = c
+	# After the camera rig (priority 100): first-person gun targets use this frame's camera.
+	process_priority = 110
+	var sk := c.skeleton
+	hand_attach = BoneAttachment3D.new()
+	hand_attach.name = "RightHandAttach"
+	hand_attach.bone_name = "RightHand"
+	sk.add_child(hand_attach)
+	hip_attach = BoneAttachment3D.new()
+	hip_attach.name = "HipAttach"
+	hip_attach.bone_name = "Hips"
+	sk.add_child(hip_attach)
+	c.item_event.connect(_on_item_event)
+
+
+func _process(delta: float) -> void:
+	if character == null:
+		return
+	var s := character.state
+	# --- held item
+	if s.held_uid != _held_uid:
+		_held_uid = s.held_uid
+		if held_node:
+			held_node.queue_free()
+			held_node = null
+		held_def = ItemDB.by_index(s.equipped)
+		if held_def and held_def.equip_scene:
+			held_node = held_def.equip_scene.instantiate() as Node3D
+			hand_attach.add_child(held_node)
+			held_node.transform = held_def.grip_offset
+			_set_layers(held_node)
+	# --- holster: first firearm in the inventory that isn't in hand
+	var hol := _holster_item()
+	var hol_uid := hol.uid if hol else 0
+	if hol_uid != _holster_uid:
+		_holster_uid = hol_uid
+		if holster_node:
+			holster_node.queue_free()
+			holster_node = null
+		if hol and hol.def().equip_scene:
+			holster_node = hol.def().equip_scene.instantiate() as Node3D
+			hip_attach.add_child(holster_node)
+			holster_node.transform = hol.def().holster_offset
+	# --- slide blowback + magazine during reload
+	_slide_kick = move_toward(_slide_kick, 0.0, delta * 0.6)
+	if held_node:
+		var slide := held_node.find_child("Slide", true, false) as Node3D
+		if slide:
+			if not slide.has_meta("rest"):
+				slide.set_meta("rest", slide.position)
+			slide.position = (slide.get_meta("rest") as Vector3) + Vector3(0, 0, -minf(_slide_kick, 0.03))
+		var mag := held_node.find_child("Magazine", true, false) as Node3D
+		if mag:
+			var hide := s.action == UltraActionLayer.Action.RELOADING and s.action_t > 0.35 and s.action_t < float(held_def.stat("reload_commit", 1.5)) - 0.2
+			mag.visible = not hide
+	_drive_hands(delta)
+
+
+func _holster_item() -> ItemInstance:
+	var inv := character.inventory
+	if inv == null:
+		return null
+	for i in Inventory.HOTBAR:
+		var it := inv.get_slot(i)
+		if it and it.uid != character.state.held_uid and it.def() and it.def().can_equip(ItemDefinition.EquipSlot.HIP):
+			return it
+	return null
+
+
+## Left hand on the support grip; right hand aims down sights (first person, local viewer).
+func _drive_hands(delta: float) -> void:
+	var anim := character.anim
+	if anim == null or anim.hand_ik == null:
+		return
+	var s := character.state
+	var ready := held_node != null and s.action == UltraActionLayer.Action.READY
+	var aiming := ready and character.last_input.has(InputFrame.B_SECONDARY) and held_def and held_def.kind == ItemDefinition.Kind.FIREARM
+	ads = move_toward(ads, 1.0 if aiming else 0.0, delta * 6.0)
+	_recoil.target = Vector3.ZERO
+	_recoil.step(delta)
+	var gun := held_node.global_transform if held_node else Transform3D()
+	# First person: the gun pose comes from the camera (the real arms follow by IK), so it
+	# always points at the crosshair. Hip pose low-right, ADS puts the sights on the view ray.
+	var fp_drive := camera != null and held_node != null and ready and held_def.kind == ItemDefinition.Kind.FIREARM
+	_fp_w = move_toward(_fp_w, 1.0 if fp_drive else 0.0, delta * 4.0)
+	if camera and held_node and _fp_w > 0.001:
+		var rear := UltraPoseSampler.marker(held_node, "M_RearSight")
+		var cam := camera.global_transform
+		var fwd := -cam.basis.z
+		var right := cam.basis.x
+		var cup := cam.basis.y
+		var aim_basis := Basis.looking_at(fwd, cup)
+		# Hip: low and to the right, toed in a touch so it converges on the crosshair ~20 m out.
+		var hip_pos := cam.origin + fwd * 0.42 + right * 0.16 + cup * -0.17
+		var hip_basis := Basis.looking_at((cam.origin + fwd * 20.0) - hip_pos, cup)
+		var hip_gun := Transform3D(hip_basis, hip_pos - hip_basis * rear.origin)
+		var ads_gun := Transform3D(aim_basis, cam.origin + fwd * 0.37 - aim_basis * rear.origin)
+		var e := smoothstep(0.0, 1.0, ads)
+		var target_gun := hip_gun.interpolate_with(ads_gun, e)
+		target_gun.origin += target_gun.basis * (_recoil.value as Vector3) * lerpf(1.0, 0.5, e)
+		target_gun.basis = target_gun.basis * Basis(Vector3.RIGHT, (_recoil.value as Vector3).y * 0.25)
+		var hand_target := target_gun * held_def.grip_offset.affine_inverse()
+		var w := smoothstep(0.0, 1.0, _fp_w)
+		anim.hand_ik.set_goal(HandIKModifier.Hand.RIGHT, hand_target, w, true, 40.0)
+		_owns[HandIKModifier.Hand.RIGHT] = true
+		gun = gun.interpolate_with(target_gun, w)
+	elif _owns[HandIKModifier.Hand.RIGHT]:
+		anim.hand_ik.release(HandIKModifier.Hand.RIGHT, 8.0)
+		_owns[HandIKModifier.Hand.RIGHT] = false
+	# Support hand follows the gun wherever it goes.
+	if ready and held_def and held_def.two_handed and held_def.support_offset != Transform3D.IDENTITY:
+		anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, gun * held_def.support_offset, 1.0, true, 10.0)
+		_owns[HandIKModifier.Hand.LEFT] = true
+	elif _owns[HandIKModifier.Hand.LEFT]:
+		anim.hand_ik.release(HandIKModifier.Hand.LEFT, 8.0)
+		_owns[HandIKModifier.Hand.LEFT] = false
+
+
+func _on_item_event(kind: StringName, _data: Dictionary) -> void:
+	if kind == &"fire":
+		_slide_kick = 0.045
+		_recoil.impulse(Vector3(0, 0.35, 1.2))
+
+
+## Held item in first person: same layers as the body so it's never culled.
+func _set_layers(n: Node) -> void:
+	for c in n.find_children("*", "VisualInstance3D", true, false):
+		(c as VisualInstance3D).layers = 1
+
+
+func muzzle_transform() -> Transform3D:
+	if held_node == null:
+		return character.visual_root.global_transform
+	return held_node.global_transform * UltraPoseSampler.marker(held_node, "M_Muzzle")
+
+
+func eject_transform() -> Transform3D:
+	if held_node == null:
+		return muzzle_transform()
+	return held_node.global_transform * UltraPoseSampler.marker(held_node, "M_EjectPort")
