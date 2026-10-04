@@ -55,6 +55,7 @@ const ACTIONS := {
 	"debug_scenarios": [0.5, ["key:F5"]],
 	"debug_slowmo": [0.5, ["key:F6"]],
 	"debug_freecam": [0.5, ["key:F7"]],
+	"companion": [0.5, ["key:F8", "joy:11"]],
 }
 
 

@@ -146,6 +146,47 @@ func add_local_player(name := "") -> void:
 		_send_reliable(1, _c2s_add_local, [idx, name])
 
 
+## Server: add an AI-driven player (companions, scenario bots). Returns it; drive it through
+## its BotInputSource (`p.character.input_source`).
+func spawn_bot(bot_name := "Helper", at := Transform3D.IDENTITY) -> NetPlayer:
+	if not is_server():
+		return null
+	var p := NetPlayer.new()
+	p.id = _next_player_id
+	_next_player_id += 1
+	p.peer_id = multiplayer.get_unique_id()
+	p.local_index = -1
+	p.display_name = bot_name
+	p.is_bot = true
+	p.role = NetPlayer.Role.AUTHORITY_LOCAL
+	var c: UltraCharacter = character_factory.call(p)
+	c.name = "Bot_%d" % p.id
+	c.self_simulate = false
+	var src := BotInputSource.new()
+	src.name = "InputSource"
+	c.add_child(src)
+	c.input_source = src
+	c.position = at.origin
+	c.rotation.y = at.basis.get_euler().y
+	c.net_role = p.role
+	c.net_id = p.id
+	c.quantize_state = true
+	(world_root if world_root else get_tree().current_scene).add_child(c)
+	src.body = c
+	p.character = c
+	c.state.quantize()
+	players[p.id] = p
+	for peer in _remote_peers():
+		_send_reliable(peer, _s2c_spawn, [p.id, p.peer_id, p.local_index, p.display_name, _state_bytes(c.state)])
+	player_added.emit(p)
+	return p
+
+
+func despawn_bot(id: int) -> void:
+	if is_server() and players.has(id) and (players[id] as NetPlayer).is_bot:
+		_server_remove_player(id)
+
+
 func remove_local_player(local_index: int) -> void:
 	for p in local_players:
 		if p.local_index == local_index:
@@ -332,6 +373,12 @@ func _server_step(dt: float) -> void:
 
 				p.last_processed_tick = f.tick
 				p.processed += 1
+	var holders: Array = []
+	for p: NetPlayer in players.values():
+		if is_instance_valid(p.character) and p.character.state.held_id != 0:
+			holders.append(p.character)
+	if not holders.is_empty():
+		UltraGrab.server_tick(holders, dt)
 	world.record_history(server_tick)
 	world.flush_dirty()
 	if server_tick % SNAPSHOT_EVERY == 0:

@@ -55,6 +55,9 @@ var fire_cd: float = 0.0
 var mag: int = 0
 var fire_seq: int = 0              ## +1 per shot (remote clients play effects on change)
 var hp: float = 100.0
+var throw_charge: float = 0.0      ## 0..1 while the throw button is held with a prop
+var held_grip: int = -1            ## team lift: which grip point we hold
+var team_share: float = 1.0        ## team lift: our share of the load (server)
 
 
 func has(f: int) -> bool:
@@ -88,6 +91,7 @@ func copy_from(o: MotorState) -> void:
 	platform_id = o.platform_id; platform_local = o.platform_local
 	held_uid = o.held_uid; equipped = o.equipped; action = o.action; action_t = o.action_t
 	fire_cd = o.fire_cd; mag = o.mag; fire_seq = o.fire_seq; hp = o.hp
+	throw_charge = o.throw_charge; held_grip = o.held_grip; team_share = o.team_share
 
 
 ## Error metric used by reconciliation (metres, plus a penalty for discrete mismatches).
@@ -134,6 +138,10 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_u8(clampi(mag, 0, 255))
 	buf.put_u8(fire_seq & 255)
 	buf.put_u16(clampi(int(roundf(hp * 10.0)), 0, 65535))
+	buf.put_u8(clampi(int(roundf(throw_charge * 255.0)), 0, 255))
+	buf.put_8(held_grip)
+	buf.put_u8(clampi(int(roundf(team_share * 255.0)), 0, 255))
+	buf.put_u16(clampi(int(roundf(carry_mult * 1000.0)), 0, 65535))
 
 
 func decode(buf: StreamPeerBuffer) -> void:
@@ -169,6 +177,10 @@ func decode(buf: StreamPeerBuffer) -> void:
 	mag = buf.get_u8()
 	fire_seq = buf.get_u8()
 	hp = buf.get_u16() / 10.0
+	throw_charge = buf.get_u8() / 255.0
+	held_grip = buf.get_8()
+	team_share = buf.get_u8() / 255.0
+	carry_mult = buf.get_u16() / 1000.0
 
 
 ## Round-trip through the codec, so a predicting client and the server hold the same bits.

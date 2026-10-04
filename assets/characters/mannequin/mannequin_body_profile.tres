@@ -2,17 +2,11 @@
 
 [ext_resource type="Resource" path="res://assets/characters/mannequin/mannequin_animset.tres" id="1_xgtje"]
 [ext_resource type="PackedScene" path="res://assets/characters/mannequin/mannequin.glb" id="2_e5be1"]
-[ext_resource type="AnimationLibrary" path="res://assets/characters/mannequin/anims/mixamo.res" id="3_axlxm"]
 [ext_resource type="AnimationLibrary" path="res://assets/characters/mannequin/anims/ual.res" id="3_rmh8l"]
 [ext_resource type="Script" path="res://addons/ultra_controller/core/body_profile.gd" id="4_axlxm"]
-[ext_resource type="AnimationLibrary" path="res://assets/characters/mannequin/anims/blender.res" id="4_cncxb"]
 
 [resource]
 script = ExtResource("4_axlxm")
 body_scene = ExtResource("2_e5be1")
 anim_set = ExtResource("1_xgtje")
 library = ExtResource("3_rmh8l")
-extra_libraries = {
-"blender": ExtResource("4_cncxb"),
-"mixamo": ExtResource("3_axlxm")
-}

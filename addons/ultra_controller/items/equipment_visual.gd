@@ -21,6 +21,8 @@ var _mag_hidden := false
 var _recoil := UltraSpring.new(Vector3.ZERO, 6.0, 0.55)
 var _fp_w := 0.0
 var _owns := [false, false]          ## hand IK goals we set (never release someone else's)
+var _prop: RigidBody3D
+var _owns_prop := false
 
 
 func setup(c: UltraCharacter) -> void:
@@ -80,6 +82,49 @@ func _process(delta: float) -> void:
 			var hide := s.action == UltraActionLayer.Action.RELOADING and s.action_t > 0.35 and s.action_t < float(held_def.stat("reload_commit", 1.5)) - 0.2
 			mag.visible = not hide
 	_drive_hands(delta)
+	_drive_held_prop(delta)
+
+
+## Hands on a held prop; the owner's own client shows the predicted hold (the server's
+## version arrives ~100 ms later through the prop stream).
+func _drive_held_prop(delta: float) -> void:
+	var s := character.state
+	var anim := character.anim
+	var o := UltraNet.world.get_object(s.held_id) if s.held_id != 0 else null
+	var rb := o.rigid() if o else null
+	if _prop != rb:
+		if _prop and is_instance_valid(_prop):
+			var po := _prop.find_child("NetObject", false, false)
+			if po:
+				po.set_meta("held_locally", false)
+		_prop = rb
+	if rb == null:
+		if _owns_prop:
+			anim.hand_ik.release(HandIKModifier.Hand.LEFT, 6.0)
+			anim.hand_ik.release(HandIKModifier.Hand.RIGHT, 6.0)
+			_owns_prop = false
+		return
+	if character.net_role == UltraCharacter.ROLE_PREDICTED and s.held_grip < 0:
+		o.set_meta("held_locally", true)
+		var target := UltraGrab.hold_target(character, rb)
+		rb.global_position = rb.global_position.lerp(target, 1.0 - exp(-18.0 * delta))
+	# Hands on the sides (or on the team-lift grip).
+	var xf := rb.global_transform
+	var half := 0.18
+	for n in rb.get_children():
+		if n is CollisionShape3D and (n as CollisionShape3D).shape is BoxShape3D:
+			half = ((n as CollisionShape3D).shape as BoxShape3D).size.x * 0.5
+	var right := character.visual_root.global_basis.x
+	var center := xf.origin
+	if s.held_grip >= 0:
+		var grips := UltraGrab.grip_points(rb)
+		if s.held_grip < grips.size():
+			center = grips[s.held_grip].global_position
+			half = 0.2
+	var hand_rot := character.visual_root.global_basis
+	anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, Transform3D(hand_rot, center - right * (half + 0.03)), 1.0, false, 8.0)
+	anim.hand_ik.set_goal(HandIKModifier.Hand.RIGHT, Transform3D(hand_rot, center + right * (half + 0.03)), 1.0, false, 8.0)
+	_owns_prop = true
 
 
 func _holster_item() -> ItemInstance:

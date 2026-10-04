@@ -19,6 +19,7 @@ const B_LEAN_R := 1 << 11
 const B_VIEW_TP := 1 << 12      ## state bit: player is in third person (affects rotation mode)
 const B_CRAWL := 1 << 13        ## state bit: toggled crawl (double-tap crouch)
 const B_DODGE := 1 << 14
+const B_GRAB := 1 << 15         ## interact held: grab physically instead of picking up / using
 
 const ENCODED_SIZE := 17
 

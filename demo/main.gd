@@ -27,6 +27,8 @@ var effects: UltraEffects
 var headless := false
 var _title_t := 0.0
 var _pause: Node
+var _companion: NetPlayer
+var _companion_brain: UltraCompanion
 
 
 func _ready() -> void:
@@ -202,8 +204,24 @@ func _unhandled_input(event: InputEvent) -> void:
 		_pause.resumed.connect(func() -> void: _pause = null)
 		add_child(_pause)
 		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed(UltraInput.action(&"companion")):
+		toggle_companion()
 	elif event.is_action_pressed(UltraInput.action(&"debug_slowmo")):
 		Engine.time_scale = 0.25 if Engine.time_scale > 0.5 else 1.0
+
+
+## Summon / dismiss a helper bot that follows you and takes the other end of heavy things.
+func toggle_companion() -> void:
+	if not UltraNet.is_server() or player == null:
+		return
+	if _companion:
+		UltraNet.despawn_bot(_companion.id)
+		_companion = null
+		return
+	var at := player.global_transform.translated(player.global_basis * Vector3(1.5, 0, 1.5))
+	_companion = UltraNet.spawn_bot("Helper", at)
+	if _companion:
+		_companion_brain = UltraCompanion.new(_companion.character, player)
 
 
 func _quit() -> void:

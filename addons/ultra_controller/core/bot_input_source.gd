@@ -23,6 +23,22 @@ var _step_tick := 0
 var _done := false
 
 
+## Net id of the nearest enabled Interactable within 3 m of the body (bots' "look at it").
+func _nearest_interactable() -> int:
+	if body == null:
+		return 0
+	var best := 0
+	var bd := 3.0
+	for n in body.get_tree().get_nodes_in_group(&"ultra_interactable"):
+		var it := n as Interactable
+		if it.enabled and it.target():
+			var d := it.target().global_position.distance_to(body.global_position)
+			if d < bd and it.net_id() != 0:
+				bd = d
+				best = it.net_id()
+	return best
+
+
 func is_done() -> bool:
 	return _done
 
@@ -65,6 +81,8 @@ func sample(tick: int) -> InputFrame:
 		if s.has("slot"):
 			want_slot = int(s["slot"])
 		f.target_id = int(s.get("target", 0))
+		if f.target_id == -1:
+			f.target_id = _nearest_interactable()
 		if _step_tick == 0:
 			f.buttons |= int(s.get("tap", 0))
 		_step_tick += 1

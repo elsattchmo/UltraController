@@ -66,7 +66,14 @@ enum View { FIRST_PERSON, THIRD_PERSON }
 @export_range(0.3, 1.2, 0.01) var crawl_height := 0.7
 @export_range(0.02, 0.6, 0.01) var stance_transition := 0.14
 @export_range(20, 300, 1) var mass := 80.0
-@export_range(0, 2000, 10) var push_strength := 350.0
+## Pushing force against rigid bodies (N). Friction decides what actually slides.
+@export_range(0, 2000, 10) var push_strength := 420.0
+## Up to this mass you hold things out in front (one-handed feel, can jump).
+@export_range(1, 200, 0.5) var lift_limit := 25.0
+## Heaviest thing you can carry alone (two hands, slow, no jumping). Heavier: push or team up.
+@export_range(1, 300, 1) var carry_capacity := 60.0
+## Maximum holding force (N); gravity compensation counts against it.
+@export_range(100, 5000, 10) var strength_n := 1100.0
 @export var character_collision := CharacterCollision.SOFT
 ## Separation speed when two characters overlap (SOFT).
 @export_range(0, 10, 0.1) var separation_speed := 2.5

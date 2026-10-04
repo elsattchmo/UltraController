@@ -15,6 +15,9 @@ var id: int = 0
 var peer_id: int = 1
 var local_index: int = 0          ## index among the owning peer's local players
 var display_name := ""
+## Server-side AI player (companion, scenario bot): simulated like a local authority player
+## but never given a camera or local input.
+var is_bot := false
 var role: int = Role.AUTHORITY_LOCAL
 var character: UltraCharacter
 
@@ -51,7 +54,7 @@ func _init() -> void:
 
 
 func is_local() -> bool:
-	return role == Role.AUTHORITY_LOCAL or role == Role.PREDICTED
+	return not is_bot and (role == Role.AUTHORITY_LOCAL or role == Role.PREDICTED)
 
 
 func record(tick: int, input: InputFrame, after: MotorState) -> void:

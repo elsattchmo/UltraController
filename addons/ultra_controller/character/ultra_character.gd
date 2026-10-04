@@ -154,6 +154,8 @@ func _physics_process(delta: float) -> void:
 	TickPlatform.set_all(tick)
 	platform_tick = tick
 	simulate(input_source.sample(tick), delta)
+	if state.held_id != 0:
+		UltraGrab.server_tick([self], delta)
 
 
 ## One simulation tick. Used directly (single-player) and by the net layer. `replaying` is
@@ -250,10 +252,13 @@ func _process(delta: float) -> void:
 		anim.land_impact = state.land_impact
 		anim.on_platform = state.platform_id != 0
 		anim.aim_weight = 1.0 if faces_aim() else 0.0
-		anim.held_def = held_def()
+		anim.held_def = UltraGrab.CARRY_DEF if state.held_id != 0 else held_def()
 		anim.item_action = state.action
 		var sprinting := state.has(MotorState.F_SPRINTING) and Vector2(state.vel.x, state.vel.z).length() > profile.jog_speed * 0.9
 		anim.item_ready_pose = 0.0 if sprinting or state.action != UltraActionLayer.Action.READY else 1.0
+		if state.held_id != 0:
+			anim.item_action = UltraActionLayer.Action.READY
+			anim.item_ready_pose = 1.0
 		anim.accel = _accel
 
 

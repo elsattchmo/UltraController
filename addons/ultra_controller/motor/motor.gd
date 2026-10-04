@@ -42,6 +42,7 @@ var floor_normal := Vector3.UP
 
 var _handlers := {}
 var _sep_query: PhysicsShapeQueryParameters3D
+var _pre_move_vel := Vector3.ZERO
 var _state_scripts := {}
 var _capsule: CapsuleShape3D
 
@@ -337,6 +338,7 @@ func move(s: MotorState, allow_step: bool) -> void:
 	var fall_speed := -body.velocity.y
 	if allow_step and was_grounded:
 		_try_step_up()
+	_pre_move_vel = body.velocity
 	body.move_and_slide()
 	_push_bodies()
 	var grounded := body.is_on_floor()
@@ -386,22 +388,31 @@ func _try_step_up() -> void:
 
 
 func _push_bodies() -> void:
+	# Velocity-matching push: try to bring the body up to our approach speed along the
+	# contact normal, limited by push force. Friction and mass decide what really slides;
+	# we end up moving at the body's pace because it's in the way.
 	for i in body.get_slide_collision_count():
 		var c := body.get_slide_collision(i)
 		var rb := c.get_collider() as RigidBody3D
 		if rb == null or rb.freeze:
 			continue
 		var n := -c.get_normal()
-		n.y = maxf(n.y, 0.0) * 0.2
-		var share := clampf(profile.mass / maxf(rb.mass, 0.1), 0.0, 1.5)
-		if apply_pushes:
-			rb.apply_impulse(n * profile.push_strength * dt * share, c.get_position() - rb.global_position)
-		# Heavy things push back: lose speed proportional to their mass.
-		var keep := profile.mass / (profile.mass + rb.mass)
-		var hv := horizontal(body.velocity)
-		var into := hv.dot(n)
-		if into > 0.0:
-			body.velocity -= n * into * (1.0 - keep) * 0.5
+		n.y = 0.0
+		if n.length() < 0.3:
+			continue                                  # standing on it, not pushing it
+		n = n.normalized()
+		var into := horizontal(_pre_move_vel).dot(n)
+		if into <= 0.05:
+			continue
+		var vb := rb.linear_velocity.dot(n)
+		var need := (into - vb) * rb.mass
+		var j := clampf(need, 0.0, profile.push_strength * dt)
+		if apply_pushes and j > 0.0:
+			rb.apply_impulse(n * j, c.get_position() - rb.global_position)
+		# The slide stopped us at the contact; keep moving at the pace we're shoving it.
+		var follow := minf(vb + j / rb.mass, into)
+		if follow > 0.0:
+			body.velocity += n * follow
 
 
 func gravity_for(s: MotorState, input: InputFrame) -> float:
@@ -415,6 +426,8 @@ func gravity_for(s: MotorState, input: InputFrame) -> float:
 
 
 func can_jump(s: MotorState) -> bool:
+	if s.held_id != 0 and s.held_mass * s.team_share > profile.lift_limit:
+		return false                              # can't hop with a heavy load
 	return s.jump_buf_t > 0.0 and (s.is_grounded() or s.coyote_t > 0.0)
 
 

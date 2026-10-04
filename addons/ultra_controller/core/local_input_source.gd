@@ -39,6 +39,8 @@ var _sprint_toggled := false
 var _crawl := false
 var _last_crouch_press := -10.0
 var _prev_pressed := {}        # action -> bool, for edge detection in _process
+var _interact_t := -1.0        # seconds interact has been held (-1 = up)
+var _interact_pulse := 0       # InputFrame bit to send on the next sample (tap / hold)
 
 
 func claims(device: String) -> bool:
@@ -131,6 +133,19 @@ func _process(delta: float) -> void:
 			_crouch_toggled = not _crouch_toggled
 			_crawl = false
 		_last_crouch_press = now
+	# Interact: a tap uses / picks up, holding past `hold_time` grabs physically.
+	var held_i := pressed(&"interact")
+	if held_i:
+		if _interact_t < 0.0:
+			_interact_t = 0.0
+		elif _interact_t >= 0.0:
+			_interact_t += delta
+			if _interact_t >= UltraInputSettings.f("hold_time") and _interact_t - delta < UltraInputSettings.f("hold_time"):
+				_interact_pulse |= InputFrame.B_GRAB
+	elif _interact_t >= 0.0:
+		if _interact_t < UltraInputSettings.f("hold_time"):
+			_interact_pulse |= InputFrame.B_INTERACT
+		_interact_t = -1.0
 	if _just_pressed(&"sprint") and UltraInputSettings.b("toggle_sprint"):
 		_sprint_toggled = not _sprint_toggled
 	for n in 9:
@@ -176,7 +191,9 @@ func sample(tick: int) -> InputFrame:
 	if pressed(&"sprint") or _sprint_toggled: b |= InputFrame.B_SPRINT
 	if f.move.length() < 0.1: _sprint_toggled = false
 	if pressed(&"walk"): b |= InputFrame.B_WALK
-	if pressed(&"interact"): b |= InputFrame.B_INTERACT
+	# interact / grab are pulses (tap vs hold), held for exactly one tick
+	b |= _interact_pulse
+	_interact_pulse = 0
 	if pressed(&"primary"): b |= InputFrame.B_PRIMARY
 	if pressed(&"secondary"): b |= InputFrame.B_SECONDARY
 	if pressed(&"throw"): b |= InputFrame.B_THROW

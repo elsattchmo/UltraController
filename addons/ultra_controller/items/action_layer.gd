@@ -12,9 +12,10 @@ enum Action { NONE, EQUIPPING, READY, RELOADING, HOLSTERING, USING }
 static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, replaying: bool) -> void:
 	s.fire_cd = maxf(s.fire_cd - dt, 0.0)
 	s.action_t += dt
+	UltraGrab.step(c, s, i, dt, replaying)
 	var inv := c.inventory
 	var want_uid := 0
-	if inv and i.want_slot > 0:
+	if inv and i.want_slot > 0 and s.held_id == 0:      # hands full: weapon stays away
 		var it := inv.get_slot(i.want_slot - 1)
 		if it and it.def() and it.def().can_equip(ItemDefinition.EquipSlot.MAIN_HAND):
 			want_uid = it.uid

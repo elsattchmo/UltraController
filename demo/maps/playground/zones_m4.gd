@@ -48,6 +48,10 @@ func _world_item(parent: Node, scene_path: String, pos: Vector3, count := 1) -> 
 
 
 func _crate(parent: Node, n: String, mass: float, pos: Vector3) -> void:
+	var it := Interactable.new()
+	it.name = "Interactable"
+	it.kind = Interactable.Kind.GRAB if mass <= 25.0 else Interactable.Kind.CARRY
+	it.prompt = "Carry (%d kg)" % int(mass)
 	var rb := RigidBody3D.new()
 	rb.name = n
 	rb.mass = mass
@@ -55,6 +59,9 @@ func _crate(parent: Node, n: String, mass: float, pos: Vector3) -> void:
 	rb.collision_mask = UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC | UltraLayers.CHARACTER
 	var sz := 0.45 + pow(mass, 1.0 / 3.0) * 0.08
 	rb.position = pos + Vector3(0, sz * 0.5 + 0.01, 0)
+	var pm := PhysicsMaterial.new()
+	pm.friction = 0.45
+	rb.physics_material_override = pm
 	var mi := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = Vector3.ONE * sz
@@ -69,6 +76,8 @@ func _crate(parent: Node, n: String, mass: float, pos: Vector3) -> void:
 	var no := NetObject.new()
 	no.name = "NetObject"
 	rb.add_child(no)
+	rb.add_child(it)
+	rb.collision_layer |= UltraLayers.INTERACTABLE
 	parent.add_child(rb)
 	b._own(rb)
 	b._label(parent, "%d kg" % int(mass), rb.position + Vector3(0, sz * 0.5 + 0.3, 0), 40)

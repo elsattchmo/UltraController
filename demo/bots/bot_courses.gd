@@ -20,6 +20,17 @@ static func get_course(name: String) -> Array:
 			out.append({"ticks": 2, "slot": 1, "buttons": InputFrame.B_SECONDARY, "tap": InputFrame.B_PRIMARY})
 			out.append({"ticks": 40, "slot": 0})
 			return out
+		"carry":
+			# Grab whatever is nearest, wander with it, throw it, repeat.
+			return [
+				{"ticks": 20},
+				{"ticks": 2, "target": -1, "tap": InputFrame.B_GRAB},
+				{"ticks": 90, "move": Vector2(0, 0.7), "yaw_rate": 0.8},
+				{"ticks": 60, "move": Vector2(0.6, 0), "pitch": 0.2},
+				{"ticks": 45, "buttons": InputFrame.B_THROW, "pitch": 0.3},
+				{"ticks": 30},
+				{"ticks": 60, "move": Vector2(0, -0.6)},
+			]
 		"walk_short":
 			# Ride whatever we spawned on: stand, shuffle a little, jump once.
 			return [{"ticks": 240}, {"ticks": 30, "move": Vector2(0, 0.3)}, {"ticks": 2, "tap": InputFrame.B_JUMP}, {"ticks": 300}]
