@@ -42,6 +42,16 @@ var on_platform := false
 var climb_speed := 0.0
 var climb_kind := 0
 var climb_duration := 0.6
+## Injuries: limp severity 0..1 and which leg; hunch from a hurt torso.
+var limp := 0.0
+var limp_left := true
+var injury_hunch := 0.0
+## The weapon is in the left hand (right arm out of action): item clips play mirrored.
+var item_left := false
+var _item_left_for := false
+var _bad_stance := false
+var _lfoot := -1
+var _rfoot := -1
 ## Held item presentation (set by the character).
 var held_def: ItemDefinition
 var item_action := 0
@@ -299,6 +309,8 @@ func _build() -> AnimationNodeBlendTree:
 	dive.connect_node("rate", 0, "clip")
 	dive.connect_node("output", 0, "rate")
 	loco.add_node("dive", dive, Vector2(1200, 500))
+	# --- down and up again (the ragdoll covers the fall; this is the pose it fades into)
+	loco.add_node("getup", _anim(&"get_up", false), Vector2(1400, 400))
 
 	# --- root motion one-shots (clip swapped at runtime); two slots so back-to-back moves blend
 	for n in ["rm_a", "rm_b"]:
@@ -307,7 +319,7 @@ func _build() -> AnimationNodeBlendTree:
 		loco.add_node(n, a, Vector2(800, 200))
 
 	# Fully connected so travel() always crossfades directly.
-	var names := ["ground", "crouch", "crawl", "air", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b", "climb", "vault", "hang", "ladder", "pipe", "wall", "rope", "swim", "dive"]
+	var names := ["ground", "crouch", "crawl", "air", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b", "climb", "vault", "hang", "ladder", "pipe", "wall", "rope", "swim", "dive", "getup"]
 	for a_name in names:
 		for b_name in names:
 			if a_name == b_name:
@@ -448,6 +460,10 @@ func _drive_state(speed: float) -> void:
 			want = "swim"
 		Id.DIVE:
 			want = "dive"
+		Id.RAGDOLL, Id.DEAD:
+			want = "fall"
+		Id.GET_UP:
+			want = "getup"
 	if want == "rm":
 		if rm_clip != _cur_rm:
 			var curve := anim_set.rm_curve(rm_clip)
@@ -466,6 +482,10 @@ func _drive_state(speed: float) -> void:
 		# A ledge climb-up starts with the hands already high (about a third into the clip).
 		tree.set(LOCO + "climb/seek/seek_request", 0.22 if state == MotorState.Id.LEDGE_CLIMB else 0.0)
 		tree.set(LOCO + "climb/speed/scale", 0.6 / maxf(climb_duration, 0.2))
+	if want == "getup" and _cur_loco != "getup":
+		_loco.start("getup", true)
+		_cur_loco = want
+		return
 	if want != _cur_loco:
 		if want in ["air", "land", "land_heavy"]:
 			_loco.travel(want)
@@ -502,6 +522,18 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	var rate := 1.0
 	if clamped.length() > 0.01:
 		rate = clampf(speed / clamped.length(), 1.0, 2.4 if backwards else 1.4)
+	# Limp: the cycle hurries through the bad leg's stance (short step) and lingers on the good
+	# one, so the asymmetry comes from the real clip's timing rather than an overlay.
+	if limp > 0.0 and moving and skeleton:
+		if _lfoot < 0:
+			_lfoot = skeleton.find_bone("LeftFoot")
+			_rfoot = skeleton.find_bone("RightFoot")
+		var ly := skeleton.get_bone_global_pose(_lfoot).origin.y
+		var ry := skeleton.get_bone_global_pose(_rfoot).origin.y
+		_bad_stance = (ly < ry) == limp_left
+		rate *= (1.0 + 0.6 * limp) if _bad_stance else (1.0 - 0.25 * limp)
+	else:
+		_bad_stance = false
 	tree.set(LOCO + "ground/move/blend_position", clamped)
 	tree.set(LOCO + "ground/rate/scale", rate)
 	var idle_w := 1.0 - smoothstep(0.05, 0.45, speed)
@@ -564,6 +596,9 @@ func _drive_body(delta: float) -> void:
 	var target := Vector2(clampf(la.x * 0.022, -0.16, 0.16), clampf(la.y * 0.018, -0.12, 0.12))
 	if state in [MotorState.Id.JUMP, MotorState.Id.FALL, MotorState.Id.ROOT_MOTION, MotorState.Id.SWIM, MotorState.Id.DIVE]:
 		target = Vector2.ZERO
+	# Limp: weight off the bad leg (lean over the good one while the bad foot is down).
+	if limp > 0.0:
+		target.x += (1.0 if limp_left else -1.0) * limp * (0.11 if _bad_stance else 0.03)
 	var k := 60.0
 	var c := 2.0 * sqrt(k) * 0.7
 	_lean_vel += ((target - _lean) * k - _lean_vel * c) * delta
@@ -581,6 +616,7 @@ func _drive_body(delta: float) -> void:
 		foot_ik.lock_weight = 0.0 if on_platform else 1.0
 	modifier.lean_roll = _lean.x
 	modifier.lean_pitch = _lean.y
+	modifier.hunch = injury_hunch
 	modifier.warp_yaw = _warp
 	_aim_w = move_toward(_aim_w, aim_weight, delta * 4.0)
 	var yaw_off := clampf(-angle_difference(body_yaw, aim_yaw), -deg_to_rad(80.0), deg_to_rad(80.0))
@@ -599,10 +635,13 @@ func _drive_body(delta: float) -> void:
 
 
 func _drive_item(delta: float) -> void:
-	if held_def != _held_roles_for:
+	if held_def != _held_roles_for or item_left != _item_left_for:
 		_held_roles_for = held_def
+		_item_left_for = item_left
 		if held_def and not held_def.anim_roles.is_empty():
 			_set_item_clips(held_def.anim_roles)
+		elif modifier:
+			modifier.item_hips_yaw = NAN
 	var has_layer := held_def != null and not held_def.anim_roles.is_empty()
 	var want := 0.0
 	if has_layer:
@@ -625,10 +664,51 @@ func _set_item_clips(roles: Dictionary) -> void:
 	for node_name: String in pairs:
 		var role := StringName(roles.get(pairs[node_name], ""))
 		if role != &"":
-			(item.get_node(node_name) as AnimationNodeAnimation).animation = _clip(role)
+			(item.get_node(node_name) as AnimationNodeAnimation).animation = _mirrored(_clip(role)) if item_left else _clip(role)
+	if modifier:
+		modifier.item_hips_yaw = _hips_yaw((item.get_node("aim") as AnimationNodeAnimation).animation)
+
+
+## Hips yaw a clip was made with (skeleton space), from its first Hips rotation key.
+func _hips_yaw(clip: StringName) -> float:
+	var a := player.get_animation(clip) if player.has_animation(clip) else null
+	if a == null:
+		return NAN
+	for t in a.get_track_count():
+		if a.track_get_type(t) == Animation.TYPE_ROTATION_3D and String(a.track_get_path(t).get_concatenated_subnames()) == "Hips":
+			var q: Quaternion = a.rotation_track_interpolate(t, 0.0)
+			var z := Basis(q).z
+			return atan2(z.x, z.z)
+	return NAN
+
+
+## A left/right mirrored copy of a clip, made once and kept in the same library.
+func _mirrored(clip: StringName) -> StringName:
+	var s := String(clip)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var clip_name := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	if l == null or not l.has_animation(clip_name):
+		return clip
+	var mname := clip_name + "_M"
+	if not l.has_animation(mname):
+		l.add_animation(mname, UltraAnimMirror.mirror(l.get_animation(clip_name)))
+	return StringName((lib + "/" if lib != "" else "") + mname)
 
 
 ## Item events from the action layer (predicted locally, from snapshots remotely).
+## Hit reaction on the upper body: a head snap or a body jolt.
+func play_hit(head: bool) -> void:
+	if tree == null:
+		return
+	var root := tree.tree_root as AnimationNodeBlendTree
+	var src := root.get_node("hit_src") as AnimationNodeAnimation
+	var want := _clip(&"hit_head" if head else &"hit_chest")
+	if src.animation != want:
+		src.animation = want
+	tree.set("parameters/hit/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+
+
 func item_event(kind: StringName) -> void:
 	match kind:
 		&"fire":
@@ -639,7 +719,3 @@ func item_event(kind: StringName) -> void:
 			tree.set("parameters/upper_src/reload/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
 
 
-func play_hit(role: StringName) -> void:
-	var src := (tree.tree_root as AnimationNodeBlendTree).get_node("hit_src") as AnimationNodeAnimation
-	src.animation = _clip(role)
-	tree.set("parameters/hit/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)

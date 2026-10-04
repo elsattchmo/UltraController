@@ -16,8 +16,16 @@ var _shell_mat: StandardMaterial3D
 ## Characters controlled on this machine: their impacts were already predicted.
 var local_ids: Array[int] = []
 
+static var _current: UltraEffects
+
+
+## The effects node of the running world (null in tools / tests without one).
+static func instance() -> UltraEffects:
+	return _current if is_instance_valid(_current) else null
+
 
 func _ready() -> void:
+	_current = self
 	_flash_mat = _unshaded(Color(1.0, 0.75, 0.35), 4.0)
 	_tracer_mat = _unshaded(Color(1.0, 0.85, 0.5), 2.0)
 	_spark_mat = _unshaded(Color(1.0, 0.7, 0.3), 3.0)
@@ -62,13 +70,18 @@ func _on_item(c: UltraCharacter, kind: StringName, data: Dictionary) -> void:
 	if data.has("origin"):
 		var space := get_world_3d().direct_space_state
 		var to: Vector3 = data.origin + (data.dir as Vector3) * 120.0
-		var q := PhysicsRayQueryParameters3D.create(data.origin, to, UltraCombat.MASK, [c.get_rid()])
-		var hit := space.intersect_ray(q)
+		var ex: Array[RID] = [c.get_rid()]
+		if c.hit_volume:
+			ex.append(c.hit_volume.get_rid())
+		var q := PhysicsRayQueryParameters3D.create(data.origin, to, UltraCombat.MASK, ex)
+		var hit := UltraCombat._cast(space, q, data.origin, data.dir)   # same limb test as the server
 		var end: Vector3 = hit.position if not hit.is_empty() else to
 		tracer(muzzle.origin, end)
 		if not hit.is_empty():
-			if hit.collider is UltraCharacter:
-				blood(hit.position, hit.normal)
+			var who := UltraCharacter.of_collider(hit.collider)
+			if who:
+				if who.damage_profile.blood_on():
+					blood(hit.position, hit.normal)
 			else:
 				sparks(hit.position, hit.normal)
 	else:
@@ -84,10 +97,14 @@ func _on_impact(pos: Vector3, normal: Vector3, kind: StringName, shooter_id: int
 		sparks(pos, normal)
 
 
-func _on_hit(_target_id: int, pos: Vector3, _dir: Vector3, _amount: float, attacker_id: int) -> void:
+func _on_hit(target_id: int, pos: Vector3, dir: Vector3, amount: float, attacker_id: int, region := -1) -> void:
+	var c := UltraNet.world.character(target_id)
+	if c:
+		c.react_to_hit(region, dir, amount)
 	if attacker_id in local_ids:
 		return
-	blood(pos, Vector3.UP)
+	if c == null or c.damage_profile.blood_on():
+		blood(pos, -dir)
 
 
 func flash(at: Transform3D) -> void:

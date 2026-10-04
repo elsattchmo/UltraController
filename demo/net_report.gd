@@ -26,7 +26,8 @@ var _gone: Array[Dictionary] = []
 
 static func _summ(p: NetPlayer) -> Dictionary:
 	var pos := p.character.state.pos if is_instance_valid(p.character) else Vector3.ZERO
-	return {"id": p.id, "role": p.role, "processed": p.processed, "misses": p.misses, "pos": pos}
+	var limbs := UltraLimbs.describe(p.character.state) if is_instance_valid(p.character) else "-"
+	return {"id": p.id, "role": p.role, "processed": p.processed, "misses": p.misses, "pos": pos, "limbs": limbs, "name": p.display_name}
 
 
 var _shots := 0
@@ -115,6 +116,15 @@ func _finish() -> void:
 				if not _states_seen.has(st):
 					print("NETREPORT FAIL never entered %s" % st)
 					ok = false
+		if UltraArgs.has("expect-remote-injury"):
+			var hurt: Array[String] = []
+			for rp: NetPlayer in UltraNet.players.values():
+				if rp.role == NetPlayer.Role.INTERPOLATED and is_instance_valid(rp.character) and not UltraLimbs.is_whole(rp.character.state):
+					hurt.append("%s: %s" % [rp.display_name, UltraLimbs.describe(rp.character.state)])
+			print("NETREPORT remote injuries: %s" % ("; ".join(hurt) if not hurt.is_empty() else "none"))
+			if hurt.is_empty():
+				print("NETREPORT FAIL no injury reached this client")
+				ok = false
 		var want_remotes := UltraArgs.get_int("expect-remotes", 0)
 		var seen := 0
 		for id: int in _path:
@@ -133,7 +143,7 @@ func _finish() -> void:
 			print("NETREPORT FAIL server never had players")
 			ok = false
 		for e in everyone:
-			print("NETREPORT player=%d role=%s processed=%d misses=%d pos=%s" % [e.id, NetPlayer.Role.keys()[e.role], e.processed, e.misses, (e.pos as Vector3).snappedf(0.001)])
+			print("NETREPORT player=%d role=%s processed=%d misses=%d pos=%s %s (%s)" % [e.id, NetPlayer.Role.keys()[e.role], e.processed, e.misses, (e.pos as Vector3).snappedf(0.001), e.get("name", ""), e.get("limbs", "")])
 			if e.role == NetPlayer.Role.AUTHORITY_REMOTE and int(e.processed) < 300:
 				print("NETREPORT FAIL server processed too few frames for player %d" % e.id)
 				ok = false

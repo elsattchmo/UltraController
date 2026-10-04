@@ -17,3 +17,6 @@ extends Resource
 @export var body_mesh_name := "BodyMesh"
 ## Eye position relative to the Head bone at rest, in character space (-Z forward).
 @export var eye_offset := Vector3(0.0, 0.075, -0.1)
+## Hit regions: capsules {region, a, b, r} in character space (feet origin, -Z forward), baked
+## from the idle pose by tools/make_hitboxes.gd. Used to tell which limb a shot hit.
+@export var hitboxes: Array[Dictionary] = []

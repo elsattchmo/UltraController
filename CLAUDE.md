@@ -65,6 +65,23 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   movement; `breath` is in MotorState. Buoyancy for props runs wherever physics is
   authoritative (`UltraNet.mode != CLIENT`; tests run in NONE). Swim visuals (stroke lift,
   dive pitch) are presentation in `UltraCharacter._swim_visual`.
+- **Damage is per region** (`UltraLimbs`: 10 regions). `limb_hp` (percent) and the `severed`
+  mask live in MotorState, so injuries change movement predictably (`UltraInjury`: speed, no
+  sprint/jump, forced crawl, no climbing, weapon hand). Only the authority changes them
+  (`apply_damage`); remote players get 2-bit statuses in snapshots. Which limb a shot hit comes
+  from region capsules baked into the BodyProfile (`tools/make_hitboxes.gd`) - no skeleton on the
+  server. Shots test a wide `HitVolume` (HITBOX layer), then must pass through a limb capsule.
+- Knock-down is a deterministic low capsule (RAGDOLL -> GET_UP states); the floppy body is a
+  local `PhysicalBoneSimulator3D` (UltraRagdoll). An inactive simulator still writes the pose:
+  keep `influence = 0` while it's off. Dismemberment scales the region's root bone to ~0 in the
+  last modifier (`DismemberModifier`, must stay after the simulator), caps it, and spawns a gib
+  skinned on the CPU from the region's triangles.
+- Upper-body item clips can be mirrored at runtime (`UltraAnimMirror`; the skeleton is mirror
+  symmetric). `BodyDynamicsModifier.item_hips_yaw` turns the spine by the item clip's own hips
+  yaw so a mirrored clip isn't twisted by unmirrored legs.
+- FP eye: follows the head's yaw only, never its pitch (pitch swung the eye out in front of the
+  body exactly when looking down at it).
+- Modified bone poses are only readable during `skeleton_updated` (tests: sample there).
 - `teleport()` drops any traversal state (else a scripted move drags you back).
 - FP eye is swept from the capsule axis (`CameraRig._fp_guard`): the head bone dips into ledges.
 

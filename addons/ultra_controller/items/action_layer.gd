@@ -20,7 +20,9 @@ static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, rep
 		if it and it.def() and it.def().can_equip(ItemDefinition.EquipSlot.MAIN_HAND):
 			want_uid = it.uid
 	# Traversal / ragdoll / swimming states put the item away.
-	var busy := s.state in [MotorState.Id.ROOT_MOTION, MotorState.Id.SLIDE, MotorState.Id.CRAWL, MotorState.Id.MANTLE, MotorState.Id.VAULT, MotorState.Id.LEDGE_HANG, MotorState.Id.LEDGE_CLIMB, MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.ROPE, MotorState.Id.SWIM, MotorState.Id.DIVE, MotorState.Id.RAGDOLL, MotorState.Id.DEAD]
+	if UltraInjury.weapon_hand(s) == 0:
+		want_uid = 0                                     # no working arm to hold it with
+	var busy := s.state in [MotorState.Id.GET_UP, MotorState.Id.ROOT_MOTION, MotorState.Id.SLIDE, MotorState.Id.CRAWL, MotorState.Id.MANTLE, MotorState.Id.VAULT, MotorState.Id.LEDGE_HANG, MotorState.Id.LEDGE_CLIMB, MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.ROPE, MotorState.Id.SWIM, MotorState.Id.DIVE, MotorState.Id.RAGDOLL, MotorState.Id.DEAD]
 	var def := ItemDB.by_index(s.equipped)
 	match s.action:
 		Action.NONE:
@@ -113,6 +115,7 @@ static func aim_ray(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDe
 	var spread := deg_to_rad(float(def.stat("ads_spread_deg" if ads else "spread_deg", 0.5)))
 	var moving := Vector2(s.vel.x, s.vel.z).length() / maxf(c.profile.jog_speed, 0.1)
 	spread *= 1.0 + moving * (0.5 if ads else 1.5) + (0.0 if s.is_grounded() else 2.0)
+	spread *= UltraInjury.aim_mult(s, c.damage_profile)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(Vector2i(c.net_id, s.fire_seq))
 	var a := rng.randf() * TAU
@@ -127,8 +130,9 @@ static func _reload(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDe
 	if def == null:
 		_set_action(s, Action.NONE)
 		return
-	var commit := float(def.stat("reload_commit", 1.5))
-	var total := float(def.stat("reload_time", 2.0))
+	var slow := UltraInjury.reload_mult(s, c.damage_profile)
+	var commit := float(def.stat("reload_commit", 1.5)) * slow
+	var total := float(def.stat("reload_time", 2.0)) * slow
 	# Interrupted before the magazine went in: nothing gained.
 	if busy or (s.has(MotorState.F_SPRINTING) and s.action_t < commit):
 		_set_action(s, Action.READY)

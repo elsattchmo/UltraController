@@ -424,6 +424,7 @@ func _build_snapshot(peer: int) -> PackedByteArray:
 			b.put_u8(s.action)
 			b.put_u8(s.fire_seq)
 			b.put_u16(clampi(int(s.hp * 10.0), 0, 65535))
+			b.put_u32(UltraLimbs.pack(s))
 	world.write_props(b)
 	return b.data_array
 
@@ -573,6 +574,7 @@ func _s2c_snapshot(bytes: PackedByteArray) -> void:
 			e.action = b.get_u8()
 			e.fire_seq = b.get_u8()
 			e.hp = b.get_u16() / 10.0
+			e.limbs = b.get_u32()
 			if p:
 				p.snaps.append(e)
 				if p.snaps.size() > 40:

@@ -41,6 +41,15 @@ static func get_course(name: String) -> Array:
 			out.append({"ticks": 60, "move": Vector2(0, 0.6), "yaw_rate": 1.6})
 			out.append({"ticks": 120})
 			return out
+		"limbshot":
+			# From the dummy-yard marker: draw, aim at Dummy B's left thigh, fire four shots.
+			var aim := {"yaw": PI - 0.012, "pitch": -0.1}
+			var out := [{"ticks": 60, "slot": 1}.merged(aim)]
+			for i in 4:
+				out.append({"ticks": 2, "slot": 1, "tap": InputFrame.B_PRIMARY}.merged(aim))
+				out.append({"ticks": 30, "slot": 1}.merged(aim))
+			out.append({"ticks": 300, "slot": 1}.merged(aim))
+			return out
 		"swim":
 			# Walk into the deep end, swim, dive, come up, swim in circles (water under lag).
 			return [

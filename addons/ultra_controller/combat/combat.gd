@@ -13,6 +13,7 @@ class DamageInfo:
 	var kind := &"bullet"
 	var collider: Object
 	var shape := 0
+	var region := -1                ## UltraLimbs.Region, -1 = work it out from the point
 
 
 const MASK := UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC | UltraLayers.CHARACTER | UltraLayers.HITBOX
@@ -20,8 +21,11 @@ const MASK := UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC | UltraLayers
 
 static func hitscan(shooter: UltraCharacter, origin: Vector3, dir: Vector3, def: ItemDefinition) -> Dictionary:
 	var space := shooter.get_world_3d().direct_space_state
-	var q := PhysicsRayQueryParameters3D.create(origin, origin + dir * float(def.stat("range", 100.0)), MASK, [shooter.get_rid()])
-	var hit: Dictionary = UltraNet.world.rewound(shooter, func() -> Dictionary: return space.intersect_ray(q))
+	var excl: Array[RID] = [shooter.get_rid()]
+	if shooter.hit_volume:
+		excl.append(shooter.hit_volume.get_rid())
+	var q := PhysicsRayQueryParameters3D.create(origin, origin + dir * float(def.stat("range", 100.0)), MASK, excl)
+	var hit: Dictionary = UltraNet.world.rewound(shooter, func() -> Dictionary: return _cast(space, q, origin, dir))
 	if hit.is_empty():
 		return {}
 	var info := DamageInfo.new()
@@ -32,14 +36,39 @@ static func hitscan(shooter: UltraCharacter, origin: Vector3, dir: Vector3, def:
 	info.attacker_id = shooter.net_id
 	info.collider = hit.collider
 	info.shape = int(hit.get("shape", 0))
+	info.region = int(hit.get("region", -1))
 	apply(info, float(def.stat("impulse", 4.0)))
-	var kind := &"flesh" if hit.collider is UltraCharacter else &"surface"
+	var kind := &"flesh" if UltraCharacter.of_collider(hit.collider) else &"surface"
 	var shooter_peer := 0
 	var sp: NetPlayer = UltraNet.players.get(shooter.net_id)
 	if sp and sp.role == NetPlayer.Role.AUTHORITY_REMOTE:
 		shooter_peer = sp.peer_id
 	UltraNet.world.broadcast(&"impact", [info.point, info.normal, kind, shooter.net_id], false, shooter_peer)
 	return hit
+
+
+## A ray that knows bodies aren't capsules: a character's capsule only counts if the ray also
+## passes through one of its limbs (checked where the character *was*, under lag compensation);
+## otherwise the shot carries on past it.
+static func _cast(space: PhysicsDirectSpaceState3D, q: PhysicsRayQueryParameters3D, origin: Vector3, dir: Vector3) -> Dictionary:
+	for _i in 4:
+		var hit := space.intersect_ray(q)
+		var c := UltraCharacter.of_collider(hit.get("collider")) if not hit.is_empty() else null
+		if c == null:
+			return hit
+		var xf: Transform3D = PhysicsServer3D.body_get_state(c.get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM)
+		var rh := UltraHitboxes.raycast(c, xf.origin, origin, dir)
+		if not rh.is_empty():
+			hit.collider = c
+			hit.region = rh.region
+			hit.position = rh.point
+			return hit
+		var ex := q.exclude
+		ex.append(c.get_rid())
+		if c.hit_volume:
+			ex.append(c.hit_volume.get_rid())
+		q.exclude = ex
+	return {}
 
 
 ## Deliver damage + impulse to whatever was hit (characters, damageables, rigid bodies).

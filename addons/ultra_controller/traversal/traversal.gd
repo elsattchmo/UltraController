@@ -98,6 +98,8 @@ static func hook(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 	var Id := MotorState.Id
 	if s.held_id != 0 or s.equipped != 0 and s.action == UltraActionLayer.Action.RELOADING:
 		return -1
+	if not UltraInjury.can_climb(s):
+		return -1                                        # needs both arms and a leg to stand on
 	var fwd := Vector3(-sin(s.body_yaw), 0, -cos(s.body_yaw))
 	var wish := i.move_world(i.yaw)
 	var dir := wish.normalized() if wish.length() > 0.2 else fwd

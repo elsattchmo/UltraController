@@ -7,6 +7,8 @@ extends Node
 
 var character: UltraCharacter
 var hand_attach: BoneAttachment3D
+var left_hand_attach: BoneAttachment3D
+var _side := 1                        ## 1 right hand, -1 left (right arm out of action)
 var hip_attach: BoneAttachment3D
 var held_node: Node3D                 ## instance of the held item's equip_scene
 var holster_node: Node3D
@@ -34,6 +36,10 @@ func setup(c: UltraCharacter) -> void:
 	hand_attach.name = "RightHandAttach"
 	hand_attach.bone_name = "RightHand"
 	sk.add_child(hand_attach)
+	left_hand_attach = BoneAttachment3D.new()
+	left_hand_attach.name = "LeftHandAttach"
+	left_hand_attach.bone_name = "LeftHand"
+	sk.add_child(left_hand_attach)
 	hip_attach = BoneAttachment3D.new()
 	hip_attach.name = "HipAttach"
 	hip_attach.bone_name = "Hips"
@@ -46,16 +52,18 @@ func _process(delta: float) -> void:
 		return
 	var s := character.state
 	# --- held item
-	if s.held_uid != _held_uid:
+	var side := -1 if UltraInjury.weapon_hand(s) == -1 else 1
+	if s.held_uid != _held_uid or side != _side:
 		_held_uid = s.held_uid
+		_side = side
 		if held_node:
 			held_node.queue_free()
 			held_node = null
 		held_def = ItemDB.by_index(s.equipped)
 		if held_def and held_def.equip_scene:
 			held_node = held_def.equip_scene.instantiate() as Node3D
-			hand_attach.add_child(held_node)
-			held_node.transform = held_def.grip_offset
+			(hand_attach if _side == 1 else left_hand_attach).add_child(held_node)
+			held_node.transform = grip()
 			_set_layers(held_node)
 	# --- holster: first firearm in the inventory that isn't in hand
 	var hol := _holster_item()
@@ -138,6 +146,11 @@ func _holster_item() -> ItemInstance:
 	return null
 
 
+## The held item's grip in its hand's bone space (mirrored for the left hand).
+func grip() -> Transform3D:
+	return held_def.grip_offset if _side == 1 else UltraAnimMirror.mirror_xform(held_def.grip_offset)
+
+
 ## Left hand on the support grip; right hand aims down sights (first person, local viewer).
 func _drive_hands(delta: float) -> void:
 	var anim := character.anim
@@ -162,7 +175,7 @@ func _drive_hands(delta: float) -> void:
 		var cup := cam.basis.y
 		var aim_basis := Basis.looking_at(fwd, cup)
 		# Hip: low and to the right, toed in a touch so it converges on the crosshair ~20 m out.
-		var hip_pos := cam.origin + fwd * 0.42 + right * 0.16 + cup * -0.17
+		var hip_pos := cam.origin + fwd * 0.42 + right * 0.16 * _side + cup * -0.17
 		var hip_basis := Basis.looking_at((cam.origin + fwd * 20.0) - hip_pos, cup)
 		var hip_gun := Transform3D(hip_basis, hip_pos - hip_basis * rear.origin)
 		var ads_gun := Transform3D(aim_basis, cam.origin + fwd * 0.37 - aim_basis * rear.origin)
@@ -170,19 +183,26 @@ func _drive_hands(delta: float) -> void:
 		var target_gun := hip_gun.interpolate_with(ads_gun, e)
 		target_gun.origin += target_gun.basis * (_recoil.value as Vector3) * lerpf(1.0, 0.5, e)
 		target_gun.basis = target_gun.basis * Basis(Vector3.RIGHT, (_recoil.value as Vector3).y * 0.25)
-		var hand_target := target_gun * held_def.grip_offset.affine_inverse()
+		var hand_target := target_gun * grip().affine_inverse()
 		var w := smoothstep(0.0, 1.0, _fp_w)
-		anim.hand_ik.set_goal(HandIKModifier.Hand.RIGHT, hand_target, w, true, 40.0)
-		_owns[HandIKModifier.Hand.RIGHT] = true
+		var gun_hand := HandIKModifier.Hand.RIGHT if _side == 1 else HandIKModifier.Hand.LEFT
+		var other := HandIKModifier.Hand.LEFT if _side == 1 else HandIKModifier.Hand.RIGHT
+		anim.hand_ik.set_goal(gun_hand, hand_target, w, true, 40.0)
+		_owns[gun_hand] = true
+		if _side == -1 and _owns[other]:
+			anim.hand_ik.release(other, 8.0)
+			_owns[other] = false
 		gun = gun.interpolate_with(target_gun, w)
-	elif _owns[HandIKModifier.Hand.RIGHT]:
-		anim.hand_ik.release(HandIKModifier.Hand.RIGHT, 8.0)
-		_owns[HandIKModifier.Hand.RIGHT] = false
-	# Support hand follows the gun wherever it goes.
-	if ready and held_def and held_def.two_handed and held_def.support_offset != Transform3D.IDENTITY:
+	else:
+		for h in [HandIKModifier.Hand.RIGHT, HandIKModifier.Hand.LEFT]:
+			if _owns[h] and (h == HandIKModifier.Hand.RIGHT) == (_side == 1):
+				anim.hand_ik.release(h, 8.0)
+				_owns[h] = false
+	# Support hand follows the gun wherever it goes (two working hands only).
+	if ready and _side == 1 and UltraInjury.two_hands(s) and held_def and held_def.two_handed and held_def.support_offset != Transform3D.IDENTITY:
 		anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, gun * held_def.support_offset, 1.0, true, 10.0)
 		_owns[HandIKModifier.Hand.LEFT] = true
-	elif _owns[HandIKModifier.Hand.LEFT]:
+	elif _side == 1 and _owns[HandIKModifier.Hand.LEFT]:
 		anim.hand_ik.release(HandIKModifier.Hand.LEFT, 8.0)
 		_owns[HandIKModifier.Hand.LEFT] = false
 

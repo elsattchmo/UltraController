@@ -146,11 +146,16 @@ func _make_bot_input(local_index: int) -> InputSource:
 func _spawn_transform(np: NetPlayer) -> Transform3D:
 	var names := ["spawn", "spawn_2", "spawn_3", "spawn_4"]
 	var want := UltraArgs.get_str("spawn", "")
+	# Humans in join order (bots such as the yard's dummies take ids too).
+	var human := 0
+	for other: NetPlayer in UltraNet.players.values():
+		if not other.is_bot and other.id < np.id:
+			human += 1
 	var m: Marker3D = null
-	if want != "" and np.id == 1:
+	if want != "" and human == 0:
 		m = map.call("marker", want)
 	if m == null:
-		m = map.call("marker", names[(np.id - 1) % names.size()])
+		m = map.call("marker", names[human % names.size()])
 	return m.global_transform if m else Transform3D.IDENTITY
 
 

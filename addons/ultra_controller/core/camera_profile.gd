@@ -15,7 +15,7 @@ extends Resource
 @export_range(0, 2, 0.01) var fp_bob_amount := 0.8
 ## Eye point relative to the Head bone, in character space (metres; -Z forward).
 ## When looking down, move the eye forward so the chest never fills the view.
-@export_range(0, 0.4, 0.005) var fp_lookdown_shift := 0.2
+@export_range(0, 0.4, 0.005) var fp_lookdown_shift := 0.05
 @export_range(0, 5, 0.1) var fp_strafe_roll_deg := 1.2
 @export_range(0, 30, 0.5) var lean_angle_deg := 12.0
 @export_range(0, 0.6, 0.01) var lean_offset := 0.32

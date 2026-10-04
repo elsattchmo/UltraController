@@ -44,7 +44,7 @@ static func _dodge_role(i: InputFrame) -> StringName:
 
 func tick(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 	m.probe_floor(s)
-	m.update_stance(s, m.wanted_stance(i))
+	m.update_stance(s, MotorState.Stance.CRAWL if UltraInjury.must_crawl(s) else m.wanted_stance(i))
 	var speed := m.target_ground_speed(s, i)
 	if s.state == Id.LAND:
 		var hard := s.has(MotorState.F_HARD_LANDING)

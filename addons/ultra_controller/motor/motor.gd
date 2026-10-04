@@ -25,6 +25,8 @@ const STATE_SCRIPTS := {
 	MotorState.Id.ROPE: preload("states/rope_state.gd"),
 	MotorState.Id.SWIM: preload("states/swim_state.gd"),
 	MotorState.Id.DIVE: preload("states/swim_state.gd"),
+	MotorState.Id.RAGDOLL: preload("states/ragdoll_state.gd"),
+	MotorState.Id.GET_UP: preload("states/ragdoll_state.gd"),
 }
 
 const F_TURNING := 1 << 8       ## idle feet turning toward aim (anim plays a turn)
@@ -32,6 +34,8 @@ const F_TURNING := 1 << 8       ## idle feet turning toward aim (anim plays a tu
 var body: CharacterBody3D
 var shape: CollisionShape3D
 var profile: MovementProfile
+## Injury rules (speed with a bad leg...). The character sets it; a default otherwise.
+var damage: DamageProfile = DamageProfile.new()
 var anim_set: AnimationSet
 ## Only the authority applies impulses to rigid bodies; predicting clients just feel the drag.
 var apply_pushes := true
@@ -219,7 +223,7 @@ func target_ground_speed(s: MotorState, input: InputFrame) -> float:
 			speed = profile.crouch_speed
 		_:
 			var forwardish := input.move.y > 0.45 * mag
-			if input.has(InputFrame.B_SPRINT) and profile.enable_sprint and forwardish and mag > 0.5 and s.carry_mult > 0.55:
+			if input.has(InputFrame.B_SPRINT) and profile.enable_sprint and forwardish and mag > 0.5 and s.carry_mult > 0.55 and UltraInjury.can_sprint(s):
 				speed = profile.sprint_speed
 				s.set_flag(MotorState.F_SPRINTING, true)
 			elif input.has(InputFrame.B_WALK):
@@ -241,7 +245,7 @@ func target_ground_speed(s: MotorState, input: InputFrame) -> float:
 		var fwd := input.move.y / mag
 		var dir_mult := lerpf(profile.strafe_mult, 1.0, fwd) if fwd >= 0.0 else lerpf(profile.strafe_mult, profile.back_mult, -fwd)
 		speed *= dir_mult
-	return speed * s.carry_mult * UltraSwim.wade_mult(self)
+	return speed * s.carry_mult * UltraSwim.wade_mult(self) * UltraInjury.speed_mult(s, damage)
 
 
 ## Weighty planar acceleration with momentum-limited turning and plant-and-pivot braking.
@@ -453,6 +457,8 @@ func gravity_for(s: MotorState, input: InputFrame) -> float:
 func can_jump(s: MotorState) -> bool:
 	if s.held_id != 0 and s.held_mass * s.team_share > profile.lift_limit:
 		return false                              # can't hop with a heavy load
+	if not UltraInjury.can_jump(s):
+		return false                              # a crippled leg won't push off
 	return s.jump_buf_t > 0.0 and (s.is_grounded() or s.coyote_t > 0.0)
 
 

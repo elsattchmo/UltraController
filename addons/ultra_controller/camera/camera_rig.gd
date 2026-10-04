@@ -49,7 +49,10 @@ func attach(c: UltraCharacter) -> void:
 	c.set_view_index(view_index)
 	c.landed.connect(_on_landed)
 	c.item_event.connect(_on_item_event)
+	c.hit_reacted.connect(_on_hit)
 	_ray_excl = [c.get_rid()]
+	if c.hit_volume:
+		_ray_excl.append(c.hit_volume.get_rid())
 	tp_blend = 1.0 if c.profile.default_view == MovementProfile.View.THIRD_PERSON else 0.0
 	if c.input_source:
 		c.input_source.view_tp = tp_blend > 0.5
@@ -70,6 +73,20 @@ func _on_landed(impact: float) -> void:
 
 
 ## Camera kick (recoil, hits): radians of pitch/yaw that spring back.
+var _concuss := 0.0                ## seconds of head-hit wobble left
+var _concuss_amp := 0.0
+
+
+## Hits jolt the view; head hits leave you reeling for a moment (wobble, FOV pulse).
+func _on_hit(region: int, _dir: Vector3, amount: float) -> void:
+	if region == UltraLimbs.Region.HEAD:
+		_concuss_amp = clampf(amount / 40.0, 0.4, 1.0)
+		_concuss = 2.5 * _concuss_amp
+		kick(0.1 * _concuss_amp, randf_range(-0.08, 0.08))
+	else:
+		kick(clampf(amount * 0.0015, 0.01, 0.05), randf_range(-0.02, 0.02))
+
+
 func kick(pitch: float, yaw: float) -> void:
 	_kick.impulse(Vector2(yaw, pitch) * 30.0)
 
@@ -105,9 +122,15 @@ func _on_skeleton_updated() -> void:
 	var head_sk := sk.get_bone_global_pose(_head_bone)
 	var rot_sk := head_sk.basis.orthonormalized() * _head_rest_inv
 	var to_sk := sk.global_basis.orthonormalized().inverse() * character.visual_root.global_basis
-	var eye_sk := head_sk.origin + rot_sk * (to_sk * character.body_profile.eye_offset)
-	# Store relative to the visual root so it stays valid when the root moves next frame.
-	_eye_sk_cached = character.visual_root.global_transform.affine_inverse() * (sk.global_transform * eye_sk)
+	# The eye follows the head's turn but not its nod: pitching the head would swing the eye out
+	# in front of the body exactly when you look down at it.
+	var rot_v := to_sk.inverse() * rot_sk * to_sk
+	var f := rot_v * Vector3.FORWARD
+	f.y = 0.0
+	var yaw_v := Basis(Vector3.UP, atan2(-f.x, -f.z)) if f.length() > 0.05 else Basis()
+	var vis_inv := character.visual_root.global_transform.affine_inverse()
+	# Stored relative to the visual root so it stays valid when the root moves next frame.
+	_eye_sk_cached = vis_inv * (sk.global_transform * head_sk.origin) + yaw_v * character.body_profile.eye_offset
 	_have_eye = true
 
 
@@ -176,6 +199,13 @@ func _process(delta: float) -> void:
 	_roll.target = clampf(-lv.x / maxf(character.profile.jog_speed, 0.1), -1.0, 1.0) * deg_to_rad(cam_profile.fp_strafe_roll_deg) * (1.0 - t)
 	_roll.step(delta)
 	var roll: float = _roll.value - float(_lean.value) * deg_to_rad(cam_profile.lean_angle_deg) * (1.0 - t)
+	var wob := 0.0
+	if _concuss > 0.0:
+		_concuss = maxf(_concuss - delta, 0.0)
+		wob = _concuss_amp * smoothstep(0.0, 1.0, _concuss / (2.5 * _concuss_amp))
+		var now := Time.get_ticks_msec() / 1000.0
+		roll += sin(now * 5.3) * 0.07 * wob
+		rot = rot * Basis(Vector3.RIGHT, sin(now * 3.1) * 0.03 * wob) * Basis(Vector3.UP, sin(now * 2.3) * 0.04 * wob)
 	_fov.target = cam_profile.sprint_fov_kick if character.state.has(MotorState.F_SPRINTING) and character.state.vel.length() > character.profile.jog_speed else 0.0
 	_fov.step(delta)
 
@@ -186,7 +216,7 @@ func _process(delta: float) -> void:
 	if eq:
 		eq.camera = camera if t < 0.5 else null
 	var ads_fov := float(character.held_def().stat("ads_fov", cam_profile.fov)) if character.held_def() else cam_profile.fov
-	camera.fov = lerpf(cam_profile.fov + float(_fov.value), ads_fov, smoothstep(0.0, 1.0, ads))
+	camera.fov = lerpf(cam_profile.fov + float(_fov.value), ads_fov, smoothstep(0.0, 1.0, ads)) + sin(Time.get_ticks_msec() / 1000.0 * 2.0) * 4.0 * wob
 	if src is LocalInputSource:
 		(src as LocalInputSource).sens_mult = lerpf(1.0, UltraInputSettings.f("ads_sensitivity_mult"), ads)
 	camera.near = lerpf(cam_profile.near, 0.08, t)

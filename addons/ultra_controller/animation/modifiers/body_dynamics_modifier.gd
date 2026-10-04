@@ -20,6 +20,10 @@ var pelvis_offset := Vector3.ZERO
 var hunch: float = 0.0           ## + = bend forward (injury / carry)
 ## 0..1: a weapon is up. Aim pitch then lives in the spine so the arms track the crosshair.
 var weapon_aim: float = 0.0
+## The item clip's own hips yaw (skeleton space, atan2(z.x, z.z)); the upper body is turned by
+## the difference to the locomotion hips, so an upper-body clip keeps the stance it was made in
+## (and a mirrored clip isn't twisted by the unmirrored legs). NAN = off.
+var item_hips_yaw: float = NAN
 
 ## Distribution weights over [Spine, Chest, UpperChest, Neck, Head].
 @export var aim_pitch_weights := PackedFloat32Array([0.18, 0.22, 0.25, 0.17, 0.18])
@@ -60,6 +64,7 @@ func _process_modification_with_delta(_delta: float) -> void:
 			return
 	# Hips: warp yaw, lean, offset. Rotations are applied in skeleton space about the hips.
 	var hips_g := sk.get_bone_global_pose(_hips)
+	var hips_anim_yaw := atan2(hips_g.basis.z.x, hips_g.basis.z.z)
 	var r_hips := Basis(Vector3.UP, -warp_yaw) * Basis(Vector3.BACK, lean_roll * 0.35) * Basis(Vector3.RIGHT, lean_pitch * 0.25)
 	hips_g.basis = r_hips * hips_g.basis
 	hips_g.origin += pelvis_offset
@@ -79,6 +84,8 @@ func _process_modification_with_delta(_delta: float) -> void:
 		var roll := lean_roll * (0.25 if k < 3 else 0.0)
 		var fwd_lean := lean_pitch * (0.2 if k < 2 else 0.0)
 		var r := Basis(Vector3.UP, -yaw) * Basis(Vector3.RIGHT, -pitch + fwd_lean) * Basis(Vector3.BACK, roll)
+		if k == 0 and not is_nan(item_hips_yaw) and weapon_aim > 0.0:
+			r = Basis(Vector3.UP, angle_difference(hips_anim_yaw, item_hips_yaw) * weapon_aim) * r
 		# Rotate about this bone's own origin.
 		g.basis = r * g.basis
 		sk.set_bone_global_pose(b, g)

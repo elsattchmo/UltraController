@@ -45,7 +45,7 @@ static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, rep
 			return
 		var swimming := s.state == MotorState.Id.SWIM or s.state == MotorState.Id.DIVE
 		var two_hand := s.held_grip >= 0 or s.held_mass > c.profile.lift_limit
-		if swimming and two_hand:
+		if (swimming or not UltraInjury.two_hands(s)) and two_hand:
 			_release(c, s, 0.0, replaying)               # can't swim with a two-hand load
 			return
 		if UltraMotor.pressed_edge(s, i, InputFrame.B_DROP) or UltraMotor.pressed_edge(s, i, InputFrame.B_INTERACT) or UltraMotor.pressed_edge(s, i, InputFrame.B_GRAB):
@@ -201,7 +201,7 @@ static func _hold_single(c: UltraCharacter, rb: RigidBody3D, dt: float) -> void:
 	var m := rb.mass
 	var g := Vector3.DOWN * float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))
 	var f := m * ((target - p) * OMEGA * OMEGA - (rb.linear_velocity - c.state.vel * 0.0) * 2.0 * ZETA * OMEGA) - m * g
-	f = f.limit_length(c.profile.strength_n)
+	f = f.limit_length(c.profile.strength_n * UltraInjury.strength_mult(c.state))
 	rb.apply_central_force(f)
 	# Keep the orientation it had relative to the holder's facing when grabbed.
 	if not rb.has_meta("grab_rel"):
@@ -247,5 +247,5 @@ static func _hold_team(carriers: Array, rb: RigidBody3D, dt: float) -> void:
 		var v := rb.linear_velocity + rb.angular_velocity.cross(r)
 		var m_eff := rb.mass / maxf(float(carriers.size()), 1.0)
 		var f := m_eff * ((target - gp) * OMEGA * OMEGA * 0.6 - v * 2.0 * ZETA * OMEGA * 0.6) + Vector3.UP * m_eff * g
-		f = f.limit_length(c.profile.strength_n)
+		f = f.limit_length(c.profile.strength_n * UltraInjury.strength_mult(c.state))
 		rb.apply_force(f, r)

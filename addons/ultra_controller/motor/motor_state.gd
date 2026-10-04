@@ -40,7 +40,9 @@ var rm_scale := Vector3.ONE
 var held_id: int = 0
 var held_mass: float = 0.0
 var carry_mult: float = 1.0
-var injury_bits: int = 0
+## Per-limb damage (UltraLimbs.Region order): health percent per region, and what's gone.
+var limb_hp := UltraLimbs.full_health()
+var severed: int = 0
 var trav_point := Vector3.ZERO
 var trav_normal := Vector3.ZERO
 var trav_height: float = 0.0
@@ -96,7 +98,8 @@ func copy_from(o: MotorState) -> void:
 	air_time = o.air_time; prev_buttons = o.prev_buttons
 	rm_clip = o.rm_clip; rm_t = o.rm_t; rm_yaw0 = o.rm_yaw0; rm_scale = o.rm_scale
 	held_id = o.held_id; held_mass = o.held_mass; carry_mult = o.carry_mult
-	injury_bits = o.injury_bits
+	limb_hp = o.limb_hp.duplicate()
+	severed = o.severed
 	trav_point = o.trav_point; trav_normal = o.trav_normal; trav_height = o.trav_height
 	platform_id = o.platform_id; platform_local = o.platform_local
 	held_uid = o.held_uid; equipped = o.equipped; action = o.action; action_t = o.action_t
@@ -113,6 +116,8 @@ func diff(o: MotorState) -> float:
 	if state != o.state or stance != o.stance or held_id != o.held_id:
 		d += 1.0
 	if held_uid != o.held_uid or action != o.action or mag != o.mag or fire_seq != o.fire_seq:
+		d += 1.0
+	if severed != o.severed or limb_hp != o.limb_hp:
 		d += 1.0
 	d += absf(action_t - o.action_t) + absf(hp - o.hp) * 0.01
 	return d
@@ -137,7 +142,8 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_float(rm_scale.x); buf.put_float(rm_scale.y); buf.put_float(rm_scale.z)
 	buf.put_u16(held_id)
 	buf.put_float(held_mass)
-	buf.put_u16(injury_bits)
+	buf.put_data(limb_hp)
+	buf.put_u16(severed)
 	buf.put_float(trav_point.x); buf.put_float(trav_point.y); buf.put_float(trav_point.z)
 	buf.put_8(_q8(trav_normal.x, 127.0)); buf.put_8(_q8(trav_normal.y, 127.0)); buf.put_8(_q8(trav_normal.z, 127.0))
 	buf.put_float(trav_height)
@@ -184,7 +190,9 @@ func decode(buf: StreamPeerBuffer) -> void:
 	rm_scale = Vector3(buf.get_float(), buf.get_float(), buf.get_float())
 	held_id = buf.get_u16()
 	held_mass = buf.get_float()
-	injury_bits = buf.get_u16()
+	var lh: Array = buf.get_data(UltraLimbs.COUNT)
+	limb_hp = lh[1] if lh[0] == OK else UltraLimbs.full_health()
+	severed = buf.get_u16()
 	trav_point = Vector3(buf.get_float(), buf.get_float(), buf.get_float())
 	trav_normal = Vector3(buf.get_8() / 127.0, buf.get_8() / 127.0, buf.get_8() / 127.0)
 	trav_height = buf.get_float()

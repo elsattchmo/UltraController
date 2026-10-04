@@ -9,6 +9,7 @@ var passes := 0
 
 
 func _ready() -> void:
+	UltraDummyPost.auto_spawn = false            # suites spawn the characters they need
 	var args := {}
 	for a in OS.get_cmdline_user_args():
 		var kv := a.trim_prefix("--").split("=", true, 1)

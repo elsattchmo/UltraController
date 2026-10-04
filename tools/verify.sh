@@ -132,6 +132,9 @@ fi
 if [ "$SUITE" = "m7" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
 	SERVER_ARGS="--spawn=pool_deep_side --no-kit" CLIENT_BOT="swim" net_case swim 1 --lag=120 --jitter=20 --loss=2 --max-correction=0.05 --expect-states=SWIM,DIVE
 fi
+if [ "$SUITE" = "m8" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
+	SERVER_ARGS="--spawn=dummies" CLIENT_BOT="limbshot" net_case limbs 1 --lag=120 --jitter=20 --loss=2 --expect-shots=4 --expect-remote-injury
+fi
 if [ "$SUITE" = "m4" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
 	SERVER_ARGS="--spawn=range" CLIENT_BOT="gunplay" net_case gunplay 1 --lag=120 --jitter=20 --loss=2 --expect-shots=12
 fi

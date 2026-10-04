@@ -17,6 +17,8 @@ signal inventory_dirty
 ## Authority: damage was applied (see UltraCombat.DamageInfo).
 signal damaged(info: UltraCombat.DamageInfo)
 signal died
+## Every machine, when a hit lands on this character (region = UltraLimbs.Region).
+signal hit_reacted(region: int, dir: Vector3, amount: float)
 
 @export var profile: MovementProfile
 @export var body_profile: BodyProfile
@@ -26,6 +28,8 @@ signal died
 @export var self_simulate := true
 ## Build the animated body (off for pure-simulation bots, servers and tests).
 @export var build_visuals := true
+## Per-limb damage, dismemberment and gore rules (a default is made if empty).
+@export var damage_profile: DamageProfile
 ## Snap state to its network encoding after each tick (on in sessions; deterministic replays).
 var quantize_state := false
 
@@ -48,6 +52,10 @@ var visual_root: Node3D
 var body_node: Node3D
 var skeleton: Skeleton3D
 var head_mesh: MeshInstance3D
+var body_fx: UltraBodyFX
+var ragdoll: UltraRagdoll
+## Getting up: the body starts where the ragdoll lay and eases onto the capsule.
+var ragdoll_offset := Vector3.ZERO
 var anim: UltraAnimDriver
 
 ## Visual-only offset that absorbs teleport-free corrections and step pops (decays to zero).
@@ -66,6 +74,8 @@ func _ready() -> void:
 	add_to_group(&"ultra_character")
 	if profile == null:
 		profile = MovementProfile.new()
+	if damage_profile == null:
+		damage_profile = DamageProfile.new()
 	collision_layer = UltraLayers.CHARACTER
 	collision_mask = UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC
 	if profile.character_collision == MovementProfile.CharacterCollision.HARD:
@@ -76,7 +86,9 @@ func _ready() -> void:
 		_shape.name = "CollisionShape3D"
 		_shape.shape = CapsuleShape3D.new()
 		add_child(_shape)
+	_make_hit_volume()
 	motor = UltraMotor.new(self, _shape, profile, body_profile.anim_set if body_profile else null)
+	motor.damage = damage_profile
 	state.pos = global_position
 	state.height = profile.stand_height
 	state.body_yaw = rotation.y
@@ -125,11 +137,34 @@ func _build_visual() -> void:
 		add_child(tv)
 		tv.setup(self)
 		item_event.connect(func(kind: StringName, _d: Dictionary) -> void: anim.item_event(kind))
+		body_fx = UltraBodyFX.new()
+		body_fx.name = "BodyFX"
+		add_child(body_fx)
+		body_fx.setup(self)
+		ragdoll = UltraRagdoll.new()
+		ragdoll.name = "RagdollFX"
+		add_child(ragdoll)
+		ragdoll.setup(self)
 	set_view_index(view_index)
 	_sync_visual(1.0)
 
 
 ## Hide our own head from the camera of local viewport `idx` (shadow still cast).
+## Presentation of a hit (every machine): hit clip, flinch on the hit bone.
+func react_to_hit(region: int, dir: Vector3, amount: float) -> void:
+	if body_fx:
+		body_fx.react(region, dir, amount)
+	hit_reacted.emit(region, dir, amount)
+
+
+func body_mesh() -> MeshInstance3D:
+	return body_node.find_child(body_profile.body_mesh_name, true, false) as MeshInstance3D if body_node else null
+
+
+func get_accel() -> Vector3:
+	return _accel
+
+
 func set_view_index(idx: int) -> void:
 	view_index = idx
 	if head_mesh:
@@ -161,7 +196,48 @@ func teleport(pos: Vector3, yaw: float = NAN) -> void:
 	_sync_visual(1.0)
 
 
+## Shots test this wider volume (arms stick out of the movement capsule); which limb was hit
+## is then worked out from the region capsules (UltraHitboxes). Movement never touches it.
+var hit_volume: StaticBody3D
+var _hit_shape: CollisionShape3D
+
+
+func _make_hit_volume() -> void:
+	hit_volume = StaticBody3D.new()
+	hit_volume.name = "HitVolume"
+	hit_volume.collision_layer = UltraLayers.HITBOX
+	hit_volume.collision_mask = 0
+	_hit_shape = CollisionShape3D.new()
+	var cap := CapsuleShape3D.new()
+	cap.radius = 0.55
+	cap.height = 2.1
+	_hit_shape.shape = cap
+	_hit_shape.position = Vector3(0, 1.0, 0)
+	hit_volume.add_child(_hit_shape)
+	add_child(hit_volume)
+
+
+func _update_hit_volume() -> void:
+	if _hit_shape == null:
+		return
+	var prone := state.state in [MotorState.Id.CRAWL, MotorState.Id.DIVE, MotorState.Id.DEAD, MotorState.Id.RAGDOLL]
+	var want := Transform3D(Basis(Vector3.RIGHT, PI * 0.5).rotated(Vector3.UP, state.body_yaw - rotation.y), Vector3(0, 0.35, 0)) if prone \
+		else Transform3D(Basis(), Vector3(0, 1.0, 0))
+	if not _hit_shape.transform.is_equal_approx(want):
+		_hit_shape.transform = want
+
+
+## The character a ray hit, whether it struck the movement capsule or the hit volume.
+static func of_collider(o: Object) -> UltraCharacter:
+	if o is UltraCharacter:
+		return o
+	if o is StaticBody3D and (o as Node).name == "HitVolume" and (o as Node).get_parent() is UltraCharacter:
+		return (o as Node).get_parent()
+	return null
+
+
 func _physics_process(delta: float) -> void:
+	_update_hit_volume()
 	if not self_simulate or input_source == null:
 		return
 	TickPlatform.set_all(tick)
@@ -232,6 +308,8 @@ func apply_remote(pos: Vector3, vel: Vector3, yaw: float, e: Dictionary) -> void
 	state.equipped = int(e.get("equipped", 0))
 	state.action = int(e.get("action", 0))
 	state.hp = float(e.get("hp", state.hp))
+	if e.has("limbs"):
+		UltraLimbs.unpack_into(state, int(e.limbs))
 	var old := state.state
 	var dt := maxf(get_process_delta_time(), 0.001)
 	_accel = _accel.lerp((vel - state.vel) / dt, 0.2)
@@ -259,11 +337,21 @@ func apply_remote(pos: Vector3, vel: Vector3, yaw: float, e: Dictionary) -> void
 
 func _process(delta: float) -> void:
 	visual_offset = visual_offset.lerp(Vector3.ZERO, 1.0 - exp(-14.0 * delta))
+	ragdoll_offset = ragdoll_offset.lerp(Vector3.ZERO, 1.0 - exp(-2.2 * delta))
 	_sync_visual(Engine.get_physics_interpolation_fraction())
 	if anim:
 		anim.state = state.state
 		anim.stance = state.stance
 		anim.velocity = state.vel
+		var S := UltraLimbs.Status
+		var ll := UltraLimbs.leg(state, true)
+		var lr := UltraLimbs.leg(state, false)
+		var sev := func(st: int) -> float: return 0.6 if st == S.INJURED else (1.0 if st >= S.CRIPPLED else 0.0)
+		anim.limp = maxf(sev.call(ll), sev.call(lr))
+		anim.limp_left = sev.call(ll) >= sev.call(lr)
+		var torso := UltraLimbs.status(state, UltraLimbs.Region.TORSO)
+		anim.injury_hunch = 0.0 if torso == S.HEALTHY else (0.12 if torso == S.INJURED else 0.25)
+		anim.item_left = UltraInjury.weapon_hand(state) == -1
 		anim.body_yaw = visual_root.rotation.y
 		anim.aim_yaw = input_source.live_yaw if input_source else last_input.yaw
 		anim.aim_pitch = input_source.live_pitch if input_source else last_input.pitch
@@ -298,7 +386,7 @@ func _process(delta: float) -> void:
 func _sync_visual(alpha: float) -> void:
 	if visual_root == null:
 		return
-	var p := _prev_pos.lerp(state.pos, alpha) + visual_offset
+	var p := _prev_pos.lerp(state.pos, alpha) + visual_offset + ragdoll_offset
 	var yaw := lerp_angle(_prev_yaw, state.body_yaw, alpha)
 	# Locally controlled in first person and facing the aim: glue the body to the live mouse
 	# yaw so the arms never lag the camera by a tick.
@@ -349,20 +437,61 @@ func _swim_visual(p: Vector3, yaw: float) -> Transform3D:
 
 
 ## Authority only. Characters take damage here (limb damage arrives in M8).
+## Damage lands on a region: it hurts overall health (head 3x, limbs less) and that region's
+## own health. A region at 0 is crippled; a big enough overkill (or a blade / blast) cuts it off.
 func apply_damage(info: UltraCombat.DamageInfo) -> void:
 	if not is_authority() or state.state == MotorState.Id.DEAD:
 		return
-	state.hp = maxf(state.hp - info.amount, 0.0)
-	UltraNet.world.broadcast(&"hit", [net_id, info.point, info.dir, info.amount, info.attacker_id], false)
+	var dp := damage_profile
+	var R := UltraLimbs.Region
+	var r := info.region if info.region >= 0 else UltraHitboxes.nearest(self, info.point)
+	if info.kind == &"drown":
+		r = R.TORSO
+	info.region = r
+	var mult := dp.region_mult[r] if dp.limb_damage else 1.0
+	state.hp = maxf(state.hp - info.amount * mult, 0.0)
+	var cut := 0
+	if dp.limb_damage and info.kind != &"drown":
+		var max_hp := dp.region_hp[r]
+		var after := state.limb_hp[r] / 100.0 * max_hp - info.amount
+		state.limb_hp[r] = clampi(int(ceil(after / max_hp * 100.0)), 0, 100)
+		var sharp := info.kind == &"blast" or info.kind == &"blade"
+		if dp.dismemberment and dp.gore_on() and (dp.severable >> r) & 1 and not (state.severed >> r) & 1 \
+				and (after <= -dp.sever_overkill or (sharp and after <= 0.0)):
+			cut = UltraLimbs.sever_mask(r) & ~state.severed
+			state.severed |= cut
+			for k in UltraLimbs.COUNT:
+				if cut & (1 << k):
+					state.limb_hp[k] = 0
+	UltraNet.world.broadcast(&"hit", [net_id, info.point, info.dir, info.amount, info.attacker_id, r], false)
+	if cut != 0:
+		UltraNet.world.broadcast(&"sever", [net_id, cut, info.dir, info.point], true)
 	damaged.emit(info)
-	if state.hp <= 0.0:
+	var legs := (1 << R.THIGH_L) | (1 << R.SHIN_L) | (1 << R.THIGH_R) | (1 << R.SHIN_R)
+	var dead := state.hp <= 0.0 or (cut & (1 << R.HEAD)) != 0 or (dp.limb_damage and state.limb_hp[R.HEAD] == 0)
+	if dead:
+		state.hp = 0.0
+		state.trav_from = info.dir * clampf(info.amount * 0.06, 1.0, 6.0)   # the body's push
 		motor.change_state(state, last_input, MotorState.Id.DEAD)
 		UltraNet.world.broadcast(&"died", [net_id, info.attacker_id], true)
 		died.emit()
+	elif info.amount * mult >= dp.knockdown_damage or info.kind == &"blast" or (cut & legs) != 0:
+		knock_down(info.dir * clampf(info.amount * 0.08, 2.0, 8.0) + Vector3.UP * 1.5)
+
+
+## Authority: fall over (ragdoll); you get up once the body settles. Predicted from here on.
+func knock_down(push: Vector3) -> void:
+	if not is_authority() or state.state in [MotorState.Id.DEAD, MotorState.Id.RAGDOLL, MotorState.Id.GET_UP]:
+		return
+	state.trav_from = push
+	motor.change_state(state, last_input, MotorState.Id.RAGDOLL)
 
 
 func respawn(at: Transform3D) -> void:
 	state.hp = 100.0
+	state.limb_hp = UltraLimbs.full_health()
+	state.severed = 0
+	state.breath = profile.breath_time
 	state.state = MotorState.Id.IDLE
 	state.action = 0
 	teleport(at.origin, at.basis.get_euler().y)

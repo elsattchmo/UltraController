@@ -62,6 +62,17 @@ func unregister(o: NetObject) -> void:
 		objects.erase(o.net_id)
 
 
+## The character with this net id (players and bots; falls back to a scene search).
+func character(net_id: int) -> UltraCharacter:
+	var p: NetPlayer = net.players.get(net_id)
+	if p and is_instance_valid(p.character):
+		return p.character
+	for n in net.get_tree().get_nodes_in_group(&"ultra_character"):
+		if (n as UltraCharacter).net_id == net_id:
+			return n
+	return null
+
+
 func get_object(id: int) -> NetObject:
 	return objects.get(id)
 
@@ -231,6 +242,11 @@ func on_event(name: StringName, cb: Callable) -> void:
 	(_handlers[name] as Array).append(cb)
 
 
+func off_event(name: StringName, cb: Callable) -> void:
+	if _handlers.has(name):
+		(_handlers[name] as Array).erase(cb)
+
+
 func emit_local(name: StringName, args: Array) -> void:
 	for cb: Callable in _handlers.get(name, []):
 		if cb.is_valid():
@@ -313,8 +329,13 @@ func rewound(shooter: UltraCharacter, query: Callable) -> Variant:
 		var past: Vector3 = (_history[p.id] as PackedVector3Array)[view_tick % LAG_HISTORY]
 		var xf := Transform3D(old.basis, past)
 		PhysicsServer3D.body_set_state(c.get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, xf)
+		if c.hit_volume:
+			PhysicsServer3D.body_set_state(c.hit_volume.get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, xf)
 		moved.append([c, old])
 	var r: Variant = query.call()
 	for m: Array in moved:
-		PhysicsServer3D.body_set_state((m[0] as UltraCharacter).get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, m[1])
+		var mc := m[0] as UltraCharacter
+		PhysicsServer3D.body_set_state(mc.get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, m[1])
+		if mc.hit_volume:
+			PhysicsServer3D.body_set_state(mc.hit_volume.get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, m[1])
 	return r
