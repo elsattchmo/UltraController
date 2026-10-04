@@ -30,6 +30,32 @@ static func mirror(src: Animation) -> Animation:
 	return a
 
 
+## A segment of a clip played backwards, as its own clip (resampled at `fps`).
+static func reversed_segment(src: Animation, from: float, to: float, fps := 30.0) -> Animation:
+	var a := Animation.new()
+	var len := to - from
+	a.length = len
+	a.loop_mode = Animation.LOOP_NONE
+	var n := maxi(int(ceil(len * fps)), 1)
+	for t in src.get_track_count():
+		var ty := src.track_get_type(t)
+		if ty != Animation.TYPE_ROTATION_3D and ty != Animation.TYPE_POSITION_3D and ty != Animation.TYPE_SCALE_3D:
+			continue
+		var nt := a.add_track(ty)
+		a.track_set_path(nt, src.track_get_path(t))
+		for k in n + 1:
+			var tt := minf(k / fps, len)
+			var st := to - tt
+			match ty:
+				Animation.TYPE_ROTATION_3D:
+					a.rotation_track_insert_key(nt, tt, src.rotation_track_interpolate(t, st))
+				Animation.TYPE_POSITION_3D:
+					a.position_track_insert_key(nt, tt, src.position_track_interpolate(t, st))
+				Animation.TYPE_SCALE_3D:
+					a.scale_track_insert_key(nt, tt, src.scale_track_interpolate(t, st))
+	return a
+
+
 ## The same transform on the other side of the body (bone-local mirror: a proper rotation).
 static func mirror_xform(t: Transform3D) -> Transform3D:
 	var m := Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1))

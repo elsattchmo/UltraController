@@ -5,7 +5,7 @@ extends MotorStateHandler
 
 const Id := MotorState.Id
 const LIE_HEIGHT := 0.5
-const GET_UP_TIME := 1.5
+const GET_UP_TIME := 1.7
 
 
 func enter(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
@@ -38,9 +38,9 @@ func tick(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 	var v := m.body.velocity
 	if s.state == Id.RAGDOLL:
 		m.set_height(s, move_toward(s.height, LIE_HEIGHT, 4.0 * m.dt))
-		if s.is_grounded():
-			var hv := m.horizontal(v).move_toward(Vector3.ZERO, 5.0 * m.dt)
-			v = Vector3(hv.x, v.y, hv.z)
+		# A body tumbling along the ground stops quickly.
+		var hv := m.horizontal(v).move_toward(Vector3.ZERO, (11.0 if s.is_grounded() else 1.5) * m.dt)
+		v = Vector3(hv.x, v.y, hv.z)
 	else:
 		var want := m.profile.crawl_height if UltraInjury.must_crawl(s) else m.profile.stand_height
 		var next_h := move_toward(s.height, want, 1.6 * m.dt)

@@ -56,6 +56,8 @@ var body_fx: UltraBodyFX
 var ragdoll: UltraRagdoll
 ## Getting up: the body starts where the ragdoll lay and eases onto the capsule.
 var ragdoll_offset := Vector3.ZERO
+## Getting up: the body starts turned the way the ragdoll lay and eases round to body_yaw.
+var ragdoll_yaw := 0.0
 var _was_wet := false
 var anim: UltraAnimDriver
 
@@ -351,6 +353,8 @@ func apply_remote(pos: Vector3, vel: Vector3, yaw: float, e: Dictionary) -> void
 func _process(delta: float) -> void:
 	visual_offset = visual_offset.lerp(Vector3.ZERO, 1.0 - exp(-14.0 * delta))
 	ragdoll_offset = ragdoll_offset.lerp(Vector3.ZERO, 1.0 - exp(-2.2 * delta))
+	if state.state != MotorState.Id.GET_UP or ragdoll == null or not ragdoll.active:
+		ragdoll_yaw = lerpf(ragdoll_yaw, 0.0, 1.0 - exp(-2.5 * delta))
 	_sync_visual(Engine.get_physics_interpolation_fraction())
 	if anim:
 		anim.state = state.state
@@ -358,6 +362,7 @@ func _process(delta: float) -> void:
 		anim.velocity = state.vel
 		anim.air_time = state.air_time
 		anim.getup_crawl = UltraInjury.must_crawl(state)
+		anim.getup_front = ragdoll != null and ragdoll.getup_front
 		var S := UltraLimbs.Status
 		var ll := UltraLimbs.leg(state, true)
 		var lr := UltraLimbs.leg(state, false)
@@ -415,6 +420,7 @@ func _sync_visual(alpha: float) -> void:
 			and absf(angle_difference(state.body_yaw, last_input.yaw)) < 0.05:
 		yaw = input_source.live_yaw
 	visual_feet = p
+	yaw += ragdoll_yaw
 	var basis := Basis(Vector3.UP, yaw)
 	if state.state == MotorState.Id.ROPE:
 		# Hang along the rope (pivot at the hands) with the rope just in front of the chest.
@@ -495,6 +501,7 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 		state.hp = 0.0
 		state.trav_from = info.dir * clampf(info.amount * 0.06, 1.0, 6.0)   # the body's push
 		motor.change_state(state, last_input, MotorState.Id.DEAD)
+		state.vel = motor.body.velocity
 		UltraNet.world.broadcast(&"died", [net_id, info.attacker_id], true)
 		died.emit()
 	elif info.amount * mult >= dp.knockdown_damage or info.kind == &"blast" or (cut & legs) != 0:
@@ -507,6 +514,7 @@ func knock_down(push: Vector3) -> void:
 		return
 	state.trav_from = push
 	motor.change_state(state, last_input, MotorState.Id.RAGDOLL)
+	state.vel = motor.body.velocity            # (outside a motor step: carry the push over)
 
 
 func respawn(at: Transform3D) -> void:

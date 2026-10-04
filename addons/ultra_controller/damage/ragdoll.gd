@@ -31,6 +31,29 @@ var active := false
 var _fade := 0.0                          ## 1 = ragdoll, 0 = animation
 var _getting_up := false
 
+## --- Active ragdoll ("muscle tone"), and joint limits enforced here: the Jolt integration
+## ignores PhysicalBone3D joint limits, so the bones would otherwise fold any way at all.
+## 0..1 how hard the body holds its pose when knocked down / once it's lying there.
+@export_range(0, 1, 0.01) var tone_start := 1.0
+@export_range(0, 1, 0.01) var tone_down := 0.18
+@export_range(0, 1, 0.01) var tone_dead := 0.04
+@export_range(1, 30, 0.5) var max_joint_speed := 7.0      ## rad/s, any bone vs. its parent
+@export_range(1, 30, 0.5) var max_bone_speed := 12.0      ## m/s
+const TONE_W := 13.0                       ## muscle natural frequency at full tone (rad/s)
+const LIMIT_W := 30.0                      ## joint-limit stiffness (rad/s)
+## Brace pose: arms out to break the fall (a falling-forward frame of Death_A).
+const BRACE_CLIP := "Death_A"
+const BRACE_TIME := 3.3
+
+var _ctl: Array[Dictionary] = []          ## per controlled bone
+var _t := 0.0
+var getup_front := false                  ## presentation: lying face down when getting up
+var getup_yaw := NAN                      ## world yaw the get-up clip should start facing
+var limit_violation := 0.0
+## Steers the tumbling body toward the knocked-down capsule (so the get-up starts near it).
+var pull_strength := 1.0
+                ## largest joint-limit overshoot this ragdoll (deg)
+
 
 func setup(c: UltraCharacter) -> void:
 	character = c
@@ -92,6 +115,191 @@ func setup(c: UltraCharacter) -> void:
 			pb.set("joint_constraints/twist_span", float(spec[6]))
 		sim.add_child(pb)
 		bones.append(pb)
+	_build_controllers(sk)
+
+
+func _pb_for(sk: Skeleton3D, b: int) -> PhysicalBone3D:
+	for pb in bones:
+		if sk.find_bone(pb.bone_name) == b:
+			return pb
+	return null
+
+
+func _build_controllers(sk: Skeleton3D) -> void:
+	var specs := BODIES.duplicate()
+	specs.append(["RightFoot", "RightToes", 0.045, 1.0, J.CONE, 25.0, 10.0])
+	var brace := _clip_globals(sk, BRACE_CLIP, BRACE_TIME)
+	for spec: Array in specs:
+		var b := sk.find_bone(spec[0])
+		var pb := _pb_for(sk, b)
+		if pb == null or spec[0] == "Hips":
+			continue
+		var par := sk.get_bone_parent(b)
+		var ppb: PhysicalBone3D = null
+		while par >= 0 and ppb == null:
+			ppb = _pb_for(sk, par)
+			if ppb == null:
+				par = sk.get_bone_parent(par)
+		if ppb == null:
+			continue
+		var rest_rel := (sk.get_bone_global_rest(par).basis.orthonormalized().inverse() * sk.get_bone_global_rest(b).basis.orthonormalized()).get_rotation_quaternion()
+		var brace_rel := rest_rel
+		if not brace.is_empty():
+			brace_rel = ((brace[par] as Basis).inverse() * (brace[b] as Basis)).get_rotation_quaternion()
+		_ctl.append({"pb": pb, "parent": ppb, "bone": b, "pbone": par, "rest_rel": rest_rel,
+			"kind": spec[4], "lim": deg_to_rad(float(spec[5])), "snap": rest_rel, "brace": brace_rel})
+
+
+## Global (skeleton-space) bone bases of a clip frame, composed from its rotation tracks.
+func _clip_globals(sk: Skeleton3D, clip: String, t: float) -> Array:
+	var lib: AnimationLibrary = character.body_profile.library if character.body_profile else null
+	if lib == null or not lib.has_animation(clip):
+		return []
+	var a := lib.get_animation(clip)
+	var local := {}
+	for tr in a.get_track_count():
+		if a.track_get_type(tr) == Animation.TYPE_ROTATION_3D:
+			local[String(a.track_get_path(tr).get_concatenated_subnames())] = a.rotation_track_interpolate(tr, t)
+	var g: Array = []
+	g.resize(sk.get_bone_count())
+	for b in sk.get_bone_count():
+		var q: Quaternion = local.get(sk.get_bone_name(b), sk.get_bone_rest(b).basis.get_rotation_quaternion())
+		var p := sk.get_bone_parent(b)
+		g[b] = (g[p] as Basis) * Basis(q) if p >= 0 else Basis(q)
+	return g
+
+
+## Bone world basis from its physical body (body_offset only translates).
+static func _wb(pb: PhysicalBone3D) -> Basis:
+	return pb.global_basis.orthonormalized()
+
+
+func _snapshot_pose() -> void:
+	for c in _ctl:
+		var pr: PhysicalBone3D = c.parent
+		var ch: PhysicalBone3D = c.pb
+		c.snap = (_wb(pr).inverse() * _wb(ch)).get_rotation_quaternion()
+
+
+## Muscles + joint limits + speed limits, as velocity changes (stable at 60 Hz).
+func _drive(delta: float) -> void:
+	_t += delta
+	var dead := character.state.state == MotorState.Id.DEAD
+	var tone := lerpf(tone_start, tone_down, smoothstep(0.0, 1.2, _t))
+	if dead:
+		tone = lerpf(tone, tone_dead, smoothstep(0.3, 2.0, _t))
+	# Arms come out to break the fall, then relax once down.
+	var brace_w := smoothstep(0.12, 0.55, _t) * lerpf(1.0, 0.35, smoothstep(0.9, 1.6, _t)) * (0.5 if dead else 1.0)
+	# Once down, the body loses energy fast (it lies still instead of twitching).
+	var settle := smoothstep(0.8, 1.6, _t)
+	for pb in bones:
+		pb.linear_damp = lerpf(0.1, 2.5, settle)
+		pb.angular_damp = lerpf(1.5, 6.0, settle)
+	var kt := pow(TONE_W, 2.0) * tone
+	var ct := 2.0 * 0.9 * TONE_W * sqrt(tone)
+	var kl := LIMIT_W * LIMIT_W
+	var cl := 2.0 * LIMIT_W
+	for c in _ctl:
+		var pr: PhysicalBone3D = c.parent
+		var ch: PhysicalBone3D = c.pb
+		var pw := _wb(pr)
+		var cw := _wb(ch)
+		var q := (pw.inverse() * cw).get_rotation_quaternion()
+		var rest_rel: Quaternion = c.rest_rel
+		var goal: Quaternion = (c.snap as Quaternion).slerp(c.brace, brace_w)
+		# Joint limit: the nearest allowed relative rotation.
+		var d := rest_rel.inverse() * q
+		if d.w < 0.0:
+			d = -d
+		var allowed := q
+		var over := 0.0
+		if c.kind == J.HINGE:
+			# Knees / elbows: never bend the wrong way (backwards about the bone's +X); the rest
+			# (twist, the bend itself up to its limit) is left to the muscles.
+			var ang := wrapf(2.0 * atan2(d.x, d.w), -PI, PI)
+			if ang < deg_to_rad(-4.0):
+				allowed = q * Quaternion(Vector3.RIGHT, deg_to_rad(-4.0) - ang)
+				over = rad_to_deg(deg_to_rad(-4.0) - ang)
+			elif d.get_angle() > c.lim:
+				allowed = rest_rel * Quaternion.IDENTITY.slerp(d, c.lim / d.get_angle())
+				over = rad_to_deg(d.get_angle() - c.lim)
+		elif d.get_angle() > c.lim:
+			allowed = rest_rel * Quaternion.IDENTITY.slerp(d, c.lim / d.get_angle())
+			over = rad_to_deg(d.get_angle() - c.lim)
+		if _t > 0.25:
+			limit_violation = maxf(limit_violation, over)
+		var w_rel := ch.angular_velocity - pr.angular_velocity
+		var dv := Vector3.ZERO
+		if kt > 0.0:
+			dv += _rot_err(pw, cw, goal) * kt - w_rel * ct
+		var lim_err := _rot_err(pw, cw, allowed)
+		if lim_err.length() > 0.002:
+			dv += lim_err * kl - w_rel * cl * 0.5
+		dv *= delta
+		var mc := ch.mass
+		var mp := pr.mass
+		ch.angular_velocity += dv * (mp / (mc + mp))
+		pr.angular_velocity -= dv * (mc / (mc + mp))
+		# Max joint speed.
+		var wr := ch.angular_velocity - pr.angular_velocity
+		if wr.length() > max_joint_speed:
+			ch.angular_velocity = pr.angular_velocity + wr.normalized() * max_joint_speed
+	# Keep the body near the (deterministic) knocked-down capsule, so getting up starts close
+	# to where it lies: a soft horizontal pull on the hips.
+	var hips := bones[0] if not bones.is_empty() else null
+	# Only while falling / tumbling: once down, the body lies where it is (dragging it along
+	# the floor would keep it twitching).
+	var pull_w := (1.0 - smoothstep(1.0, 1.5, _t)) * pull_strength
+	if hips and hips.bone_name == "Hips" and pull_w > 0.0:
+		var off := character.state.pos - hips.global_position
+		off.y = 0.0
+		var cv := character.state.vel
+		# Only beyond a dead zone (the hips needn't sit exactly over the capsule), so the body can
+		# come to rest.
+		var excess := off.normalized() * maxf(off.length() - 0.6, 0.0) if off.length() > 0.001 else Vector3.ZERO
+		var want := Vector3(cv.x, 0, cv.z) + excess.limit_length(1.5) * 3.0
+		var hv := Vector3(hips.linear_velocity.x, 0, hips.linear_velocity.z)
+		var dv := (want - hv) * minf(5.0 * delta, 1.0) * pull_w
+		for pb in bones:                   # the whole body, so it doesn't stretch from the hips
+			pb.linear_velocity += dv * (1.0 if pb == hips else 0.6)
+	for pb in bones:
+		if pb.linear_velocity.length() > max_bone_speed:
+			pb.linear_velocity = pb.linear_velocity.normalized() * max_bone_speed
+		if pb.angular_velocity.length() > max_joint_speed * 2.0:
+			pb.angular_velocity = pb.angular_velocity.normalized() * max_joint_speed * 2.0
+
+
+## World axis * angle that turns the child onto `goal` (relative to the parent).
+static func _rot_err(pw: Basis, cw: Basis, goal: Quaternion) -> Vector3:
+	var want := pw * Basis(goal)
+	var e := (want * cw.inverse()).get_rotation_quaternion()
+	if e.w < 0.0:
+		e = -e
+	var ang := e.get_angle()
+	return e.get_axis() * ang if ang > 0.0001 else Vector3.ZERO
+
+
+## Which way the body lies, and the yaw the get-up clip should start from.
+func _decide_getup() -> void:
+	var sk := character.skeleton
+	var chest := _pb_for(sk, sk.find_bone("Chest"))
+	var hips := _pb_for(sk, sk.find_bone("Hips"))
+	var head := _pb_for(sk, sk.find_bone("Head"))
+	if chest == null or hips == null or head == null:
+		getup_front = false
+		getup_yaw = NAN
+		return
+	var fwd_local := sk.get_bone_global_rest(sk.find_bone("Chest")).basis.orthonormalized().inverse() * Vector3(0, 0, 1)
+	var front := _wb(chest) * fwd_local
+	getup_front = front.y < -0.2
+	var h := head.global_position - hips.global_position
+	h.y = 0.0
+	if h.length() < 0.05:
+		getup_yaw = NAN
+		return
+	h = h.normalized()
+	# Face-down clip: head ahead of the character. Face-up (LayToIdle): head behind.
+	getup_yaw = atan2(-h.x, -h.z) if getup_front else atan2(h.x, h.z)
 
 
 func _physics_process(delta: float) -> void:
@@ -103,9 +311,14 @@ func _physics_process(delta: float) -> void:
 		start()
 	elif st == MotorState.Id.GET_UP and active and not _getting_up:
 		_getting_up = true
+		_decide_getup()
 		character.ragdoll_offset = hips_offset()
+		if not is_nan(getup_yaw):
+			character.ragdoll_yaw = angle_difference(character.state.body_yaw, getup_yaw)
 	elif not down and st != MotorState.Id.GET_UP and active:
 		stop()
+	if active and not _getting_up:
+		_drive(delta)
 	if _getting_up:
 		_fade = maxf(_fade - delta / 0.6, 0.0)
 		sim.influence = _fade
@@ -120,10 +333,14 @@ func start() -> void:
 	sim.active = true
 	sim.influence = 1.0
 	sim.physical_bones_start_simulation()
-	var v := character.state.vel + character.state.trav_from * 0.6
+	var v := character.state.vel             # already carries the knock-down push
 	for pb in bones:
 		pb.linear_velocity = v
 		pb.angular_velocity = Vector3.ZERO
+		pb.angular_damp = 1.5
+	_t = 0.0
+	limit_violation = 0.0
+	_snapshot_pose()
 
 
 func stop() -> void:

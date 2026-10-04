@@ -45,6 +45,7 @@ var climb_kind := 0
 var climb_duration := 0.6
 var air_time := 0.0
 var getup_crawl := false
+var getup_front := false
 ## Injuries: limp severity 0..1 and which leg; hunch from a hurt torso.
 var limp := 0.0
 var limp_left := true
@@ -133,6 +134,15 @@ func _clip(role: StringName) -> StringName:
 
 
 const BRISK_RATE := 1.75
+## Face-down get-up: Death_A from where it lies on its front (3.85 s) back to standing (1.6 s).
+const FRONT_GETUP_FROM := 1.6
+const FRONT_GETUP_LEN := 2.25
+const GETUP_TIME := 1.7          ## keep in step with ragdoll_state.gd GET_UP_TIME
+
+
+func _clip_len(role: StringName, fallback: float) -> float:
+	var a := _role_anim(role)
+	return a.length if a else fallback
 ## Most the legs turn toward travel when walking backwards on a diagonal.
 var back_warp_deg := 35.0
 ## The mannequin's Strafe_Right doesn't blend with Walk_Backwards (back-right diagonals skate
@@ -336,7 +346,22 @@ func _build() -> AnimationNodeBlendTree:
 	dive.connect_node("output", 0, "rate")
 	loco.add_node("dive", dive, Vector2(1200, 500))
 	# --- down and up again (the ragdoll covers the fall; this is the pose it fades into)
-	loco.add_node("getup", _anim(&"get_up", false), Vector2(1400, 400))
+	# Both get-ups last GET_UP_TIME (the motor's): face up = LayToIdle; face down = the end of
+	# Death_A (falling onto the front) played backwards: push up, kneel, stand.
+	var gu := AnimationNodeBlendTree.new()
+	gu.add_node("clip", _anim(&"get_up", false), Vector2(0, 0))
+	gu.add_node("speed", AnimationNodeTimeScale.new(), Vector2(200, 0))
+	gu.connect_node("speed", 0, "clip")
+	gu.connect_node("output", 0, "speed")
+	loco.add_node("getup", gu, Vector2(1400, 400))
+	var gf := AnimationNodeBlendTree.new()
+	var fa := AnimationNodeAnimation.new()
+	fa.animation = _reversed(_clip(&"death_a"), FRONT_GETUP_FROM, FRONT_GETUP_FROM + FRONT_GETUP_LEN)
+	gf.add_node("clip", fa, Vector2(0, 0))
+	gf.add_node("speed", AnimationNodeTimeScale.new(), Vector2(200, 0))
+	gf.connect_node("speed", 0, "clip")
+	gf.connect_node("output", 0, "speed")
+	loco.add_node("getup_front", gf, Vector2(1400, 500))
 
 	# --- root motion one-shots (clip swapped at runtime); two slots so back-to-back moves blend
 	for n in ["rm_a", "rm_b"]:
@@ -345,7 +370,7 @@ func _build() -> AnimationNodeBlendTree:
 		loco.add_node(n, a, Vector2(800, 200))
 
 	# Fully connected so travel() always crossfades directly.
-	var names := ["ground", "crouch", "crawl", "air", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b", "climb", "vault", "hang", "ladder", "pipe", "wall", "rope", "swim", "dive", "getup"]
+	var names := ["ground", "crouch", "crawl", "air", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b", "climb", "vault", "hang", "ladder", "pipe", "wall", "rope", "swim", "dive", "getup", "getup_front"]
 	for a_name in names:
 		for b_name in names:
 			if a_name == b_name:
@@ -506,7 +531,7 @@ func _drive_state(speed: float) -> void:
 			want = "fall"
 		Id.GET_UP:
 			# No legs to stand on: fade from the ragdoll straight into the crawl.
-			want = "crawl" if getup_crawl else "getup"
+			want = "crawl" if getup_crawl else ("getup_front" if getup_front else "getup")
 	if want == "rm":
 		if rm_clip != _cur_rm:
 			var curve := anim_set.rm_curve(rm_clip)
@@ -527,8 +552,11 @@ func _drive_state(speed: float) -> void:
 		# A ledge climb-up starts with the hands already high (about a third into the clip).
 		tree.set(LOCO + "climb/seek/seek_request", 0.22 if state == MotorState.Id.LEDGE_CLIMB else 0.0)
 		tree.set(LOCO + "climb/speed/scale", 0.6 / maxf(climb_duration, 0.2))
-	if want == "getup" and _cur_loco != "getup":
-		_loco.start("getup", true)
+	if want.begins_with("getup") and _cur_loco != want:
+		var dur := GETUP_TIME
+		tree.set(LOCO + "getup/speed/scale", _clip_len(&"get_up", 1.5) / dur)
+		tree.set(LOCO + "getup_front/speed/scale", FRONT_GETUP_LEN / dur)
+		_loco.start(want, true)
 		_cur_loco = want
 		if inertial:
 			inertial.trigger()
@@ -736,6 +764,20 @@ func _hips_yaw(clip: StringName) -> float:
 			var z := Basis(q).z
 			return atan2(z.x, z.z)
 	return NAN
+
+
+## A reversed segment of a clip, made once and kept in the same library.
+func _reversed(clip: StringName, from: float, to: float) -> StringName:
+	var s := String(clip)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var clip_name := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	if l == null or not l.has_animation(clip_name):
+		return clip
+	var rname := "%s_rev_%d_%d" % [clip_name, int(from * 100), int(to * 100)]
+	if not l.has_animation(rname):
+		l.add_animation(rname, UltraAnimMirror.reversed_segment(l.get_animation(clip_name), from, to))
+	return StringName((lib + "/" if lib != "" else "") + rname)
 
 
 ## A left/right mirrored copy of a clip, made once and kept in the same library.

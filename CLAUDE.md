@@ -76,6 +76,16 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   keep `influence = 0` while it's off. Dismemberment scales the region's root bone to ~0 in the
   last modifier (`DismemberModifier`, must stay after the simulator), caps it, and spawns a gib
   skinned on the CPU from the region's triangles.
+- **Jolt ignores PhysicalBone3D joint limits** (probed: setting them to 5 deg changes nothing).
+  `UltraRagdoll._drive` enforces them (cones; knees/elbows never bend backwards about +X),
+  caps joint speed (`max_joint_speed`) and adds muscle tone: bones are PD-driven toward the
+  pose at the moment of the knock-down, blending to a brace pose (Death_A 3.3 s), fading from
+  `tone_start` to `tone_down` (`tone_dead` when dead); damping rises once down so it settles.
+  A damped pull keeps the body near the deterministic capsule for the first ~1.2 s.
+- Get-up picks the clip from how the ragdoll lies: face up = LayToIdle, face down = Death_A
+  1.6-3.85 s reversed (`UltraAnimMirror.reversed_segment`); the body starts at the ragdoll's
+  hips and yaw (`ragdoll_offset`, `ragdoll_yaw`) and eases onto the capsule. GET_UP_TIME 1.7.
+- `knock_down` / death set state.vel from the push (they run outside a motor step).
 - Upper-body item clips can be mirrored at runtime (`UltraAnimMirror`; the skeleton is mirror
   symmetric). `BodyDynamicsModifier.item_hips_yaw` turns the spine by the item clip's own hips
   yaw so a mirrored clip isn't twisted by unmirrored legs.
