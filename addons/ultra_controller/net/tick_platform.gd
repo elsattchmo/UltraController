@@ -64,7 +64,12 @@ func apply_tick(tick: int) -> void:
 
 
 ## Put every platform where it is at `tick` (start of a simulated tick, or before a replay).
+## The world tick last applied (presentation of other tick-driven things, e.g. water level).
+static var current_tick := 0
+
+
 static func set_all(tick: int) -> void:
+	current_tick = tick
 	for p in all:
 		p.apply_tick(tick)
 

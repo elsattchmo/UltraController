@@ -43,6 +43,11 @@ static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, rep
 		if o == null or o.rigid() == null:
 			_release(c, s, 0.0, replaying)
 			return
+		var swimming := s.state == MotorState.Id.SWIM or s.state == MotorState.Id.DIVE
+		var two_hand := s.held_grip >= 0 or s.held_mass > c.profile.lift_limit
+		if swimming and two_hand:
+			_release(c, s, 0.0, replaying)               # can't swim with a two-hand load
+			return
 		if UltraMotor.pressed_edge(s, i, InputFrame.B_DROP) or UltraMotor.pressed_edge(s, i, InputFrame.B_INTERACT) or UltraMotor.pressed_edge(s, i, InputFrame.B_GRAB):
 			_release(c, s, 0.0, replaying)
 			return

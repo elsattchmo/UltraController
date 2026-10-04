@@ -22,7 +22,8 @@ signal snapshot_received(server_tick: int)
 
 const SNAPSHOT_EVERY := 2
 const INTERP_DELAY_TICKS := 6.0
-const MAX_RESEND := 24             ## send every unacknowledged input, up to this many
+const MAX_RESEND := 60             ## send every unacknowledged input, up to this many (1 s:
+                                   ## an OS stall on the client mustn't leave holes behind)
 const TARGET_QUEUE := 2
 const MAX_QUEUE := 32
 const CORRECTION_EPS := 0.02
@@ -509,7 +510,9 @@ func _send_inputs() -> void:
 		# Everything the server hasn't confirmed yet: a burst of lost packets is refilled by
 		# the very next one.
 		var frames: Array[InputFrame] = []
-		var from := maxi(p.last_acked + 1, p.client_tick - MAX_RESEND)
+		# Keep the datagram under ~1.1 KB with several local players (no fragmentation).
+		var cap := clampi(MAX_RESEND / mine.size(), 24, MAX_RESEND)
+		var from := maxi(p.last_acked + 1, p.client_tick - cap)
 		for t in range(from, p.client_tick):
 			var f := p.history_input(t)
 			if f:

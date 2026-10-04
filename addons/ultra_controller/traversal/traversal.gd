@@ -122,6 +122,16 @@ static func hook(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 						return _start_move(m, s, Move.MANTLE, l)
 					if l.height <= REACH_AIR:
 						return _hang(m, s, l)
+		Id.SWIM:
+			# Out of the water: up a ladder, or over an edge that's not far above the surface.
+			var lad3 := UltraLadder.find_enterable(s.pos, dir, i.move.y)
+			if lad3 and forward:
+				return _enter_ladder(m, s, lad3)
+			if jump or forward:
+				var l3 := scan(m, s.pos, dir, 2.4)
+				var above := l3.top.y - m.water_surface if l3 else 0.0
+				if l3 and (l3.standable or l3.crouch_only) and above > -0.05 and above < 0.9 and (jump or above < 0.45):
+					return _start_move(m, s, Move.MANTLE, l3)
 		Id.JUMP, Id.FALL:
 			var rope := UltraRope.find_catch(s.pos)
 			if rope and not (s.prev_state == Id.ROPE and s.state_time < 0.5):

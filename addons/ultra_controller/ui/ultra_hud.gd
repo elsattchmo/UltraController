@@ -12,6 +12,7 @@ var _cross: Control
 var _prompt: Label
 var _ammo: Label
 var _health: ProgressBar
+var _breath: ProgressBar
 var _msg: Label
 var _hotbar: HBoxContainer
 var _inv_panel: PanelContainer
@@ -54,6 +55,19 @@ func _ready() -> void:
 	_health.add_theme_stylebox_override("fill", fill)
 	_health.add_theme_stylebox_override("background", bg)
 	_root.add_child(_health)
+	# Air: appears under water and while it refills.
+	_breath = ProgressBar.new()
+	_breath.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_breath.position = Vector2(24, -90)
+	_breath.size = Vector2(260, 12)
+	_breath.show_percentage = false
+	var bfill := StyleBoxFlat.new()
+	bfill.bg_color = Color(0.45, 0.8, 1.0)
+	bfill.set_corner_radius_all(3)
+	_breath.add_theme_stylebox_override("fill", bfill)
+	_breath.add_theme_stylebox_override("background", bg)
+	_breath.visible = false
+	_root.add_child(_breath)
 	_hotbar = HBoxContainer.new()
 	_hotbar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	_hotbar.position = Vector2(-9 * 37, -64)
@@ -118,6 +132,10 @@ func _process(delta: float) -> void:
 	_msg_t = maxf(_msg_t - delta, 0.0)
 	_msg.visible = _msg_t > 0.0
 	_health.value = s.hp
+	_breath.max_value = character.profile.breath_time
+	_breath.value = s.breath
+	_breath.visible = s.breath < character.profile.breath_time - 0.01
+	_breath.modulate = Color(1, 0.35, 0.3) if s.breath < 5.0 else Color.WHITE
 	var def := character.held_def()
 	if def and def.kind == ItemDefinition.Kind.FIREARM:
 		var reserve := character.inventory.count_of(StringName(def.stat("ammo", "")))

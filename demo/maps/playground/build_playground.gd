@@ -31,6 +31,7 @@ func _ready() -> void:
 	(load("res://demo/maps/playground/zones_m4.gd") as Script).new(self).build()
 	(load("res://demo/maps/playground/zones_m5.gd") as Script).new(self).build()
 	(load("res://demo/maps/playground/zones_m6.gd") as Script).new(self).build()
+	(load("res://demo/maps/playground/zones_m7.gd") as Script).new(self).build()
 	var ps := PackedScene.new()
 	var err := ps.pack(scene_root)
 	if err == OK:
@@ -154,8 +155,42 @@ func _environment() -> void:
 	sun.owner = scene_root
 
 
+## Holes in the ground slab for sunken zones (x, z, width, depth): pool + grotto, cistern, river.
+const GROUND_HOLES: Array[Rect2] = [Rect2(40, 64, 32, 32), Rect2(78, 64, 12, 12), Rect2(96, 60, 4, 40)]
+
+
+## The 400 m ground slab, cut into strips around GROUND_HOLES.
 func _ground() -> void:
-	_block(scene_root, "Ground", Vector3(400, 1, 400), 0, 0, 0.0, grid_dark)
+	var g := _node(scene_root, "Ground")
+	var xs: Array[float] = [-200.0, 200.0]
+	for h in GROUND_HOLES:
+		xs.append(h.position.x)
+		xs.append(h.end.x)
+	xs.sort()
+	var k := 0
+	for i in xs.size() - 1:
+		var x0 := xs[i]
+		var x1 := xs[i + 1]
+		if x1 - x0 < 0.001:
+			continue
+		var cx := (x0 + x1) * 0.5
+		var zs: Array = [Vector2(-200, 200)]
+		for h in GROUND_HOLES:
+			if cx <= h.position.x or cx >= h.end.x:
+				continue
+			var nz: Array = []
+			for seg: Vector2 in zs:
+				if h.end.y <= seg.x or h.position.y >= seg.y:
+					nz.append(seg)
+					continue
+				if h.position.y > seg.x:
+					nz.append(Vector2(seg.x, h.position.y))
+				if h.end.y < seg.y:
+					nz.append(Vector2(h.end.y, seg.y))
+			zs = nz
+		for seg: Vector2 in zs:
+			_block(g, "Slab%02d" % k, Vector3(x1 - x0, 1, seg.y - seg.x), cx, (seg.x + seg.y) * 0.5, 0.0, grid_dark)
+			k += 1
 
 
 func _hub() -> void:

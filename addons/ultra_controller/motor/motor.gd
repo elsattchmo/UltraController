@@ -23,6 +23,8 @@ const STATE_SCRIPTS := {
 	MotorState.Id.LADDER: preload("states/climb_state.gd"),
 	MotorState.Id.WALL_CLIMB: preload("states/climb_state.gd"),
 	MotorState.Id.ROPE: preload("states/rope_state.gd"),
+	MotorState.Id.SWIM: preload("states/swim_state.gd"),
+	MotorState.Id.DIVE: preload("states/swim_state.gd"),
 }
 
 const F_TURNING := 1 << 8       ## idle feet turning toward aim (anim plays a turn)
@@ -46,6 +48,10 @@ var last_step_up: float = 0.0
 var last_landing: float = 0.0
 var floor_friction: float = 1.0
 var floor_normal := Vector3.UP
+## Water sampled at the start of the step (volumes are static or a function of the tick).
+var water: UltraWater
+var water_surface := -INF
+var water_depth := 0.0            ## water above the feet (0 = dry)
 
 var _handlers := {}
 var _sep_query: PhysicsShapeQueryParameters3D
@@ -79,6 +85,7 @@ func _init(p_body: CharacterBody3D, p_shape: CollisionShape3D, p_profile: Moveme
 	body.platform_on_leave = CharacterBody3D.PLATFORM_ON_LEAVE_DO_NOTHING
 	_state_scripts = STATE_SCRIPTS.duplicate()
 	transition_hooks.append(UltraTraversal.hook)
+	transition_hooks.append(UltraSwim.hook)
 	for id: int in _state_scripts:
 		var scr: Script = _state_scripts[id]
 		if not _handlers.has(scr):
@@ -105,6 +112,7 @@ func step(s: MotorState, input: InputFrame, p_dt: float) -> void:
 	body.global_position = s.pos
 	body.velocity = s.vel
 	_ride_platform(s)
+	_sample_water(s)
 
 	# Timers shared by every state.
 	if pressed_edge(s, input, InputFrame.B_JUMP):
@@ -126,11 +134,14 @@ func step(s: MotorState, input: InputFrame, p_dt: float) -> void:
 			break
 		change_state(s, input, nxt)
 
+	var swimming := s.state == MotorState.Id.SWIM or s.state == MotorState.Id.DIVE
+	body.motion_mode = CharacterBody3D.MOTION_MODE_FLOATING if swimming else CharacterBody3D.MOTION_MODE_GROUNDED
 	handler(s.state).tick(self, s, input)
 
 	s.pos = body.global_position
 	s.vel = body.velocity
 	s.state_time += dt
+	UltraSwim.update_breath(self, s)
 	# (prev_buttons is advanced by the character after the action layer has seen the edges)
 
 
@@ -189,6 +200,12 @@ static func rotate_toward_angle(from: float, to: float, max_delta: float) -> flo
 	return from + clampf(d, -max_delta, max_delta)
 
 
+func _sample_water(s: MotorState) -> void:
+	water = UltraWater.find(s.pos + Vector3.UP * 0.01, platform_tick) if not UltraWater.all.is_empty() else null
+	water_surface = water.surface_y(platform_tick) if water else -INF
+	water_depth = maxf(water_surface - s.pos.y, 0.0) if water else 0.0
+
+
 ## Ground speed the player is asking for this tick.
 func target_ground_speed(s: MotorState, input: InputFrame) -> float:
 	var mag := minf(input.move.length(), 1.0)
@@ -224,7 +241,7 @@ func target_ground_speed(s: MotorState, input: InputFrame) -> float:
 		var fwd := input.move.y / mag
 		var dir_mult := lerpf(profile.strafe_mult, 1.0, fwd) if fwd >= 0.0 else lerpf(profile.strafe_mult, profile.back_mult, -fwd)
 		speed *= dir_mult
-	return speed * s.carry_mult
+	return speed * s.carry_mult * UltraSwim.wade_mult(self)
 
 
 ## Weighty planar acceleration with momentum-limited turning and plant-and-pivot braking.
@@ -443,6 +460,7 @@ func do_jump(s: MotorState, input: InputFrame) -> void:
 	s.jump_buf_t = 0.0
 	s.coyote_t = 0.0
 	var v := profile.jump_velocity(gravity) * lerpf(0.75, 1.0, s.carry_mult)
+	v *= lerpf(1.0, 0.6, clampf(water_depth / maxf(profile.swim_depth, 0.1), 0.0, 1.0))   # wading
 	body.velocity.y = v
 	s.set_flag(MotorState.F_JUMP_HELD, true)
 	s.set_flag(MotorState.F_GROUNDED, false)
@@ -473,6 +491,12 @@ func update_stance(s: MotorState, want: int) -> void:
 	var rate := (profile.stand_height - profile.crouch_height) / maxf(profile.stance_transition, 0.01)
 	s.height = move_toward(s.height, target, rate * dt)
 	_apply_capsule(s.height)
+
+
+## Set the capsule height directly (swimming / diving), feet stay put.
+func set_height(s: MotorState, h: float) -> void:
+	s.height = h
+	_apply_capsule(h)
 
 
 func _apply_capsule(h: float) -> void:

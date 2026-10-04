@@ -282,6 +282,24 @@ func _build() -> AnimationNodeBlendTree:
 		bt.connect_node("output", 0, "rate")
 		loco.add_node(spec[0], bt, Vector2(1000, 400))
 
+	# --- water: tread <-> stroke by speed (stroke rate-matched); dive = stroke along the body
+	var swim := AnimationNodeBlendTree.new()
+	swim.add_node("idle", _anim(&"swim_idle"), Vector2(0, 0))
+	swim.add_node("fwd", _anim(&"swim_f"), Vector2(0, 200))
+	swim.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 200))
+	swim.add_node("mix", AnimationNodeBlend2.new(), Vector2(400, 0))
+	swim.connect_node("rate", 0, "fwd")
+	swim.connect_node("mix", 0, "idle")
+	swim.connect_node("mix", 1, "rate")
+	swim.connect_node("output", 0, "mix")
+	loco.add_node("swim", swim, Vector2(1200, 400))
+	var dive := AnimationNodeBlendTree.new()
+	dive.add_node("clip", _anim(&"swim_f"), Vector2(0, 0))
+	dive.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
+	dive.connect_node("rate", 0, "clip")
+	dive.connect_node("output", 0, "rate")
+	loco.add_node("dive", dive, Vector2(1200, 500))
+
 	# --- root motion one-shots (clip swapped at runtime); two slots so back-to-back moves blend
 	for n in ["rm_a", "rm_b"]:
 		var a := AnimationNodeAnimation.new()
@@ -289,7 +307,7 @@ func _build() -> AnimationNodeBlendTree:
 		loco.add_node(n, a, Vector2(800, 200))
 
 	# Fully connected so travel() always crossfades directly.
-	var names := ["ground", "crouch", "crawl", "air", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b", "climb", "vault", "hang", "ladder", "pipe", "wall", "rope"]
+	var names := ["ground", "crouch", "crawl", "air", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b", "climb", "vault", "hang", "ladder", "pipe", "wall", "rope", "swim", "dive"]
 	for a_name in names:
 		for b_name in names:
 			if a_name == b_name:
@@ -426,6 +444,10 @@ func _drive_state(speed: float) -> void:
 			want = "wall"
 		Id.ROPE:
 			want = "rope"
+		Id.SWIM:
+			want = "swim"
+		Id.DIVE:
+			want = "dive"
 	if want == "rm":
 		if rm_clip != _cur_rm:
 			var curve := anim_set.rm_curve(rm_clip)
@@ -499,6 +521,10 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	tree.set(LOCO + "wall/rate/scale", climb_speed / 0.5)
 	tree.set(LOCO + "hang/rate/scale", 0.6 + absf(climb_speed) * 1.5)
 	tree.set(LOCO + "rope/rate/scale", climb_speed / 0.6)
+	# Swimming: stroke fades in with speed; dive strokes match 3D speed (slow glide when still).
+	tree.set(LOCO + "swim/mix/blend_amount", smoothstep(0.15, 0.8, speed))
+	tree.set(LOCO + "swim/rate/scale", clampf(speed / 1.5, 0.5, 1.8))
+	tree.set(LOCO + "dive/rate/scale", clampf(velocity.length() / 1.8, 0.3, 1.6))
 	# Crouch / crawl cycles: forward clip, warped toward travel direction, rate-matched.
 	var crouch_rate := clampf(speed / _crouch_speed, 0.3, 2.2) * (-1.0 if backwards else 1.0)
 	tree.set(LOCO + "crouch/rate/scale", crouch_rate)
@@ -536,7 +562,7 @@ func _drive_body(delta: float) -> void:
 	# Lean from acceleration in body space, through a soft spring so it swings and settles.
 	var la := _to_local(accel)
 	var target := Vector2(clampf(la.x * 0.022, -0.16, 0.16), clampf(la.y * 0.018, -0.12, 0.12))
-	if state in [MotorState.Id.JUMP, MotorState.Id.FALL, MotorState.Id.ROOT_MOTION]:
+	if state in [MotorState.Id.JUMP, MotorState.Id.FALL, MotorState.Id.ROOT_MOTION, MotorState.Id.SWIM, MotorState.Id.DIVE]:
 		target = Vector2.ZERO
 	var k := 60.0
 	var c := 2.0 * sqrt(k) * 0.7

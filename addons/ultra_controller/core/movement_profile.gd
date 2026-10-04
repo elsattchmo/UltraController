@@ -90,6 +90,24 @@ enum View { FIRST_PERSON, THIRD_PERSON }
 @export_range(0, 1, 0.01) var land_recover_time := 0.22
 @export_range(0, 1, 0.01) var hard_land_recover_time := 0.6
 
+@export_group("Water")
+@export var enable_swim := true
+## Water this deep above the feet floats you (about chest height).
+@export_range(0.5, 2.0, 0.01) var swim_depth := 1.3
+## Floating: feet this far below the surface (head and shoulders out).
+@export_range(0.5, 2.0, 0.01) var float_depth := 1.5
+@export_range(0.2, 5, 0.05) var swim_speed := 1.5
+@export_range(0.2, 6, 0.05) var swim_sprint_speed := 2.4
+@export_range(0.2, 5, 0.05) var dive_speed := 1.8
+@export_range(0.5, 20, 0.1) var swim_accel := 3.0
+## Underwater capsule height (horizontal body).
+@export_range(0.5, 1.5, 0.01) var dive_height := 0.8
+## Seconds of air; refills 4x faster than it drains.
+@export_range(1, 120, 1) var breath_time := 20.0
+## Wading speed multiplier from knee-deep (0) to chest-deep (1).
+@export_range(0.1, 1, 0.01) var wade_mult_knee := 0.85
+@export_range(0.1, 1, 0.01) var wade_mult_chest := 0.5
+
 @export_group("Features")
 @export var enable_sprint := true
 @export var enable_crouch := true

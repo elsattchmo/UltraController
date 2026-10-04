@@ -41,6 +41,18 @@ static func get_course(name: String) -> Array:
 			out.append({"ticks": 60, "move": Vector2(0, 0.6), "yaw_rate": 1.6})
 			out.append({"ticks": 120})
 			return out
+		"swim":
+			# Walk into the deep end, swim, dive, come up, swim in circles (water under lag).
+			return [
+				{"ticks": 20},
+				{"ticks": 150, "move": Vector2(0, 1)},
+				{"ticks": 60},
+				{"ticks": 120, "move": Vector2(0, 1), "pitch": -0.7},
+				{"ticks": 60, "move": Vector2(0.5, 0.8), "pitch": -0.3},
+				{"ticks": 150, "buttons": InputFrame.B_JUMP, "pitch": 0.2},
+				{"ticks": 240, "move": Vector2(0, 1), "yaw_rate": 0.9, "pitch": 0.0},
+				{"ticks": 120},
+			]
 		"walk_short":
 			# Ride whatever we spawned on: stand, shuffle a little, jump once.
 			return [{"ticks": 240}, {"ticks": 30, "move": Vector2(0, 0.3)}, {"ticks": 2, "tap": InputFrame.B_JUMP}, {"ticks": 300}]

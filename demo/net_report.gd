@@ -33,6 +33,7 @@ var _shots := 0
 var _hooked := {}
 var _max_y := -INF                  # highest the (predicted) local player got: traversal checks
 var _trav_states := {}
+var _states_seen := {}
 
 
 func _on_snapshot(_tick: int) -> void:
@@ -55,6 +56,7 @@ func _on_snapshot(_tick: int) -> void:
 			_max_y = maxf(_max_y, p.character.state.pos.y)
 			if p.character.state.state >= MotorState.Id.MANTLE:
 				_trav_states[MotorState.Id.keys()[p.character.state.state]] = true
+			_states_seen[MotorState.Id.keys()[p.character.state.state]] = true
 
 
 var _done := false
@@ -106,6 +108,13 @@ func _finish() -> void:
 			if _max_y < climb or _trav_states.is_empty():
 				print("NETREPORT FAIL never got up (max y %.2f, want %.2f)" % [_max_y, climb])
 				ok = false
+		var want_states := UltraArgs.get_str("expect-states", "")
+		if want_states != "":
+			print("NETREPORT states %s" % ",".join(_states_seen.keys()))
+			for st in want_states.split(","):
+				if not _states_seen.has(st):
+					print("NETREPORT FAIL never entered %s" % st)
+					ok = false
 		var want_remotes := UltraArgs.get_int("expect-remotes", 0)
 		var seen := 0
 		for id: int in _path:

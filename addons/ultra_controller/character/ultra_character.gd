@@ -198,7 +198,15 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 		landed.emit(motor.last_landing)
 	if old != state.state:
 		state_changed.emit(old, state.state)
-	_accel = _accel.lerp((state.vel - _prev_vel) / delta, 0.35)
+	# Out of air: drowning hurts once a second (authority decides damage).
+	if is_authority() and state.breath <= 0.0 and tick % 60 == 0:
+		var d := UltraCombat.DamageInfo.new()
+		d.amount = 8.0
+		d.kind = &"drown"
+		d.point = state.pos + Vector3.UP * 1.5
+		d.dir = Vector3.DOWN
+		apply_damage(d)
+	_accel =_accel.lerp((state.vel - _prev_vel) / delta, 0.35)
 	_prev_vel = state.vel
 
 
@@ -309,7 +317,35 @@ func _sync_visual(alpha: float) -> void:
 			fwd = (fwd - up * fwd.dot(up)).normalized()
 			basis = Basis(up.cross(-fwd).normalized(), up, -fwd)
 			p -= fwd * ROPE_CHEST_GAP
+	elif state.state == MotorState.Id.SWIM or state.state == MotorState.Id.DIVE:
+		var xf := _swim_visual(p, yaw)
+		basis = xf.basis
+		p = xf.origin
+	else:
+		_dive_pitch = 0.0
 	visual_root.global_transform = Transform3D(basis, p)
+
+
+var _dive_pitch := 0.0
+
+
+## Swimming presentation: the stroke clip is horizontal ~1 m above its root, the tread clip is
+## upright. Lift the stroke to the waterline; under water, sink the body into the short capsule
+## and pitch it along the swim direction (around the capsule centre).
+func _swim_visual(p: Vector3, yaw: float) -> Transform3D:
+	var v := state.vel
+	var hs := Vector2(v.x, v.z).length()
+	var f := clampf((profile.stand_height - state.height) / maxf(profile.stand_height - profile.dive_height, 0.1), 0.0, 1.0)
+	var lift := 0.35 * smoothstep(0.15, 0.8, hs) * (1.0 - f) - 0.6 * f
+	var want_pitch := 0.0
+	if state.state == MotorState.Id.DIVE and v.length() > 0.3:
+		want_pitch = clampf(atan2(v.y, maxf(hs, 0.01)), deg_to_rad(-75.0), deg_to_rad(75.0))
+	_dive_pitch = lerpf(_dive_pitch, want_pitch, 1.0 - exp(-5.0 * get_process_delta_time()))
+	var yaw_b := Basis(Vector3.UP, yaw)
+	var b := yaw_b * Basis(Vector3.RIGHT, _dive_pitch)
+	var c := p + Vector3.UP * state.height * 0.5
+	var o := p + Vector3.UP * lift
+	return Transform3D(b, c + (b * yaw_b.inverse()) * (o - c))
 
 
 ## Authority only. Characters take damage here (limb damage arrives in M8).

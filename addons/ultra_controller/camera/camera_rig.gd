@@ -155,6 +155,9 @@ func _process(delta: float) -> void:
 	_land.step(delta)
 	fp_local.y += float(_land.value)
 	var fp_pos := _fp_guard(vis, vis * fp_local) if t < 0.99 else vis * fp_local
+	# Swimming at the surface: keep the eye just above the water line (never half-submerged).
+	if character.state.state == MotorState.Id.SWIM and character.motor and character.motor.water:
+		fp_pos.y = maxf(fp_pos.y, character.motor.water.surface_y(TickPlatform.current_tick) + 0.12)
 
 	# --- third-person shoulder
 	var pivot_target := character.visual_root.global_position + Vector3.UP * (character.state.height * 0.86)
@@ -189,6 +192,45 @@ func _process(delta: float) -> void:
 	camera.near = lerpf(cam_profile.near, 0.08, t)
 	var first_person := tp_blend < 0.15
 	camera.cull_mask = UltraLayers.camera_cull_mask(view_index, first_person)
+	_underwater_fx()
+
+
+var _uw_env: Environment
+var underwater := false
+
+
+## Under the surface: murky blue fog through a per-camera environment override.
+func _underwater_fx() -> void:
+	var under := not UltraWater.all.is_empty() and UltraWater.depth_at(camera.global_position, TickPlatform.current_tick) > 0.02
+	if under == underwater:
+		return
+	underwater = under
+	if under:
+		if _uw_env == null:
+			var base := get_world_3d().environment if get_world_3d() else null
+			if base == null:
+				var we := get_tree().root.find_child("WorldEnvironment", true, false) as WorldEnvironment
+				base = we.environment if we else null
+			_uw_env = base.duplicate() if base else Environment.new()
+			_uw_env.fog_enabled = true
+			_uw_env.fog_mode = Environment.FOG_MODE_EXPONENTIAL
+			_uw_env.fog_light_color = Color(0.08, 0.36, 0.44)
+			_uw_env.fog_light_energy = 0.9
+			_uw_env.fog_density = 0.1
+			_uw_env.fog_sky_affect = 1.0
+			_uw_env.adjustment_enabled = true
+			_uw_env.adjustment_saturation = 0.75
+			_uw_env.adjustment_brightness = 0.85
+			# Tint everything (fog only reaches the distance): a blue-green colour grade.
+			var gt := GradientTexture1D.new()
+			var gr := Gradient.new()
+			gr.set_color(0, Color(0.0, 0.03, 0.06))
+			gr.set_color(1, Color(0.62, 0.9, 0.95))
+			gt.gradient = gr
+			_uw_env.adjustment_color_correction = gt
+		camera.environment = _uw_env
+	else:
+		camera.environment = null
 
 
 ## Keep the first-person eye out of walls: the head bone can dip into a ledge while mantling

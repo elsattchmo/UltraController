@@ -45,7 +45,7 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   `_client_step`; single-player is OFFLINE (AUTHORITY_LOCAL, zero latency, same motor path).
 - **State is quantized every tick** (`UltraCharacter.quantize_state`, on in sessions): server and
   client compute on identical bits, so a client rebased onto a snapshot re-predicts exactly.
-- Clients send **every unacknowledged input** (≤24) each tick; the server keeps an ordered queue,
+- Clients send **every unacknowledged input** (≤60, 1 s: survives an OS stall) each tick; the server keeps an ordered queue,
   waits ≤10 ticks on a hole, never guesses inputs. Clock dilation keeps the queue ~2 deep.
 - **ENet throttle is disabled** per peer (`_no_throttle`) — it silently dropped bursts of
   20 unreliable packets on localhost under CPU load.
@@ -59,6 +59,12 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   `trav_from -> trav_to` over `trav_dur`; hang/ladder/rope keep their anchor in `trav_*` fields.
   Ropes are a pendulum in MotorState (`trav_from` = swing velocity); the verlet rope is cosmetic.
   Hands on rope/ledge are presentation (`UltraTraversalVisual`, IK priority 111 > equipment 110).
+- **Water is analytic** (`UltraWater.find/surface_y(tick)`): box volumes, level a function of the
+  world tick (valves replicate `{from,to,t0,dur}`), so swimming predicts. SWIM floats the feet
+  `float_depth` under the surface on a damped spring; DIVE uses a 0.8 m capsule and 3D aim
+  movement; `breath` is in MotorState. Buoyancy for props runs wherever physics is
+  authoritative (`UltraNet.mode != CLIENT`; tests run in NONE). Swim visuals (stroke lift,
+  dive pitch) are presentation in `UltraCharacter._swim_visual`.
 - `teleport()` drops any traversal state (else a scripted move drags you back).
 - FP eye is swept from the capsule axis (`CameraRig._fp_guard`): the head bone dips into ledges.
 
