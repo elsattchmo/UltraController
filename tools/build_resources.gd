@@ -18,7 +18,29 @@ func _init() -> void:
 	print("input actions added: ", added)
 	_profiles()
 	_body()
+	_presets()
 	quit()
+
+
+func _presets() -> void:
+	var dir := "res://addons/ultra_controller/session/presets/"
+	DirAccess.make_dir_recursive_absolute(dir)
+	var defs := [
+		["01_host_client", "Host + 1 client", ["left|--host", "right|--connect=127.0.0.1"]],
+		["02_host_2_clients", "Host + 2 clients", ["tl|--host", "tr|--connect=127.0.0.1", "bl|--connect=127.0.0.1"]],
+		["03_server_2_clients", "Dedicated server + 2 clients", ["headless|--server", "left|--connect=127.0.0.1", "right|--connect=127.0.0.1"]],
+		["04_host_client_lag", "Host + client, 120 ms lag", ["left|--host", "right|--connect=127.0.0.1 --lag=120 --jitter=20 --loss=2"]],
+		["05_host_client_bad", "Host + client, bad network (250 ms, 5% loss)", ["left|--host", "right|--connect=127.0.0.1 --lag=250 --jitter=80 --loss=5"]],
+		["06_split_2p", "Split-screen 2P", ["full|--offline --players=2 --join-screen"]],
+		["07_split_4p", "Split-screen 4P", ["full|--offline --players=4 --join-screen"]],
+		["08_host_split_plus_client", "Host split-screen 2P + remote client", ["left|--host --players=2 --join-screen", "right|--connect=127.0.0.1"]],
+	]
+	for d: Array in defs:
+		var p := UltraLaunchPreset.new()
+		p.title = d[1]
+		p.instances = PackedStringArray(d[2])
+		ResourceSaver.save(p, dir + d[0] + ".tres")
+	print("launch presets saved: ", defs.size())
 
 
 func _profiles() -> void:

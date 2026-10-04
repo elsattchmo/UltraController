@@ -5,7 +5,9 @@ extends RefCounted
 ## Per-player overrides live in user://ultra_input.cfg and are layered on top at boot.
 
 const ROOT := "ultra_controller/input/"
-const USER_FILE := "user://ultra_input.cfg"
+static var USER_FILE: String:
+	get:
+		return UltraArgs.user_path("ultra_input.cfg")
 
 ## name -> [default, type, hint, hint_string]
 const SETTINGS := {

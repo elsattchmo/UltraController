@@ -5,6 +5,9 @@ extends Resource
 ## or a shooter. Presets live in addons/ultra_controller/profiles/. Speeds are in m/s.
 
 enum Rotation { FACE_AIM, FACE_MOVE, FACE_MOVE_UNTIL_AIM }
+## How characters treat each other. SOFT (default) lets them overlap slightly and pushes them
+## apart: predicted clients never get blocked by a remote player they only see ~100 ms late.
+enum CharacterCollision { SOFT, HARD, NONE }
 enum View { FIRST_PERSON, THIRD_PERSON }
 
 @export_group("View")
@@ -64,6 +67,9 @@ enum View { FIRST_PERSON, THIRD_PERSON }
 @export_range(0.02, 0.6, 0.01) var stance_transition := 0.14
 @export_range(20, 300, 1) var mass := 80.0
 @export_range(0, 2000, 10) var push_strength := 350.0
+@export var character_collision := CharacterCollision.SOFT
+## Separation speed when two characters overlap (SOFT).
+@export_range(0, 10, 0.1) var separation_speed := 2.5
 
 @export_group("Slide")
 @export var enable_slide := true

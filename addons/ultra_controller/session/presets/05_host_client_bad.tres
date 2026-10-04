@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="UltraLaunchPreset" format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/session/launch_preset.gd" id="1_ugpsk"]
+
+[resource]
+script = ExtResource("1_ugpsk")
+title = "Host + client, bad network (250 ms, 5% loss)"
+instances = PackedStringArray("left|--host", "right|--connect=127.0.0.1 --lag=250 --jitter=80 --loss=5")

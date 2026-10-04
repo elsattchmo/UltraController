@@ -84,6 +84,46 @@ fi
 
 run "tests_$SUITE" 1200 --headless --fixed-fps 60 res://tests/test_runner.tscn -- --suite="$SUITE"
 
+# --- real multi-process netcode: dedicated server + headless clients over localhost ENet
+net_case() {   # net_case <name> <client-count> <client net args...>
+	local name="$1"; local clients="$2"; shift 2
+	local port=$((24700 + RANDOM % 250))
+	timeout 60 "$ENGINE" --headless --path "$DST" -- --server --port=$port --net-report --quit-after=28 ${SERVER_ARGS:-} > "$LOGS/net_${name}_server.log" 2>&1 &
+	local spid=$!
+	sleep 2
+	local pids=()
+	for ((k=0; k<clients; k++)); do
+		local extra=""
+		local course="course_full"
+		[ "$clients" -gt 1 ] && extra="--expect-remotes=$((clients-1))"
+		[ "$k" -gt 0 ] && course="circle_east"
+		[ -n "${CLIENT_BOT:-}" ] && course="$CLIENT_BOT"
+		timeout 60 "$ENGINE" --headless --path "$DST" -- --connect=127.0.0.1:$port --bot=$course --net-report --quit-after=22 --user-dir=c$k $extra "$@" > "$LOGS/net_${name}_client$k.log" 2>&1 &
+		pids+=($!)
+		sleep 0.5
+	done
+	local bad=0
+	for pid in "${pids[@]}"; do wait $pid || bad=1; done
+	wait $spid || bad=1
+	for f in "$LOGS"/net_${name}_*.log; do
+		grep -qE "SCRIPT ERROR|Parse Error" "$f" && { echo "verify: script errors in $f"; bad=1; }
+	done
+	if [ $bad -ne 0 ]; then
+		echo "verify: net $name FAILED"
+		grep -h "NETREPORT" "$LOGS"/net_${name}_*.log | head -20
+		fail=1
+	else
+		echo "verify: net $name ok  $(grep -h 'NETREPORT player=' "$LOGS"/net_${name}_client0.log | head -1 | cut -c11-)"
+	fi
+}
+if [ "$SUITE" = "m2" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
+	net_case clean 1 --expect-no-corrections
+	net_case lag120 1 --lag=120 --jitter=20 --loss=2
+	net_case bad 1 --lag=250 --jitter=80 --loss=5
+	net_case two_clients 2 --lag=80 --jitter=10 --loss=1
+	SERVER_ARGS="--spawn=platform_elevator" CLIENT_BOT="walk_short" net_case platform 1 --lag=120 --jitter=20 --loss=2 --max-correction=0.05
+fi
+
 if [ "$TOUR" = "1" ] && [ -f "$DST/demo/tours/$SUITE.gd" ]; then
 	echo "verify: windowed tour $SUITE"
 	timeout 300 "$ENGINE" --path "$DST" --resolution 1280x720 --disable-vsync -- --tour="$SUITE" --out="$ROOT/review/$SUITE" > "$LOGS/tour_$SUITE.log" 2>&1

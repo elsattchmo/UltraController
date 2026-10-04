@@ -19,11 +19,18 @@ signal state_changed(old_state: int, new_state: int)
 @export var self_simulate := true
 ## Build the animated body (off for pure-simulation bots, servers and tests).
 @export var build_visuals := true
+## Snap state to its network encoding after each tick (on in sessions; deterministic replays).
+var quantize_state := false
 
 var input_source: InputSource
+## NetPlayer.Role this character plays on this machine (set by UltraNet).
+const ROLE_PREDICTED := 2
+var net_role: int = 0
 var motor: UltraMotor
 var state := MotorState.new()
 var tick := 0
+## World tick for moving platforms during the next simulate() (set by UltraNet).
+var platform_tick := 0
 var last_input := InputFrame.new()
 
 var visual_root: Node3D
@@ -45,7 +52,9 @@ func _ready() -> void:
 	if profile == null:
 		profile = MovementProfile.new()
 	collision_layer = UltraLayers.CHARACTER
-	collision_mask = UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC | UltraLayers.CHARACTER
+	collision_mask = UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC
+	if profile.character_collision == MovementProfile.CharacterCollision.HARD:
+		collision_mask |= UltraLayers.CHARACTER
 	_shape = get_node_or_null("CollisionShape3D")
 	if _shape == null:
 		_shape = CollisionShape3D.new()
@@ -124,17 +133,28 @@ func teleport(pos: Vector3, yaw: float = NAN) -> void:
 func _physics_process(delta: float) -> void:
 	if not self_simulate or input_source == null:
 		return
+	TickPlatform.set_all(tick)
+	platform_tick = tick
 	simulate(input_source.sample(tick), delta)
 
 
-## One simulation tick. Used directly (single-player) and by the net layer.
-func simulate(input: InputFrame, delta: float) -> void:
+## One simulation tick. Used directly (single-player) and by the net layer. `replaying` is
+## set during reconciliation: the state advances but presentation events don't re-fire.
+func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	_prev_pos = state.pos
 	_prev_yaw = state.body_yaw
 	var old := state.state
+	motor.apply_pushes = net_role != ROLE_PREDICTED and not replaying   # only the authority shoves props
+	motor.platform_tick = platform_tick
 	motor.step(state, input, delta)
+	# Every machine continues from exactly what a snapshot can carry, so a client rebased
+	# onto server state and the server itself compute identical futures.
+	if quantize_state:
+		state.quantize()
 	last_input = input
 	tick = input.tick + 1
+	if replaying:
+		return
 	if motor.last_step_up > 0.0:
 		visual_offset.y -= motor.last_step_up        # the camera/body glide up the step
 	if motor.last_landing > 0.0:
@@ -145,6 +165,33 @@ func simulate(input: InputFrame, delta: float) -> void:
 	_prev_vel = state.vel
 
 
+## Client view of somebody else's character: interpolated snapshot values, every frame.
+func apply_remote(pos: Vector3, vel: Vector3, yaw: float, aim_yaw: float, pitch: float, st: int, stance: int, flags: int, height: float, rm_clip: int, land_impact: float, buttons: int) -> void:
+	var old := state.state
+	var dt := maxf(get_process_delta_time(), 0.001)
+	_accel = _accel.lerp((vel - state.vel) / dt, 0.2)
+	state.pos = pos
+	state.vel = vel
+	state.body_yaw = yaw
+	state.state = st
+	state.stance = stance
+	state.flags = flags
+	state.height = height
+	state.rm_clip = rm_clip
+	state.land_impact = land_impact
+	last_input.yaw = aim_yaw
+	last_input.pitch = pitch
+	last_input.buttons = buttons
+	_prev_pos = pos
+	_prev_yaw = yaw
+	global_position = pos
+	motor.update_stance(state, stance)
+	if old != st:
+		state_changed.emit(old, st)
+		if st == MotorState.Id.LAND or (old in [MotorState.Id.JUMP, MotorState.Id.FALL] and st != MotorState.Id.FALL):
+			landed.emit(land_impact)
+
+
 func _process(delta: float) -> void:
 	visual_offset = visual_offset.lerp(Vector3.ZERO, 1.0 - exp(-14.0 * delta))
 	_sync_visual(Engine.get_physics_interpolation_fraction())
@@ -153,7 +200,7 @@ func _process(delta: float) -> void:
 		anim.stance = state.stance
 		anim.velocity = state.vel
 		anim.body_yaw = visual_root.rotation.y
-		anim.aim_yaw = input_source.live_yaw if input_source else state.body_yaw
+		anim.aim_yaw = input_source.live_yaw if input_source else last_input.yaw
 		anim.aim_pitch = input_source.live_pitch if input_source else last_input.pitch
 		anim.turning = state.has(UltraMotor.F_TURNING)
 		anim.rm_clip = state.rm_clip

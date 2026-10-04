@@ -31,6 +31,8 @@ var transition_hooks: Array[Callable] = []
 
 var gravity: float = 9.8
 var dt: float = 1.0 / 60.0
+## World tick this step simulates (moving platforms are a function of it).
+var platform_tick: int = 0
 ## Per-step outputs for presentation (not part of the simulated state).
 var last_step_up: float = 0.0
 var last_landing: float = 0.0
@@ -38,6 +40,7 @@ var floor_friction: float = 1.0
 var floor_normal := Vector3.UP
 
 var _handlers := {}
+var _sep_query: PhysicsShapeQueryParameters3D
 var _state_scripts := {}
 var _capsule: CapsuleShape3D
 
@@ -61,7 +64,10 @@ func _init(p_body: CharacterBody3D, p_shape: CollisionShape3D, p_profile: Moveme
 	body.floor_stop_on_slope = true
 	body.max_slides = 6
 	body.motion_mode = CharacterBody3D.MOTION_MODE_GROUNDED
-	body.platform_on_leave = CharacterBody3D.PLATFORM_ON_LEAVE_ADD_VELOCITY
+	# Platforms are carried by the motor (deterministic, replayable), not by the engine.
+	body.platform_floor_layers = 0
+	body.platform_wall_layers = 0
+	body.platform_on_leave = CharacterBody3D.PLATFORM_ON_LEAVE_DO_NOTHING
 	_state_scripts = STATE_SCRIPTS.duplicate()
 	for id: int in _state_scripts:
 		var scr: Script = _state_scripts[id]
@@ -88,6 +94,7 @@ func step(s: MotorState, input: InputFrame, p_dt: float) -> void:
 	_apply_capsule(s.height)
 	body.global_position = s.pos
 	body.velocity = s.vel
+	_ride_platform(s)
 
 	# Timers shared by every state.
 	if pressed_edge(s, input, InputFrame.B_JUMP):
@@ -253,8 +260,74 @@ func probe_floor(s: MotorState) -> void:
 		floor_friction = mat.friction
 
 
+## Carry a rider by its platform's motion from the previous tick to this one.
+func _ride_platform(s: MotorState) -> void:
+	if s.platform_id == 0:
+		return
+	var plat := TickPlatform.find(s.platform_id)
+	if plat == null:
+		s.platform_id = 0
+		return
+	var prev := plat.pose_at(platform_tick - 1)
+	var cur := plat.pose_at(platform_tick)
+	var delta := cur * prev.affine_inverse()
+	body.global_position = delta * body.global_position
+	var fwd := delta.basis * Vector3.FORWARD
+	s.body_yaw += atan2(-fwd.x, -fwd.z)
+
+
+func _update_platform(s: MotorState) -> void:
+	var on := 0
+	if body.is_on_floor():
+		for i in body.get_slide_collision_count():
+			var c := body.get_slide_collision(i)
+			if c.get_normal().y > 0.7 and c.get_collider() is TickPlatform:
+				on = (c.get_collider() as TickPlatform).platform_id
+				break
+	if s.platform_id != 0 and on == 0 and not s.is_grounded():
+		# Leaving a platform: keep its velocity (jumping off a lift carries you up).
+		var plat := TickPlatform.find(s.platform_id)
+		if plat:
+			var pv := (plat.pose_at(platform_tick).origin - plat.pose_at(platform_tick - 1).origin) / dt
+			body.velocity += pv
+	s.platform_id = on
+
+
+## Soft character separation: overlapping characters drift apart instead of blocking.
+func _separate(s: MotorState) -> void:
+	if profile.character_collision != MovementProfile.CharacterCollision.SOFT:
+		return
+	if _sep_query == null:
+		_sep_query = PhysicsShapeQueryParameters3D.new()
+		var cyl := CylinderShape3D.new()
+		_sep_query.shape = cyl
+		_sep_query.collision_mask = UltraLayers.CHARACTER
+	var cyl2 := _sep_query.shape as CylinderShape3D
+	cyl2.radius = profile.radius * 2.0
+	cyl2.height = s.height
+	_sep_query.transform = Transform3D(Basis(), body.global_position + Vector3.UP * s.height * 0.5)
+	_sep_query.exclude = [body.get_rid()]
+	var hits := body.get_world_3d().direct_space_state.intersect_shape(_sep_query, 8)
+	var push := Vector3.ZERO
+	for h in hits:
+		var other := h.collider as Node3D
+		if other == null:
+			continue
+		var d := body.global_position - other.global_position
+		d.y = 0.0
+		var dist := d.length()
+		var overlap := profile.radius * 2.0 - dist
+		if overlap <= 0.0:
+			continue
+		var dir := d / dist if dist > 0.001 else Vector3.RIGHT.rotated(Vector3.UP, float(body.get_instance_id() % 628) / 100.0)
+		push += dir * (overlap / (profile.radius * 2.0))
+	if push != Vector3.ZERO:
+		body.velocity += push.limit_length(1.0) * profile.separation_speed
+
+
 ## Move with stair stepping, then slide. Updates grounded flags and landing info.
 func move(s: MotorState, allow_step: bool) -> void:
+	_separate(s)
 	var was_grounded := s.is_grounded()
 	var fall_speed := -body.velocity.y
 	if allow_step and was_grounded:
@@ -264,6 +337,7 @@ func move(s: MotorState, allow_step: bool) -> void:
 	var grounded := body.is_on_floor()
 	s.set_flag(MotorState.F_WAS_GROUNDED, was_grounded)
 	s.set_flag(MotorState.F_GROUNDED, grounded)
+	_update_platform(s)
 	if grounded:
 		s.coyote_t = profile.coyote_time
 		s.air_time = 0.0

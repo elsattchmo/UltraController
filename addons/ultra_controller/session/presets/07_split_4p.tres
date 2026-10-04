@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="UltraLaunchPreset" format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/session/launch_preset.gd" id="1_pp0d8"]
+
+[resource]
+script = ExtResource("1_pp0d8")
+title = "Split-screen 4P"
+instances = PackedStringArray("full|--offline --players=4 --join-screen")

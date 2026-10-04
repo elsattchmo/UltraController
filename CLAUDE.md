@@ -13,6 +13,9 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Tests: `godot --headless --path . --fixed-fps 60 res://tests/test_runner.tscn -- --suite=m1`
   (scene runner, not `--script`, so autoloads work). Suites live in `tests/suites/<suite>_*.gd`.
 - Capture tour: `godot --path . --resolution 1280x720 -- --tour=m1 --out=<dir>`.
+- `bash tools/verify.sh m2` also runs real server+client processes over localhost ENet with
+  `--lag/--jitter/--loss`; each client prints `NETREPORT` (corrections, queue depth) and fails
+  the run past the limits. Launch presets: `-- --launch=01_host_client` or Project > Tools > Ultra.
 - Regenerate after changing the importer / clips:
   1. delete `.godot/imported/mannequin.glb-*` then `--import` (a changed import *script* does not trigger reimport)
   2. `--script res://tools/build_animset.gd` (measures clips, writes mannequin_animset.tres)
@@ -37,7 +40,19 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   `BodyProfile`. Swapping Mixamo/Blender clips = editing those resources.
 - Skeleton is retargeted to `SkeletonProfileHumanoid` at import (`GeneralSkeleton`, bone names
   `Hips`, `LeftFoot`…). Model faces +Z; the body node is turned 180°.
-- **No MultiplayerSpawner/MultiplayerSynchronizer** (4.7.1 GH-109864) — custom RPC tick system.
+- **No MultiplayerSpawner/MultiplayerSynchronizer** (4.7.1 GH-109864) — custom RPC tick system
+  in the `UltraNet` autoload. Modes OFFLINE/HOST/CLIENT/DEDICATED all run `_server_step` or
+  `_client_step`; single-player is OFFLINE (AUTHORITY_LOCAL, zero latency, same motor path).
+- **State is quantized every tick** (`UltraCharacter.quantize_state`, on in sessions): server and
+  client compute on identical bits, so a client rebased onto a snapshot re-predicts exactly.
+- Clients send **every unacknowledged input** (≤24) each tick; the server keeps an ordered queue,
+  waits ≤10 ticks on a hole, never guesses inputs. Clock dilation keeps the queue ~2 deep.
+- **ENet throttle is disabled** per peer (`_no_throttle`) — it silently dropped bursts of
+  20 unreliable packets on localhost under CPU load.
+- Moving platforms are `TickPlatform` (pose = f(tick)); the motor carries riders itself
+  (`platform_floor_layers = 0`). Clients map their ticks to server ticks via `server_tick_offset`.
+- Characters collide SOFTly by default (`MovementProfile.character_collision`): prediction against
+  a remote player you see ~100 ms late can't be exact; soft separation keeps errors small.
 
 ## Godot 4.7 facts (probed)
 - All IK nodes exist: TwoBoneIK3D, FABRIK3D, CCDIK3D, JacobianIK3D, SplineIK3D, ChainIK3D,

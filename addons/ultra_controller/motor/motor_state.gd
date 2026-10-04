@@ -108,7 +108,7 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_float(held_mass)
 	buf.put_u16(injury_bits)
 	buf.put_float(trav_point.x); buf.put_float(trav_point.y); buf.put_float(trav_point.z)
-	buf.put_8(_q(trav_normal.x, 127.0)); buf.put_8(_q(trav_normal.y, 127.0)); buf.put_8(_q(trav_normal.z, 127.0))
+	buf.put_8(_q8(trav_normal.x, 127.0)); buf.put_8(_q8(trav_normal.y, 127.0)); buf.put_8(_q8(trav_normal.z, 127.0))
 	buf.put_float(trav_height)
 	buf.put_u16(platform_id)
 	buf.put_float(platform_local.x); buf.put_float(platform_local.y); buf.put_float(platform_local.z)
@@ -150,6 +150,11 @@ func quantize() -> MotorState:
 	return self
 
 
+## Quantize to a signed 16-bit field.
 static func _q(v: float, scale: float) -> int:
-	var lim := 32767 if scale > 127.0 else 127
-	return clampi(int(roundf(v * scale)), -lim, lim)
+	return clampi(int(roundf(v * scale)), -32767, 32767)
+
+
+## Quantize to a signed 8-bit field.
+static func _q8(v: float, scale: float) -> int:
+	return clampi(int(roundf(v * scale)), -127, 127)

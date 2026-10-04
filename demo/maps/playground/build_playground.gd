@@ -26,6 +26,7 @@ func _init() -> void:
 	_ground()
 	_hub()
 	_locomotion_yard()
+	_platforms()
 	_props()
 	_gallery()
 	var ps := PackedScene.new()
@@ -261,6 +262,56 @@ func _locomotion_yard() -> void:
 		_block(ledges, "Drop%d" % int(h), Vector3(4, h, 4), x, -48, h, grid_accent)
 		_label(ledges, "drop %d m" % int(h), Vector3(x, h + 0.5, -45.9), 56)
 		_marker("drop_%d" % int(h), Vector3(x, h + 0.05, -48), 180)
+
+
+func _platform(parent: Node, n: String, size: Vector3, pos: Vector3, mode: int, travel := Vector3.ZERO, leg := 4.0, pause := 1.0, spin := 0.0) -> TickPlatform:
+	var tp := TickPlatform.new()
+	tp.name = n
+	tp.mode = mode
+	tp.travel = travel
+	tp.leg_time = leg
+	tp.pause = pause
+	tp.spin_deg = spin
+	tp.position = pos
+	tp.collision_layer = UltraLayers.WORLD_STATIC
+	tp.collision_mask = 0
+	var mi := MeshInstance3D.new()
+	var bm: PrimitiveMesh = BoxMesh.new() if mode != TickPlatform.Mode.ROTATE else CylinderMesh.new()
+	if bm is BoxMesh:
+		(bm as BoxMesh).size = size
+	else:
+		(bm as CylinderMesh).top_radius = size.x * 0.5
+		(bm as CylinderMesh).bottom_radius = size.x * 0.5
+		(bm as CylinderMesh).height = size.y
+	mi.mesh = bm
+	mi.material_override = grid_accent
+	tp.add_child(mi)
+	var cs := CollisionShape3D.new()
+	if mode == TickPlatform.Mode.ROTATE:
+		var cyl := CylinderShape3D.new()
+		cyl.radius = size.x * 0.5
+		cyl.height = size.y
+		cs.shape = cyl
+	else:
+		var bs := BoxShape3D.new()
+		bs.size = size
+		cs.shape = bs
+	tp.add_child(cs)
+	parent.add_child(tp)
+	_own(tp)
+	return tp
+
+
+func _platforms() -> void:
+	var p := _node(scene_root, "MovingPlatforms")
+	_platform(p, "Linear", Vector3(4, 0.4, 4), Vector3(-40, 0.6, -30), TickPlatform.Mode.LINEAR, Vector3(0, 0, -16), 5.0, 1.5)
+	_marker("platform_linear", Vector3(-40, 0.85, -30), 0)
+	_platform(p, "Rotating", Vector3(8, 0.4, 8), Vector3(-40, 0.3, -60), TickPlatform.Mode.ROTATE, Vector3.ZERO, 4.0, 0.0, 35.0)
+	_marker("platform_rotate", Vector3(-38, 0.55, -60), 0)
+	_platform(p, "Elevator", Vector3(3.5, 0.3, 3.5), Vector3(-40, 0.2, -80), TickPlatform.Mode.ELEVATOR, Vector3(0, 6, 0), 4.0, 2.0)
+	_block(p, "ElevatorTop", Vector3(6, 6.2, 6), -40, -85.5, 6.2, grid)
+	_marker("platform_elevator", Vector3(-40, 0.4, -80), 180)
+	_label(p, "MOVING PLATFORMS", Vector3(-40, 3, -24), 72)
 
 
 func _props() -> void:

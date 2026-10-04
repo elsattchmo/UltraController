@@ -1,9 +1,13 @@
 extends Node
-## Demo entry point. Parses command-line options (everything after `--`):
-##   --map=playground        --profile=fps|adventure|survival|tps     --spawn=<marker>
-##   --view=fp|tp            --bot=<course>     --tour=<name> --out=<dir> (scripted captures)
-##   --quit-after=<seconds>  --slowmo=<scale>
-## Multiplayer / split-screen options arrive with the session layer (M2).
+## Demo entry point. With no options it shows the main menu; with options it starts straight
+## into a session (see UltraArgs for the full list). Examples:
+##   (nothing)                              main menu
+##   -- --offline --players=2               split-screen, two local players
+##   -- --host                              host a game (port 7777)
+##   -- --connect=127.0.0.1 --lag=120       join with a simulated 120 ms network
+##   -- --server                            dedicated server (works with --headless)
+##   -- --launch=host_client                start a preset of instances and exit
+##   -- --tour=m1                           scripted capture tour (single-player bot)
 
 const MAPS := {"playground": "res://demo/maps/playground.tscn"}
 const PROFILES := {
@@ -16,68 +20,203 @@ const BODY := "res://assets/characters/mannequin/mannequin_body_profile.tres"
 
 var args := {}
 var map: Node3D
-var player: UltraCharacter
-var rig: UltraCameraRig
-var overlay: UltraDebugOverlay
+var locals: UltraLocalPlayers
+var menu: Control
+var player: UltraCharacter          ## first local player (tours, single-player tools)
+var headless := false
+var _title_t := 0.0
 
 
 func _ready() -> void:
-	for a in OS.get_cmdline_user_args():
-		var kv := a.trim_prefix("--").split("=", true, 1)
-		args[kv[0]] = kv[1] if kv.size() > 1 else "true"
+	args = UltraArgs.all()
+	headless = DisplayServer.get_name() == "headless"
+	UltraArgs.apply_window()
 	UltraInput.apply_user_rebinds()
-	map = (load(MAPS.get(args.get("map", "playground"), MAPS["playground"])) as PackedScene).instantiate()
+	if args.has("launch"):
+		var preset := UltraLauncher.find(String(args["launch"]))
+		if preset:
+			UltraLauncher.launch(preset)
+		else:
+			push_error("no launch preset '%s'" % args["launch"])
+		get_tree().quit()
+		return
+	map = (load(MAPS.get(UltraArgs.get_str("map", "playground"), MAPS["playground"])) as PackedScene).instantiate()
 	add_child(map)
-	player = spawn_player(args.get("profile", "fps"), args.get("spawn", "spawn"))
+	locals = UltraLocalPlayers.new()
+	locals.name = "LocalPlayers"
+	locals.join_enabled = args.has("join-screen")
+	locals.hud_factory = _make_hud
+	add_child(locals)
+	UltraNet.world_root = self
+	UltraNet.character_factory = _make_character
+	UltraNet.spawn_transform = _spawn_transform
+	UltraNet.verbose = args.has("verbose-net")
+	UltraNet.lag.configure(UltraArgs.get_float("lag"), UltraArgs.get_float("jitter"), UltraArgs.get_float("loss"))
+	UltraNet.player_added.connect(_on_player_added)
+	UltraNet.session_ended.connect(func(reason: String) -> void:
+		push_warning("session ended: " + reason)
+		if args.has("quit-on-end"):
+			get_tree().quit(2))
+	if args.has("bot") or args.has("tour"):
+		UltraNet.local_input_factory = _make_bot_input
 	if args.has("quit-after"):
-		get_tree().create_timer(float(args["quit-after"])).timeout.connect(get_tree().quit)
+		get_tree().create_timer(UltraArgs.get_float("quit-after")).timeout.connect(_quit)
+	if args.has("screenshot"):
+		# --screenshot=<file.png> --screenshot-at=<seconds>: one capture for reviews.
+		get_tree().create_timer(UltraArgs.get_float("screenshot-at", 3.0)).timeout.connect(func() -> void:
+			await RenderingServer.frame_post_draw
+			var path := UltraArgs.get_str("screenshot")
+			DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+			get_viewport().get_texture().get_image().save_png(path)
+			print("screenshot ", path))
+	if _wants_session():
+		start_from_args()
+	elif headless:
+		UltraNet.start_offline(1)
+	else:
+		_show_menu()
+
+
+func _wants_session() -> bool:
+	for k in ["offline", "host", "server", "connect", "players", "bot", "tour", "profile", "spawn", "view"]:
+		if args.has(k):
+			return true
+	return false
+
+
+func start_from_args() -> void:
+	var n := maxi(UltraArgs.get_int("players", 1), 0)
+	_reserve_devices(n)
+	var port := UltraArgs.get_int("port", UltraNet.DEFAULT_PORT)
+	var names := PackedStringArray([UltraArgs.get_str("name", "Player")])
+	if args.has("server"):
+		UltraNet.host(port, 0)
+	elif args.has("host"):
+		UltraNet.host(port, n, names)
+	elif args.has("connect"):
+		var addr := UltraArgs.get_str("connect", "127.0.0.1")
+		var parts := addr.split(":")
+		UltraNet.join(parts[0], int(parts[1]) if parts.size() > 1 else port, n, names)
+	else:
+		UltraNet.start_offline(n, names)
 	if args.has("tour"):
-		var tour_script := load("res://demo/tours/%s.gd" % args["tour"]) as Script
-		var tour: Node = tour_script.new()
+		var tour: Node = (load("res://demo/tours/%s.gd" % args["tour"]) as Script).new()
 		tour.set("main", self)
 		add_child(tour)
+	if args.has("net-report"):
+		var rep: Node = (load("res://demo/net_report.gd") as Script).new()
+		add_child(rep)
 
 
-func spawn_player(profile_name: String, spawn: String) -> UltraCharacter:
+## Split-screen device assignment: one player = any device; more = keyboard for P1 and a
+## pad each for the rest.
+func _reserve_devices(n: int) -> void:
+	if n <= 1:
+		locals.reserve([[]])
+		return
+	var claims := [["kbm"]]
+	for i in range(1, n):
+		claims.append(["joy%d" % (i - 1)])
+	locals.reserve(claims)
+
+
+func _make_character(np: NetPlayer) -> UltraCharacter:
 	var c := UltraCharacter.new()
-	c.name = "Player"
-	c.profile = (load(PROFILES.get(profile_name, PROFILES["fps"])) as MovementProfile).duplicate(true)
+	c.profile = (load(PROFILES.get(UltraArgs.get_str("profile", "fps"), PROFILES["fps"])) as MovementProfile).duplicate(true)
 	c.body_profile = load(BODY)
-	c.view_index = 0
-	var src: InputSource
-	if args.has("bot") or args.has("tour"):
-		src = BotInputSource.new()
-	else:
-		src = LocalInputSource.new()
-	src.name = "InputSource"
-	if args.get("view", "") == "tp":
-		src.view_tp = true
-	c.add_child(src)
-	c.input_source = src
-	var m := map.call("marker", spawn) as Marker3D
-	if m:
-		c.position = m.global_position
-		c.rotation.y = m.global_rotation.y
-	add_child(c)
-	if src is BotInputSource:
-		(src as BotInputSource).body = c
-	if src.view_tp == false and c.profile.default_view == MovementProfile.View.THIRD_PERSON:
-		src.view_tp = true
-	rig = UltraCameraRig.new()
-	rig.name = "CameraRig"
-	rig.view_index = 0
-	add_child(rig)
-	rig.attach(c)
-	overlay = UltraDebugOverlay.new()
-	overlay.character = c
-	add_child(overlay)
+	c.build_visuals = not headless
 	return c
 
 
+func _make_bot_input(local_index: int) -> InputSource:
+	var b := BotInputSource.new()
+	if args.has("bot"):
+		b.set_steps(UltraBotCourses.get_course(UltraArgs.get_str("bot")))
+		b.loop = true
+	return b
+
+
+func _spawn_transform(np: NetPlayer) -> Transform3D:
+	var names := ["spawn", "spawn_2", "spawn_3", "spawn_4"]
+	var want := UltraArgs.get_str("spawn", "")
+	var m: Marker3D = null
+	if want != "" and np.id == 1:
+		m = map.call("marker", want)
+	if m == null:
+		m = map.call("marker", names[(np.id - 1) % names.size()])
+	return m.global_transform if m else Transform3D.IDENTITY
+
+
+func _make_hud(c: UltraCharacter) -> Node:
+	var o := UltraDebugOverlay.new()
+	o.character = c
+	return o
+
+
+func _on_player_added(p: NetPlayer) -> void:
+	if p.is_local() and player == null:
+		player = p.character
+	if p.is_local() and args.get("view", "") == "tp" and p.character.input_source:
+		p.character.input_source.view_tp = true
+	if p.is_local() and p.character.input_source is BotInputSource:
+		(p.character.input_source as BotInputSource).body = p.character
+	if menu:
+		menu.queue_free()
+		menu = null
+
+
+func _process(delta: float) -> void:
+	_title_t -= delta
+	if _title_t <= 0.0 and not headless:
+		_title_t = 0.5
+		DisplayServer.window_set_title("UltraController — " + UltraNet.stats_line())
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if menu:
+		return
 	if event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event.is_action_pressed(UltraInput.action(&"pause")):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif event.is_action_pressed(UltraInput.action(&"debug_slowmo")):
 		Engine.time_scale = 0.25 if Engine.time_scale > 0.5 else 1.0
+
+
+func _quit() -> void:
+	get_tree().quit(0)
+
+
+# ------------------------------------------------------------------ main menu
+
+func _show_menu() -> void:
+	menu = (load("res://demo/ui/main_menu.gd") as Script).new()
+	menu.set("main", self)
+	add_child(menu)
+
+
+func menu_start(kind: String, value := "") -> void:
+	match kind:
+		"single":
+			_reserve_devices(1)
+			UltraNet.start_offline(1)
+		"split":
+			locals.join_enabled = true
+			var n := int(value)
+			_reserve_devices(n)
+			UltraNet.start_offline(n)
+		"host":
+			_reserve_devices(1)
+			UltraNet.host(UltraNet.DEFAULT_PORT, 1)
+		"join":
+			_reserve_devices(1)
+			var parts := value.split(":")
+			UltraNet.join(parts[0], int(parts[1]) if parts.size() > 1 else UltraNet.DEFAULT_PORT, 1)
+		"host_and_client":
+			_reserve_devices(1)
+			UltraNet.host(UltraNet.DEFAULT_PORT, 1)
+			var p := UltraLaunchPreset.new()
+			p.instances = PackedStringArray(["right|--connect=127.0.0.1"])
+			UltraLauncher.launch(p)
+			UltraArgs.all()["window"] = "left"
+			UltraArgs.apply_window()

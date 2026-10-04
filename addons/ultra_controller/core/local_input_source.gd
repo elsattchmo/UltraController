@@ -10,7 +10,7 @@ const TRACKED: Array[StringName] = [
 	&"move_forward", &"move_back", &"move_left", &"move_right",
 	&"look_left", &"look_right", &"look_up", &"look_down",
 	&"jump", &"crouch", &"sprint", &"walk", &"interact", &"primary", &"secondary",
-	&"throw", &"drop", &"reload", &"lean_left", &"lean_right", &"toggle_view", &"dodge",
+	&"throw", &"drop", &"reload", &"lean_left", &"lean_right", &"toggle_view", &"dodge", &"leave",
 ]
 
 ## Empty = accept every device (single local player).

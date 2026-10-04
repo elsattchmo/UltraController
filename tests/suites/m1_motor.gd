@@ -179,3 +179,23 @@ func test_determinism() -> void:
 	var b2: MotorState = finals[1]
 	info("final %s / %s" % [a.pos, b2.pos])
 	check(a.pos.distance_to(b2.pos) < 1e-4 and a.state == b2.state, "same inputs -> same result")
+
+
+func test_moving_platforms() -> void:
+	for spec in [["platform_linear", 300], ["platform_rotate", 300], ["platform_elevator", 420]]:
+		var c := spawn(spec[0], "res://addons/ultra_controller/profiles/fps.tres", false)
+		await ticks(3)
+		var plat := TickPlatform.find(c.state.platform_id)
+		var rode := false
+		var max_y := -INF
+		for i in int(spec[1]):
+			await ticks(1)
+			rode = rode or c.state.platform_id != 0
+			max_y = maxf(max_y, c.state.pos.y)
+		check(rode, "%s: standing on the platform registers it" % spec[0])
+		check(c.state.platform_id != 0 and c.state.is_grounded(), "%s: still riding after %d ticks (on %d)" % [spec[0], spec[1], c.state.platform_id])
+		if spec[0] == "platform_elevator":
+			check(max_y > 4.0, "elevator lifted the rider (max y %.2f)" % max_y)
+		c.queue_free()
+		chars.erase(c)
+		await ticks(2)

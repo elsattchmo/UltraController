@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="UltraLaunchPreset" format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/session/launch_preset.gd" id="1_23bd4"]
+
+[resource]
+script = ExtResource("1_23bd4")
+title = "Host split-screen 2P + remote client"
+instances = PackedStringArray("left|--host --players=2 --join-screen", "right|--connect=127.0.0.1")

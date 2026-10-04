@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="UltraLaunchPreset" format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/session/launch_preset.gd" id="1_5irtg"]
+
+[resource]
+script = ExtResource("1_5irtg")
+title = "Host + 1 client"
+instances = PackedStringArray("left|--host", "right|--connect=127.0.0.1")
