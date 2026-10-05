@@ -17,6 +17,14 @@ static var _next_id := 1
 
 var ladder_id := 0
 
+## Rung layout (up from the origin): first rung height and spacing.
+const FIRST_RUNG := 0.25
+const RUNG_SPACING := 0.3
+
+
+func rung_count() -> int:
+	return int(height / RUNG_SPACING)
+
 
 func _ready() -> void:
 	if get_child_count() == 0:
@@ -93,8 +101,7 @@ func _build() -> void:
 		rail.position = Vector3(side * width * 0.5, height * 0.5, 0)
 		rail.material_override = mat
 		add_child(rail)
-	var n := int(height / 0.3)
-	for i in n:
+	for i in rung_count():
 		var rung := MeshInstance3D.new()
 		var cm2 := CylinderMesh.new()
 		cm2.top_radius = 0.02
@@ -102,6 +109,6 @@ func _build() -> void:
 		cm2.height = width
 		rung.mesh = cm2
 		rung.rotation_degrees.z = 90
-		rung.position = Vector3(0, 0.25 + i * 0.3, 0)
+		rung.position = Vector3(0, FIRST_RUNG + i * RUNG_SPACING, 0)
 		rung.material_override = mat
 		add_child(rung)

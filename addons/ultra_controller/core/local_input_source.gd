@@ -43,6 +43,11 @@ var _interact_t := -1.0        # seconds interact has been held (-1 = up)
 var _interact_pulse := 0       # InputFrame bit to send on the next sample (tap / hold)
 
 
+## Send `bit` for one tick (UI buttons that act like a key press, e.g. Respawn).
+func pulse(bit: int) -> void:
+	_interact_pulse |= bit
+
+
 func claims(device: String) -> bool:
 	return claimed_devices.is_empty() or claimed_devices.has(device)
 
@@ -189,8 +194,9 @@ func sample(tick: int) -> InputFrame:
 		b |= InputFrame.B_CROUCH
 	if _crawl: b |= InputFrame.B_CRAWL
 	if pressed(&"sprint") or _sprint_toggled: b |= InputFrame.B_SPRINT
-	if f.move.length() < 0.1: _sprint_toggled = false
+	if f.move.y < 0.3: _sprint_toggled = false          # stop or turn back: sprint ends
 	if pressed(&"walk"): b |= InputFrame.B_WALK
+	if pressed(&"respawn"): b |= InputFrame.B_RESPAWN
 	# interact / grab are pulses (tap vs hold), held for exactly one tick
 	b |= _interact_pulse
 	_interact_pulse = 0

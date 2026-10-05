@@ -219,7 +219,7 @@ func show_message(t: String, secs := 2.0) -> void:
 	_msg_t = secs
 
 
-func _on_hit(_target_id: int, _pos: Vector3, _dir: Vector3, _amount: float, attacker_id: int) -> void:
+func _on_hit(_target_id: int, _pos: Vector3, _dir: Vector3, _amount: float, attacker_id: int, _region := -1, _kind := &"") -> void:
 	if character and attacker_id == character.net_id:
 		_hit_t = 0.25
 

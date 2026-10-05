@@ -159,3 +159,58 @@ func test_rope_swing() -> void:
 		check(absf(c.state.pos.distance_to(r.anchor()) - (c.state.trav_s + 1.95)) < 0.02, "rope length holds under load")
 	await drive(c, 20, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2.ZERO, InputFrame.B_JUMP), func(_ch: UltraCharacter) -> bool: return false)
 	check(c.state.state in [Id.FALL, Id.JUMP, Id.LAND, Id.IDLE, Id.MOVE], "jump lets go (%s)" % Id.keys()[c.state.state])
+
+
+## Swing ropes climb too: look up + forward goes up the rope, look down + forward slides down.
+func test_swing_rope_climb() -> void:
+	var c := spawn("parkour_rope", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	await drive(c, 200, func(_k: int, ch: UltraCharacter) -> InputFrame:
+		return frame(Vector2(0, 1), InputFrame.B_SPRINT | (InputFrame.B_JUMP if ch.state.pos.z < -55.4 and ch.state.is_grounded() else 0)),
+		func(ch: UltraCharacter) -> bool: return ch.state.state == Id.ROPE or ch.state.pos.y < 2.0)
+	check(c.state.state == Id.ROPE, "caught the swing rope")
+	if c.state.state != Id.ROPE:
+		return
+	var s0 := c.state.trav_s
+	await drive(c, 60, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2(0, 1), 0, 0.0, 0.8), func(_ch: UltraCharacter) -> bool: return false)
+	var s1 := c.state.trav_s
+	await drive(c, 60, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2(0, 1), 0, 0.0, -0.8), func(_ch: UltraCharacter) -> bool: return false)
+	var s2 := c.state.trav_s
+	info("grip along the rope: %.2f -> up %.2f -> down %.2f" % [s0, s1, s2])
+	check(s1 < s0 - 0.5, "looking up + forward climbs the swing rope")
+	check(s2 > s1 + 0.5, "looking down + forward slides back down")
+	check(c.state.state == Id.ROPE, "still on the rope")
+
+
+## Ladder: hands and feet land on the rungs while climbing.
+func test_ladder_limbs_on_rungs() -> void:
+	var c := spawn("parkour_ladder")
+	await ticks(3)
+	var sk := c.skeleton
+	var ik := c.anim.hand_ik
+	var bones: Array[int] = []
+	for h in 4:
+		bones.append(ik.hand_bone(h))
+	var near := [0, 0]          # [frames sampled, limb-frames within 4 cm of a rung]
+	var sample := func() -> void:
+		if c.state.state != Id.LADDER or c.state.state_time < 0.5:
+			return
+		var lad := UltraLadder.find(c.state.trav_id)
+		near[0] += 1
+		for h in 4:
+			var p := sk.global_transform * sk.get_bone_global_pose(bones[h]).origin
+			var o: Vector2 = UltraTraversalVisual.RUNG_FOOT if h >= 2 else UltraTraversalVisual.RUNG_HAND
+			var y := (p - lad.global_position).y - o.x
+			var k := clampf(roundf((y - UltraLadder.FIRST_RUNG) / UltraLadder.RUNG_SPACING), 0.0, lad.rung_count() - 1.0)
+			var rung := lad.global_position + Vector3.UP * (UltraLadder.FIRST_RUNG + k * UltraLadder.RUNG_SPACING)
+			var off := (p - rung) - lad.normal() * o.y - Vector3.UP * o.x
+			off -= lad.normal().cross(Vector3.UP).normalized() * off.dot(lad.normal().cross(Vector3.UP).normalized())
+			if off.length() < 0.04:
+				near[1] += 1
+	sk.skeleton_updated.connect(sample)
+	await drive(c, 400, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2(0, 1)),
+		func(ch: UltraCharacter) -> bool: return ch.state.pos.y > 3.5)
+	sk.skeleton_updated.disconnect(sample)
+	var per := float(near[1]) / maxf(near[0], 1.0)
+	info("ladder: %d frames, %.2f limbs on a rung per frame" % [near[0], per])
+	check(near[0] > 30 and per >= 1.5, "at least two limbs are on rungs on average")

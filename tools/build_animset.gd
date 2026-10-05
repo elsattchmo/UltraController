@@ -8,7 +8,7 @@ extends SceneTree
 const DIR := "res://assets/characters/mannequin/"
 const ROLES := {
 	&"idle": "Idle_A", &"idle_alt": "Idle_Subtle", &"idle_hurt": "Idle_Hurt",
-	&"walk_f": "Walk", &"walk_b": "Walk_Backwards", &"strafe_l": "Strafe_left", &"strafe_r": "Strafe_right",
+	&"walk_f": "Walk", &"walk_b": "Walk_Backwards", &"strafe_l": "mixamo/Strafe_Walk_L", &"strafe_r": "mixamo/Strafe_Walk_R",
 	&"jog_f": "Jog", &"sprint_f": "Sprint", &"walk_carry": "Walk_Carry", &"walk_stealth": "Walk_Stealth",
 	&"crouch_idle": "Crouch_Idle", &"crouch_f": "Crouch_Walk", &"crawl": "Crawl",
 	&"turn_l90": "Turn_Left_90", &"turn_r90": "Turn_Right_90", &"turn_l180": "Turn_Left_180", &"turn_r180": "Turn_Right_180",
@@ -17,8 +17,8 @@ const ROLES := {
 	&"slide_start": "Slide_Start", &"slide": "Slide", &"slide_exit": "Slide_Exit",
 	&"roll": "Roll_RM", &"dodge_back": "Dodge_back_RM", &"dodge_left": "Dodge_left_RM", &"dodge_right": "Dodge_right_RM",
 	&"knockback": "Hit_Knockback_RM", &"climb_up_1m": "ClimbUp_1m_RM", &"crawl_rm": "Crawl_RM",
-	&"ladder_idle": "Ladder_Idle", &"ladder_climb": "Climb_Ladder", &"wall_climb": "Climb_Wall", &"pipe_climb": "Pipe_Climb",
-	&"ledge_hang": "Ledge_Hang", &"swim_idle": "Swim_Idle", &"swim_f": "Swim_Fwd",
+	&"ladder_idle": "Ladder_Idle", &"ladder_climb": "mixamo/Ladder_Climb", &"wall_climb": "Climb_Wall", &"pipe_climb": "Pipe_Climb",
+	&"ledge_hang": "Ledge_Hang", &"hang_idle": "mixamo/Braced_Catch", &"shimmy_l": "mixamo/Shimmy_L", &"shimmy_r": "mixamo/Shimmy_R", &"swim_idle": "Swim_Idle", &"swim_f": "Swim_Fwd",
 	&"interact": "Interact", &"pickup": "PickUp_Table", &"push": "Push", &"throw": "OverhandThrow", &"throw_object": "Throw_Object",
 	&"consume": "Consume", &"open_chest": "Chest_Open", &"kick_door": "Kick_Breach",
 	&"pistol_idle": "Pistol_Idle", &"pistol_aim_up": "Pistol_Aim_Up", &"pistol_aim_neutral": "Pistol_Aim_Neutral",

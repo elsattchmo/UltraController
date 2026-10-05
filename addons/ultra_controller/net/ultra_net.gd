@@ -149,6 +149,19 @@ func add_local_player(name := "") -> void:
 
 ## Server: add an AI-driven player (companions, scenario bots). Returns it; drive it through
 ## its BotInputSource (`p.character.input_source`).
+## Authority: put a character back at its spawn point, healed.
+func respawn_character(c: UltraCharacter) -> void:
+	if not is_server():
+		return
+	var p: NetPlayer = players.get(c.net_id)
+	var xf := c.global_transform
+	if p and spawn_transform.is_valid() and not p.is_bot:
+		xf = spawn_transform.call(p)
+	elif p and p.is_bot and c.has_meta("home"):
+		xf = c.get_meta("home")
+	c.respawn(xf)
+
+
 func spawn_bot(bot_name := "Helper", at := Transform3D.IDENTITY) -> NetPlayer:
 	if not is_server():
 		return null
@@ -169,6 +182,7 @@ func spawn_bot(bot_name := "Helper", at := Transform3D.IDENTITY) -> NetPlayer:
 	c.input_source = src
 	c.position = at.origin
 	c.rotation.y = at.basis.get_euler().y
+	c.set_meta("home", at)
 	c.net_role = p.role
 	c.net_id = p.id
 	c.quantize_state = true
@@ -380,6 +394,7 @@ func _server_step(dt: float) -> void:
 			holders.append(p.character)
 	if not holders.is_empty():
 		UltraGrab.server_tick(holders, dt)
+	UltraGrab.impacts(get_tree().get_nodes_in_group(&"ultra_character"), dt)
 	world.record_history(server_tick)
 	world.flush_dirty()
 	if server_tick % SNAPSHOT_EVERY == 0:

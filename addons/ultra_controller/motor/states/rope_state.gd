@@ -30,12 +30,13 @@ func tick(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 	if rope == null:
 		return
 	var a := rope.anchor()
-	if rope.kind == UltraRope.Kind.CLIMB:
-		s.trav_s = clampf(s.trav_s - i.move.y * 1.1 * m.dt, 0.3, rope.length - 0.2)
+	var climb := UltraRope.climb_input(rope, i)
+	if climb != 0.0:
+		s.trav_s = clampf(s.trav_s - climb * 1.1 * m.dt, 0.3, rope.length - 0.2)
 	var L := s.trav_s + BODY
 	var v := s.trav_from
 	v.y -= m.gravity * m.dt
-	if rope.kind == UltraRope.Kind.SWING:
+	if rope.kind == UltraRope.Kind.SWING and climb == 0.0:
 		var fwd := Vector3(-sin(i.yaw), 0, -cos(i.yaw))
 		var right := Vector3(cos(i.yaw), 0, -sin(i.yaw))
 		# Pumping adds energy only on the low part of the arc, so a swing tops out ~65 degrees.

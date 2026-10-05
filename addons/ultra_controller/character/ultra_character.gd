@@ -28,6 +28,9 @@ signal hit_reacted(region: int, dir: Vector3, amount: float)
 @export var self_simulate := true
 ## Build the animated body (off for pure-simulation bots, servers and tests).
 @export var build_visuals := true
+## Below this height you're put back at a spawn point; dead this long, too (0 = never).
+@export var kill_height := -40.0
+@export var auto_respawn_after := 5.0
 ## Per-limb damage, dismemberment and gore rules (a default is made if empty).
 @export var damage_profile: DamageProfile
 ## Snap state to its network encoding after each tick (on in sessions; deterministic replays).
@@ -120,6 +123,8 @@ func _build_visual() -> void:
 		body_node.rotation.y = PI
 	visual_root.add_child(body_node)
 	skeleton = body_node.find_child(body_profile.skeleton_name, true, false) as Skeleton3D
+	if skeleton:
+		skeleton.skeleton_updated.connect(_capture_hitboxes)
 	head_mesh = body_node.find_child(body_profile.head_mesh_name, true, false) as MeshInstance3D
 	# First person hides the head: close the neck opening it leaves in the body.
 	var bm := body_node.find_child(body_profile.body_mesh_name, true, false) as MeshInstance3D
@@ -233,6 +238,29 @@ func teleport(pos: Vector3, yaw: float = NAN) -> void:
 ## is then worked out from the region capsules (UltraHitboxes). Movement never touches it.
 var hit_volume: StaticBody3D
 var _hit_shape: CollisionShape3D
+## Region capsules from the posed skeleton (character space), refreshed every rendered frame.
+var live_hitboxes: Array[Dictionary] = []
+var _live_hit_frame := -100
+var _hit_frame := Transform3D()          ## character frame the visible body was posed in
+var _hit_bones := {}
+
+
+func has_live_hitboxes() -> bool:
+	return not live_hitboxes.is_empty() and Engine.get_process_frames() - _live_hit_frame <= 3
+
+
+func _capture_hitboxes() -> void:
+	if _hit_bones.is_empty():
+		for b: String in UltraHitboxes.BONES:
+			_hit_bones[b] = skeleton.find_bone(b)
+	if _hit_bones.values().has(-1):
+		return
+	var to_char := _hit_frame.affine_inverse() * skeleton.global_transform
+	var bones := _hit_bones
+	var sk := skeleton
+	var head_up := to_char.basis * sk.get_bone_global_pose(bones["Head"]).basis.y
+	live_hitboxes = UltraHitboxes.build(func(b: String) -> Vector3: return to_char * sk.get_bone_global_pose(bones[b]).origin, head_up)
+	_live_hit_frame = Engine.get_process_frames()
 
 
 func _make_hit_volume() -> void:
@@ -256,6 +284,17 @@ func _update_hit_volume() -> void:
 	var prone := state.state in [MotorState.Id.CRAWL, MotorState.Id.DIVE, MotorState.Id.DEAD, MotorState.Id.RAGDOLL]
 	var want := Transform3D(Basis(Vector3.RIGHT, PI * 0.5).rotated(Vector3.UP, state.body_yaw - rotation.y), Vector3(0, 0.35, 0)) if prone \
 		else Transform3D(Basis(), Vector3(0, 1.0, 0))
+	if prone and has_live_hitboxes():
+		# Lie the volume along the body as it actually lies (a ragdoll can face any way).
+		var hips: Vector3 = live_hitboxes[1].a
+		var axis: Vector3 = (live_hitboxes[0].b as Vector3) - hips
+		axis.y = 0.0
+		if axis.length() > 0.2:
+			var to_node := global_transform.affine_inverse() * Transform3D(Basis(Vector3.UP, state.body_yaw), global_position)
+			var y := (to_node.basis * axis).normalized()
+			var x := y.cross(Vector3.UP).normalized()
+			var mid := to_node * (hips + axis * 0.15)
+			want = Transform3D(Basis(x, y, x.cross(y)), Vector3(mid.x, 0.35, mid.z))
 	if not _hit_shape.transform.is_equal_approx(want):
 		_hit_shape.transform = want
 
@@ -278,6 +317,7 @@ func _physics_process(delta: float) -> void:
 	simulate(input_source.sample(tick), delta)
 	if state.held_id != 0:
 		UltraGrab.server_tick([self], delta)
+	UltraGrab.impacts(get_tree().get_nodes_in_group(&"ultra_character"), delta)
 
 
 ## One simulation tick. Used directly (single-player) and by the net layer. `replaying` is
@@ -292,6 +332,11 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	UltraActionLayer.step(self, state, input, delta, replaying)
 	if is_authority() and not replaying and input.target_id != 0 and UltraMotor.pressed_edge(state, input, InputFrame.B_INTERACT):
 		UltraItems.interact(self, input.target_id)
+	# Respawn: asked for, fallen out of the world, or dead for a while (authority decides).
+	if is_authority() and not replaying:
+		var dead_long := state.state == MotorState.Id.DEAD and state.state_time > auto_respawn_after and auto_respawn_after > 0.0
+		if UltraMotor.pressed_edge(state, input, InputFrame.B_RESPAWN) or state.pos.y < kill_height or dead_long:
+			UltraNet.respawn_character(self)
 	state.prev_buttons = input.buttons
 	# Every machine continues from exactly what a snapshot can carry, so a client rebased
 	# onto server state and the server itself compute identical futures.
@@ -416,10 +461,9 @@ func _process(delta: float) -> void:
 			MotorState.Id.ROPE:
 				# Climb ropes: hand over hand at the climbing speed; swing ropes: just hold on.
 				var rope := UltraRope.find(state.trav_id)
-				var climbing := rope != null and rope.kind == UltraRope.Kind.CLIMB
-				anim.climb_speed = last_input.move.y * 1.1 if climbing else 0.0
+				anim.climb_speed = UltraRope.climb_input(rope, last_input) * 1.1
 			MotorState.Id.LEDGE_HANG:
-				anim.climb_speed = last_input.move.x * 0.9
+				anim.climb_speed = last_input.move.x * 0.5 if absf(last_input.move.x) > 0.2 else 0.0
 			_:
 				anim.climb_speed = 0.0
 		anim.climb_duration = state.trav_dur
@@ -446,6 +490,7 @@ func _sync_visual(alpha: float) -> void:
 			and absf(angle_difference(state.body_yaw, last_input.yaw)) < 0.05:
 		yaw = input_source.live_yaw
 	visual_feet = p
+	_hit_frame = Transform3D(Basis(Vector3.UP, yaw), _prev_pos.lerp(state.pos, alpha))
 	yaw += ragdoll_yaw
 	var basis := Basis(Vector3.UP, yaw)
 	if state.state == MotorState.Id.ROPE:
@@ -517,7 +562,7 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 			for k in UltraLimbs.COUNT:
 				if cut & (1 << k):
 					state.limb_hp[k] = 0
-	UltraNet.world.broadcast(&"hit", [net_id, info.point, info.dir, info.amount, info.attacker_id, r], false)
+	UltraNet.world.broadcast(&"hit", [net_id, info.point, info.dir, info.amount, info.attacker_id, r, info.kind], false)
 	if cut != 0:
 		UltraNet.world.broadcast(&"sever", [net_id, cut, info.dir, info.point], true)
 	damaged.emit(info)
@@ -547,6 +592,8 @@ func respawn(at: Transform3D) -> void:
 	state.hp = 100.0
 	state.limb_hp = UltraLimbs.full_health()
 	state.severed = 0
+	state.vel = Vector3.ZERO
+	state.held_id = 0
 	state.breath = profile.breath_time
 	state.state = MotorState.Id.IDLE
 	state.action = 0

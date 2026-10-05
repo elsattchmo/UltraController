@@ -103,9 +103,17 @@ func _rebuild() -> void:
 static var _default_mat: ShaderMaterial
 
 
+static var _globals_added := false
+
+
+## (global_shader_parameter_get_list() is editor-only: at runtime it errors and returns [].)
 static func _register_globals() -> void:
-	if not (&"ultra_wave_time" in RenderingServer.global_shader_parameter_get_list()):
-		RenderingServer.global_shader_parameter_add(&"ultra_wave_time", RenderingServer.GLOBAL_VAR_TYPE_FLOAT, 0.0)
+	if _globals_added:
+		return
+	_globals_added = true
+	if Engine.is_editor_hint() and &"ultra_wave_time" in RenderingServer.global_shader_parameter_get_list():
+		return
+	RenderingServer.global_shader_parameter_add(&"ultra_wave_time", RenderingServer.GLOBAL_VAR_TYPE_FLOAT, 0.0)
 
 
 static func default_material() -> ShaderMaterial:

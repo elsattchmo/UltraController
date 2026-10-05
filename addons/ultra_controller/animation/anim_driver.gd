@@ -46,6 +46,7 @@ var climb_duration := 0.6
 var air_time := 0.0
 var getup_crawl := false
 var getup_front := false
+var _owned_w := 0.0
 ## Injuries: limp severity 0..1 and which leg; hunch from a hurt torso.
 var limp := 0.0
 var limp_left := true
@@ -155,6 +156,16 @@ var back_warp_deg := 35.0
 static var strafe_r_mirror := true
 
 
+## The stock Strafe_Right skates; mirror Strafe_Left - unless the set has its own side-steps.
+func _mirror_strafe() -> bool:
+	return strafe_r_mirror and not String(anim_set.clip(&"strafe_r")).contains("/")
+
+
+## Short shuffle side-steps need speeding up to cover walking speed; real side-step walks don't.
+func _side_brisk() -> float:
+	return BRISK_RATE if anim_set.speed_of(&"strafe_l", 0.69) < 1.0 else 1.0
+
+
 func _read_speeds() -> void:
 	_walk_speed = anim_set.speed_of(&"walk_f", 0.8)
 	_sprint_speed = anim_set.speed_of(&"sprint_f", 7.3)
@@ -165,9 +176,9 @@ func _read_speeds() -> void:
 	# Convex hull of the locomotion blend space (x = right, y = forward), for clamping.
 	_hull = PackedVector2Array([
 		Vector2(0, _sprint_speed),
-		Vector2((anim_set.speed_of(&"strafe_l", 0.69) if strafe_r_mirror else anim_set.speed_of(&"strafe_r", 0.85)) * BRISK_RATE, 0),
+		Vector2((anim_set.speed_of(&"strafe_l", 0.69) if _mirror_strafe() else anim_set.speed_of(&"strafe_r", 0.85)) * _side_brisk(), 0),
 		Vector2(0, -_back_speed),
-		Vector2(-anim_set.speed_of(&"strafe_l", 0.69) * BRISK_RATE, 0),
+		Vector2(-anim_set.speed_of(&"strafe_l", 0.69) * _side_brisk(), 0),
 	])
 
 
@@ -235,14 +246,15 @@ func _build() -> AnimationNodeBlendTree:
 	bs.add_blend_point(_anim(&"jog_f"), Vector2(0, anim_set.speed_of(&"jog_f", 4.7)), -1, &"jog")
 	bs.add_blend_point(_anim(&"sprint_f"), Vector2(0, _sprint_speed), -1, &"sprint")
 	bs.add_blend_point(_anim(&"walk_b"), Vector2(0, -_back_speed), -1, &"back")
-	var sr := _anim(&"strafe_l") if strafe_r_mirror else _anim(&"strafe_r")
-	if strafe_r_mirror:
+	var sr := _anim(&"strafe_l") if _mirror_strafe() else _anim(&"strafe_r")
+	if _mirror_strafe():
 		sr.animation = _mirrored(sr.animation)
-	bs.add_blend_point(sr, _hull[1] / BRISK_RATE, -1, &"strafe_r")
-	bs.add_blend_point(_anim(&"strafe_l"), _hull[3] / BRISK_RATE, -1, &"strafe_l")
-	# Brisk side-steps (the same cycles faster): walking sideways at full walk speed steps
-	# sideways, instead of twisting the hips 90 deg over a forward walk.
-	for spec: Array in [[sr, _hull[1], &"strafe_r_brisk"], [_anim(&"strafe_l"), _hull[3], &"strafe_l_brisk"]]:
+	var brisk_side := _side_brisk()
+	bs.add_blend_point(sr, _hull[1] / brisk_side, -1, &"strafe_r")
+	bs.add_blend_point(_anim(&"strafe_l"), _hull[3] / brisk_side, -1, &"strafe_l")
+	# Brisk side-steps (the same cycles faster) for short shuffle clips; a real walking
+	# side-step (e.g. Mixamo's) already covers walking speed.
+	for spec: Array in ([] if brisk_side == 1.0 else [[sr, _hull[1], &"strafe_r_brisk"], [_anim(&"strafe_l"), _hull[3], &"strafe_l_brisk"]]):
 		var b := (spec[0] as AnimationNodeAnimation).duplicate() as AnimationNodeAnimation
 		if b.timeline_length > 0.0:
 			b.timeline_length /= BRISK_RATE
@@ -310,12 +322,15 @@ func _build() -> AnimationNodeBlendTree:
 
 	# --- slide
 	var slide := AnimationNodeStateMachine.new()
-	slide.add_node("start", _anim(&"slide_start", false), Vector2(0, 0))
+	# Slide_Start is a whole slide (down and back up in 0.83 s): use only the drop into it.
+	var ss := _anim(&"slide_start", false)
+	ss.animation = _segment(ss.animation, 0.0, 0.40)
+	slide.add_node("start", ss, Vector2(0, 0))
 	slide.add_node("loop", _anim(&"slide"), Vector2(200, 0))
 	var sl := AnimationNodeStateMachineTransition.new()
 	sl.switch_mode = AnimationNodeStateMachineTransition.SWITCH_MODE_AT_END
 	sl.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO
-	sl.xfade_time = 0.1
+	sl.xfade_time = 0.15
 	slide.add_transition("start", "loop", sl)
 	var sl_in := AnimationNodeStateMachineTransition.new()
 	sl_in.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO
@@ -341,6 +356,8 @@ func _build() -> AnimationNodeBlendTree:
 		bt.connect_node("rate", 0, "clip")
 		bt.connect_node("output", 0, "rate")
 		loco.add_node(spec[0], bt, Vector2(1000, 400))
+	_build_hang(loco)
+	_build_ladder(loco)
 
 	# --- water: tread <-> stroke by speed (stroke rate-matched); dive = stroke along the body
 	var swim := AnimationNodeBlendTree.new()
@@ -644,6 +661,15 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	var rate := 1.0
 	if clamped.length() > 0.01:
 		rate = clampf(speed / clamped.length(), 1.0, 2.4 if backwards else 1.4)
+	# Side-stepping slower than the side-step clip was authored: stay on the side-step point
+	# and slow its cycle. (Off the points, the blend mixes the forward walk and the backpedal
+	# into the side-step: a shorter stride under feet that keep cycling, so they skate and
+	# the legs pop between poses.)
+	var side_r := absf(_hull[1].x if bp.x > 0.0 else _hull[3].x)
+	var side_k := smoothstep(0.8, 0.97, absf(bp.x) / maxf(bp.length(), 0.001)) * smoothstep(0.0, 1.0, _side_g)
+	if side_k > 0.0 and speed < side_r and not backwards:
+		clamped = clamped.lerp(Vector2(signf(bp.x) * side_r, 0.0), side_k)
+		rate = lerpf(rate, maxf(speed / side_r, 0.4), side_k)
 	# Limp: the cycle hurries through the bad leg's stance (short step) and lingers on the good
 	# one, so the asymmetry comes from the real clip's timing rather than an overlay.
 	if limp > 0.0 and moving and skeleton:
@@ -670,10 +696,12 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	tree.set(LOCO + "land/speed/scale", lerpf(2.4, 1.0, clampf((land_impact - 3.0) / 6.0, 0.0, 1.0)))
 	# Climbing cycles run at the speed you climb (and hold still when you stop).
 	var cr := climb_speed / 0.6
-	tree.set(LOCO + "ladder/rate/scale", cr)
+	tree.set(LOCO + "ladder/rate/scale", climb_speed / _ladder_speed)
 	tree.set(LOCO + "pipe/rate/scale", cr)
 	tree.set(LOCO + "wall/rate/scale", climb_speed / 0.5)
-	tree.set(LOCO + "hang/rate/scale", 0.6 + absf(climb_speed) * 1.5)
+	_hang_dir = move_toward(_hang_dir, clampf(climb_speed / 0.5, -1.0, 1.0), get_process_delta_time() * 5.0)
+	tree.set(LOCO + "hang/side/blend_position", _hang_dir)
+	tree.set(LOCO + "hang/rate/scale", 1.0 if absf(_hang_dir) < 0.05 else maxf(absf(climb_speed) / _shimmy_speed, 0.4))
 	tree.set(LOCO + "rope/rate/scale", climb_speed / 0.6)
 	# Swimming: stroke fades in with speed; dive strokes match 3D speed (slow glide when still).
 	tree.set(LOCO + "swim/mix/blend_amount", smoothstep(0.15, 0.8, speed))
@@ -756,6 +784,23 @@ func _drive_body(delta: float) -> void:
 	if state == MotorState.Id.ROOT_MOTION:
 		modifier.aim_yaw = 0.0
 		modifier.aim_pitch *= 0.3
+	# Down / getting up / dead: the clip (or the ragdoll) owns the head and spine entirely -
+	# no aim offset, no glances, no stabiliser fighting the motion.
+	var body_owned := state in [MotorState.Id.RAGDOLL, MotorState.Id.DEAD, MotorState.Id.GET_UP]
+	_owned_w = move_toward(_owned_w, 1.0 if body_owned else 0.0, delta * (8.0 if body_owned else 2.0))
+	if _owned_w > 0.0:
+		var kk := 1.0 - _owned_w
+		modifier.aim_yaw *= kk
+		modifier.aim_pitch *= kk
+		modifier.lean_roll *= kk
+		modifier.lean_pitch *= kk
+		modifier.stabilize_w = kk
+		if look:
+			look.glance_weight *= kk
+			look.want_weight *= kk
+	else:
+		modifier.stabilize_w = 1.0
+	modifier.head_calm = move_toward(modifier.head_calm, 0.8 if state == MotorState.Id.GET_UP else 0.0, delta * 3.0)
 
 
 func _drive_item(delta: float) -> void:
@@ -804,6 +849,108 @@ func _hips_yaw(clip: StringName) -> float:
 			var z := Basis(q).z
 			return atan2(z.x, z.z)
 	return NAN
+
+
+# ---------------------------------------------------------------- hanging and ladders
+
+var _hang_dir := 0.0
+var _shimmy_speed := 0.3            ## m/s one shimmy cycle covers at rate 1
+var _ladder_speed := 0.6            ## m/s one climb cycle covers at rate 1
+const LADDER_HANDS_Y := 1.25        ## mean hand height above the feet origin while laddering
+
+
+## Ledge hang: braced idle <-> left / right shimmy (BlendSpace1D on the shimmy direction), all
+## shifted so the hands sit on the ledge edge (traversal.gd HANG_DROP / HANG_BACK).
+func _build_hang(loco: AnimationNodeStateMachine) -> void:
+	if not (_role_anim(&"shimmy_l") and _role_anim(&"shimmy_r") and _role_anim(&"hang_idle")):
+		return
+	var hands := Vector3(0.0, UltraTraversal.HANG_DROP + 0.03, UltraTraversal.HANG_BACK + 0.03)
+	var bs := AnimationNodeBlendSpace1D.new()
+	bs.min_space = -1.0
+	bs.max_space = 1.0
+	bs.sync = true
+	var idle_src := _role_anim(&"hang_idle")
+	var idle := AnimationNodeAnimation.new()
+	idle.animation = _refit(_segment(_clip(&"hang_idle"), idle_src.length - 0.05, idle_src.length, 0.5), "hang", hands, Vector3.ONE)
+	idle.use_custom_timeline = true
+	idle.loop_mode = Animation.LOOP_LINEAR
+	idle.timeline_length = 0.55
+	bs.add_blend_point(idle, 0.0, -1, &"idle")
+	for spec: Array in [[&"shimmy_l", 1.0], [&"shimmy_r", -1.0]]:
+		var a := _anim(spec[0])
+		a.animation = _refit(a.animation, "hang", hands, Vector3.ONE)
+		bs.add_blend_point(a, spec[1], -1, StringName(spec[0]))
+	var bt := AnimationNodeBlendTree.new()
+	bt.add_node("side", bs, Vector2(0, 0))
+	bt.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
+	bt.connect_node("rate", 0, "side")
+	bt.connect_node("output", 0, "rate")
+	loco.replace_node("hang", bt)
+
+
+## Ladder: the climb cycle shifted so the hands meet the ladder in front of the capsule.
+func _build_ladder(loco: AnimationNodeStateMachine) -> void:
+	var src := _role_anim(&"ladder_climb")
+	if src == null or not String(anim_set.clip(&"ladder_climb")).contains("/"):
+		return
+	var a := _anim(&"ladder_climb")
+	# Hands on the ladder plane (0.36 in front of the capsule), feet ~on the capsule's base.
+	a.animation = _refit(a.animation, "ladder", Vector3(0, LADDER_HANDS_Y, 0.36), Vector3.ONE)
+	_ladder_speed = anim_set.speed_of(&"ladder_climb", 0.65)
+	var bt := AnimationNodeBlendTree.new()
+	bt.add_node("clip", a, Vector2(0, 0))
+	bt.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
+	bt.connect_node("rate", 0, "clip")
+	bt.connect_node("output", 0, "rate")
+	loco.replace_node("ladder", bt)
+
+
+## A copy of `clip` whose Hips position track is shifted so the hands' average position (model
+## space, +Z forward, feet at the origin) lands on `hands` along the axes set in `axes`. A clip
+## authored facing the other way (some Mixamo ladder / wall clips) is turned round first.
+func _refit(clip: StringName, tag: String, hands: Vector3, axes: Vector3) -> StringName:
+	var s := String(clip)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var clip_name := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	if l == null or not l.has_animation(clip_name):
+		return clip
+	var rname := "%s_fit_%s" % [clip_name, tag]
+	if not l.has_animation(rname):
+		var a := l.get_animation(clip_name).duplicate(true) as Animation
+		var hips_pos := -1
+		var hips_rot := -1
+		for t in a.get_track_count():
+			if String(a.track_get_path(t).get_concatenated_subnames()) == "Hips":
+				if a.track_get_type(t) == Animation.TYPE_POSITION_3D:
+					hips_pos = t
+				elif a.track_get_type(t) == Animation.TYPE_ROTATION_3D:
+					hips_rot = t
+		UltraPoseSampler.pose(a, skeleton, 0.0)
+		var side := UltraPoseSampler.global_pose(skeleton, skeleton.find_bone("RightUpperLeg")).origin 			- UltraPoseSampler.global_pose(skeleton, skeleton.find_bone("LeftUpperLeg")).origin
+		if Vector3.UP.cross(side).z < 0.0 and hips_rot >= 0:
+			var turn := Quaternion(Vector3.UP, PI)
+			for k in a.track_get_key_count(hips_rot):
+				a.track_set_key_value(hips_rot, k, turn * (a.track_get_key_value(hips_rot, k) as Quaternion))
+			if hips_pos >= 0:
+				for k in a.track_get_key_count(hips_pos):
+					a.track_set_key_value(hips_pos, k, turn * (a.track_get_key_value(hips_pos, k) as Vector3))
+		var lh := skeleton.find_bone("LeftHand")
+		var rh := skeleton.find_bone("RightHand")
+		var mean := Vector3.ZERO
+		var n := 12
+		for k in n:
+			UltraPoseSampler.pose(a, skeleton, a.length * k / n)
+			mean += (UltraPoseSampler.global_pose(skeleton, lh).origin + UltraPoseSampler.global_pose(skeleton, rh).origin) * 0.5
+		mean /= n
+		var delta := (hands - mean) * axes / maxf(skeleton.motion_scale, 0.001)
+		if hips_pos >= 0:
+			for k in a.track_get_key_count(hips_pos):
+				a.track_set_key_value(hips_pos, k, (a.track_get_key_value(hips_pos, k) as Vector3) + delta)
+		l.add_animation(rname, a)
+		for b in skeleton.get_bone_count():
+			skeleton.reset_bone_pose(b)
+	return StringName((lib + "/" if lib != "" else "") + rname)
 
 
 ## A forward segment of a clip (first frame held `hold` s), made once, kept in its library.

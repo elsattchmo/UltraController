@@ -97,11 +97,11 @@ func _on_impact(pos: Vector3, normal: Vector3, kind: StringName, shooter_id: int
 		sparks(pos, normal)
 
 
-func _on_hit(target_id: int, pos: Vector3, dir: Vector3, amount: float, attacker_id: int, region := -1) -> void:
+func _on_hit(target_id: int, pos: Vector3, dir: Vector3, amount: float, attacker_id: int, region := -1, kind := &"bullet") -> void:
 	var c := UltraNet.world.character(target_id)
 	if c:
 		c.react_to_hit(region, dir, amount)
-	if attacker_id in local_ids:
+	if attacker_id in local_ids or kind == &"impact" or kind == &"drown":
 		return
 	if c == null or c.damage_profile.blood_on():
 		blood(pos, -dir)

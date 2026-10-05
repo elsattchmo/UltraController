@@ -58,7 +58,12 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   state, so client and server pick the same move. Scripted moves (MANTLE/VAULT/LEDGE_CLIMB) are
   `trav_from -> trav_to` over `trav_dur`; hang/ladder/rope keep their anchor in `trav_*` fields.
   Ropes are a pendulum in MotorState (`trav_from` = swing velocity); the verlet rope is cosmetic.
-  Hands on rope/ledge are presentation (`UltraTraversalVisual`, IK priority 111 > equipment 110).
+  Swing ropes climb too (`UltraRope.climb_input`: forward + look up/down > 28 deg).
+  Hands/feet on rope, ledge, ladder are presentation (`UltraTraversalVisual`, IK priority 111 >
+  equipment 110). `HandIKModifier` has 4 limbs (hands, then feet); `hand_basis(h, fingers, palm)`
+  orients a hand (palm learned from the curled fingers). Ledge: palms over the lip. Ladder: the
+  limb the clip brings near a rung snaps to it (`RUNG_HAND/RUNG_FOOT`, rungs `UltraLadder.FIRST_RUNG
+  + i*RUNG_SPACING`). Swing-rope legs follow the rope's angle (kick out front / back).
 - **Water is analytic** (`UltraWater.find/surface_y(tick)`): box volumes, level a function of the
   world tick (valves replicate `{from,to,t0,dur}`), so swimming predicts. SWIM floats the feet
   `float_depth` under the surface on a damped spring; DIVE uses a 0.8 m capsule and 3D aim
@@ -69,8 +74,14 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   mask live in MotorState, so injuries change movement predictably (`UltraInjury`: speed, no
   sprint/jump, forced crawl, no climbing, weapon hand). Only the authority changes them
   (`apply_damage`); remote players get 2-bit statuses in snapshots. Which limb a shot hit comes
-  from region capsules baked into the BodyProfile (`tools/make_hitboxes.gd`) - no skeleton on the
-  server. Shots test a wide `HitVolume` (HITBOX layer), then must pass through a limb capsule.
+  from region capsules (`UltraHitboxes.build`): from the live posed skeleton when there is one
+  (`UltraCharacter.live_hitboxes`, captured at `skeleton_updated` in the character frame), else
+  baked into the BodyProfile (`tools/make_hitboxes.gd`) for a headless server. Severed regions
+  can't be hit. Shots test a wide `HitVolume` (HITBOX layer; lies along a downed body), then must
+  pass through a limb capsule. The head capsule runs along the Head bone's own up axis.
+- Thrown props (`UltraGrab.mark_thrown`, 2.5 s) hitting a character (authority, swept against
+  the capsule each tick in `UltraGrab.impacts`): momentum m*|v_rel| >= 5 hurts (kind `impact`,
+  no blood) and shoves; >= `MovementProfile.impact_knockdown` (40) knocks into RAGDOLL.
 - Knock-down is a deterministic low capsule (RAGDOLL -> GET_UP states); the floppy body is a
   local `PhysicalBoneSimulator3D` (UltraRagdoll). An inactive simulator still writes the pose:
   keep `influence = 0` while it's off. Dismemberment scales the region's root bone to ~0 in the
@@ -85,14 +96,18 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Get-up picks the clip from how the ragdoll lies: face up = LayToIdle (after holding its
   lying frame), face down = Mixamo GetUp_Prone 1.4-5.3 s (role `get_up_front`; fallback
   Death_A reversed). Clips are cut/held at runtime (`UltraAnimMirror.segment`). The body
-  starts at the ragdoll's hips and yaw and eases onto the capsule. GET_UP_TIME 2.8.
+  starts at the ragdoll's hips and yaw and eases onto the capsule. GET_UP_TIME 2.8. During
+  GET_UP the neck/head are low-passed against the chest (`BodyDynamicsModifier.head_calm`):
+  the prone clip, played 1.4x, whips the head.
 - First person while down (RAGDOLL/DEAD/GET_UP): the camera is the head's real eye pushed
   15 cm out of the face, view pitch >= -50 deg and roll <= 35 deg (`_tame_view`).
 - Body materials dither away within 0.15-0.27 m of any camera (`_near_fade_mat`); the body and
   head meshes are both capped (`UltraMeshCap`, skin-coloured).
 - Walking never blends the walk with a side-step: below ~45 deg off forward the walk plays with
-  the hips turned, beyond it the side-step (hysteresis 38/52 deg). Brisk side-step points
-  (1.75x) cover sideways walking speed. Runs warp the hips from 2.2 m/s.
+  the hips turned, beyond it the side-step (hysteresis 38/52 deg). Side-steps are Mixamo
+  Strafe_Walk_L/R (1.62 m/s): slower strafing stays ON the side-step point and slows its cycle
+  (off-point blends mixed in walk + backpedal: the legs popped and skated). Brisk 1.75x points
+  only exist for short shuffle clips (< 1 m/s). Runs warp the hips from 2.2 m/s.
 - `knock_down` / death set state.vel from the push (they run outside a motor step).
 - Upper-body item clips can be mirrored at runtime (`UltraAnimMirror`; the skeleton is mirror
   symmetric). `BodyDynamicsModifier.item_hips_yaw` turns the spine by the item clip's own hips
@@ -104,12 +119,19 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   sprint) or JOG. The blend space has a "walk_brisk" point (the walk cycle at 1.75x) so walk
   speeds never pull in the jog's 2.8 m stride. Hips warp toward travel from ~1.35 m/s.
 - Backpedal diagonals: legs turn at most `back_warp_deg` (35) toward travel, the back +
-  side-step clips blend the rest. The right side-step point is a mirrored Strafe_Left
-  (Strafe_Right skates ~0.8 m/s when blended with Walk_Backwards). back_mult 0.82, strafe 0.95.
+  side-step clips blend the rest. With UAL clips the right side-step is a mirrored Strafe_Left
+  (Strafe_Right skates); Mixamo side-steps aren't mirrored. back_mult 0.82, strafe 0.95.
 - Stepping down a stair keeps you grounded (`UltraMotor._snap_down`, a ray under the capsule's
   centre; never on a TickPlatform - a raycast can see its pose a frame stale during replay);
   the fall clip waits 0.15 s of real air before showing.
-- Hard landings (> hard_land_speed) crumple into RAGDOLL and get up; Land_Three_Point is unused.
+- Hard landings (> hard_land_speed 13.5 m/s, ~9 m) crumple into RAGDOLL and get up.
+- Ledge hang = BlendSpace1D braced idle (Braced_Catch last frame) / Shimmy_L / Shimmy_R;
+  ladder = Mixamo Ladder_Climb. `AnimDriver._refit` shifts a clip's Hips track so the mean hand
+  position hits a target, and turns clips authored facing -Z (the ladder clip) round first.
+- Roll (ROOT_MOTION) hands control back once 97% of its travel is done and there's input.
+- Sprint is a toggle by default (`ultra_controller/input/toggle_sprint`), cleared by easing off
+  forward. Respawn: `uc_respawn` (F9/Backspace), below `kill_height`, or 5 s dead
+  (`UltraNet.respawn_character`). Pause menu has Main menu (reloads the scene with a meta flag).
 - Pistol grip is fitted to the posed fingers (`UltraGripFit`, run by tools/build_items.gd);
   the reload plays as authored in third person; in first person both hands' clip motion is
   shifted out in front of the eye by IK (`_drive_reload`). Don't IK the gun to a fixed pose.
@@ -175,6 +197,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   writes `intake/blender/*.glb` -> `blender/` library via the same intake. Also `mirror`,
   `make-pistol`, `mixamo-test` (a Mixamo-named FBX for testing without an account).
 - Round-trip test (m1_import.test_intake_roundtrip): Blender path exact, Mixamo FBX path < 5 cm.
+- Some Mixamo clips are authored facing away (Ladder_Climb: hips yaw 177 deg) or off the ground;
+  `_refit` handles both. Slide_Start is a whole slide (down and up): only its first 0.4 s is used.
 - Mixamo names bones per character (`mixamorig:`, `mixamorig1:` ...): the intake detects the
   prefix and makes a matching bone map (`mixamo_humanoid_<prefix>.tres`). A clip that imports
   with 0 tracks means the bone map didn't match.

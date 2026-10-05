@@ -293,3 +293,100 @@ func test_left_handed_ads_aligns_sights() -> void:
 	info("gun vs lefthand*grip: pos %.4f m, rot %.2f deg; attach vs bone %.4f m; goal vs bone rot %.2f deg" % [gun.global_position.distance_to(want.origin), rad_to_deg(gun.global_basis.get_rotation_quaternion().angle_to(want.basis.get_rotation_quaternion())), eq.left_hand_attach.global_position.distance_to(lb.origin), rad_to_deg(goal.basis.get_rotation_quaternion().angle_to(lb.basis.get_rotation_quaternion()))])
 	check(gun.get_parent() == eq.left_hand_attach and a_rear < 0.5 and a_front < 0.5, "left-handed: sights on the view ray")
 	rig.queue_free()
+
+
+## The region capsules follow the posed body (here a crouch), so a shot at the head you see
+## is a headshot - not a hit on wherever the head is in the idle pose.
+func test_hitboxes_follow_the_pose() -> void:
+	var t := dummy(Vector3(0, 0.05, -40), PI)        # facing the shooter (from behind, a crouch hides the head)
+	(t.input_source as BotInputSource).set_steps([{"ticks": 100000, "buttons": InputFrame.B_CROUCH}])
+	c.teleport(Vector3(0, 0.05, -34), 0.0)
+	await ticks(60)
+	check(t.has_live_hitboxes(), "the posed skeleton feeds the hit capsules")
+	var sk := t.skeleton
+	var head_b := sk.find_bone("Head")
+	var hp := sk.global_transform * await final_pose(sk, head_b)
+	var head := hp * Vector3(0, 0.12 / hp.basis.y.length(), 0)       # the middle of the skull
+	var cap_head := capsule_mid(t, R.HEAD)
+	info("crouched: head bone y %.2f, head capsule y %.2f" % [head.y, cap_head.y])
+	check(head.distance_to(cap_head) < 0.2, "the head capsule sits on the posed head (%.2f m)" % head.distance_to(cap_head))
+	var eye := c.state.pos + Vector3.UP * 1.6
+	var hit := UltraCombat.hitscan(c, eye, (head - eye).normalized(), ItemDB.get_def(&"pistol"))
+	check(int(hit.get("region", -1)) == R.HEAD, "a shot at the crouched head is a headshot (got %s)" % UltraLimbs.NAMES[int(hit.get("region", 0))])
+
+
+func _throw_box_at(t: UltraCharacter, mass: float, speed: float) -> RigidBody3D:
+	var rb := RigidBody3D.new()
+	rb.mass = mass
+	rb.collision_layer = UltraLayers.WORLD_DYNAMIC
+	rb.collision_mask = UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC | UltraLayers.CHARACTER
+	var cs := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3.ONE * 0.4
+	cs.shape = box
+	rb.add_child(cs)
+	add_child(rb)
+	rb.global_position = t.state.pos + Vector3(0, 1.3, 3.0)
+	rb.gravity_scale = 0.0
+	rb.linear_velocity = Vector3(0, 0, -speed)
+	UltraGrab.mark_thrown(rb, c.net_id)
+	return rb
+
+
+## Thrown props are felt: a light one shoves and hurts a little, a heavy fast one knocks the
+## target over.
+func test_thrown_props_hit_players() -> void:
+	var t := dummy(Vector3(-24, 0.05, -14))
+	await ticks(10)
+	var rb := _throw_box_at(t, 2.0, 7.0)          # 14 kg m/s
+	var traces := []
+	for i in 50:
+		await ticks(1)
+	traces.append("light: hp %.0f state %s vel %.2f" % [t.state.hp, Id.keys()[t.state.state], Vector2(t.state.vel.x, t.state.vel.z).length()])
+	check(t.state.hp < 100.0 and t.state.state != Id.RAGDOLL, "a light throw hurts a little, no knock-down")
+	rb.queue_free()
+	t.respawn(t.global_transform)
+	await ticks(10)
+	rb = _throw_box_at(t, 12.0, 6.0)              # 72 kg m/s
+	var downed := false
+	for i in 60:
+		await ticks(1)
+		downed = downed or t.state.state == Id.RAGDOLL
+	traces.append("heavy: hp %.0f downed %s" % [t.state.hp, downed])
+	info("; ".join(traces))
+	check(downed, "a heavy, fast throw knocks the target into a ragdoll")
+	rb.queue_free()
+
+
+## Getting up off the face (Mixamo get-up, played faster to fit): the head turns with the
+## body but doesn't whip about against the chest.
+func test_getup_head_is_steady() -> void:
+	var t := dummy(Vector3(-24, 0.05, -14))
+	await ticks(10)
+	t.knock_down(Vector3(0, 2.0, -6.0))
+	var sk := t.skeleton
+	var chest := sk.find_bone("Chest")
+	var head := sk.find_bone("Head")
+	var rels: Array[Quaternion] = []
+	var front := [false]
+	var grab := func() -> void:
+		if t.state.state == Id.GET_UP:
+			front[0] = front[0] or t.anim.getup_front
+			rels.append(sk.get_bone_global_pose(chest).basis.get_rotation_quaternion().inverse() * sk.get_bone_global_pose(head).basis.get_rotation_quaternion())
+	sk.skeleton_updated.connect(grab)
+	for i in 400:
+		await ticks(1)
+		if t.state.state == Id.IDLE and i > 30:
+			break
+	sk.skeleton_updated.disconnect(grab)
+	var speeds: Array[float] = []
+	for k in range(1, rels.size()):
+		speeds.append(rad_to_deg(rels[k - 1].angle_to(rels[k])) * 60.0)
+	speeds.sort()
+	check(speeds.size() > 60, "got up (%d frames)" % speeds.size())
+	if speeds.is_empty():
+		return
+	var p90 := speeds[speeds.size() * 9 / 10]
+	info("face-down get-up %s: head vs chest p90 %.0f, max %.0f deg/s" % [front[0], p90, speeds[-1]])
+	check(front[0], "landed face down -> the face-down get-up")
+	check(p90 < 85.0 and speeds[-1] < 140.0, "the head doesn't whip about (p90 %.0f, max %.0f deg/s)" % [p90, speeds[-1]])

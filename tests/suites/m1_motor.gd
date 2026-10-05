@@ -202,3 +202,22 @@ func test_moving_platforms() -> void:
 		c.queue_free()
 		chars.erase(c)
 		await ticks(2)
+
+
+## After a roll's travel is done, input takes over at once (the clip's tail no longer locks
+## the player out), and the player moves where they steer.
+func test_roll_hands_back_control() -> void:
+	var c := spawn("speed_start", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(10)
+	bot(c).set_steps([{"ticks": 2, "move": FWD, "buttons": InputFrame.B_DODGE}, {"ticks": 200, "move": Vector2(1, 0)}])
+	var left_at := -1
+	var rolled := false
+	for i in 200:
+		await ticks(1)
+		rolled = rolled or c.state.state == MotorState.Id.ROOT_MOTION
+		if rolled and left_at < 0 and c.state.state != MotorState.Id.ROOT_MOTION:
+			left_at = i
+	var v := Vector2(c.state.vel.x, c.state.vel.z)
+	info("roll handed back control after %.2f s; then moving %.2f m/s" % [left_at / 60.0, v.length()])
+	check(rolled and left_at > 0 and left_at < 110, "control returns within ~1.8 s of the roll")
+	check(v.length() > 0.8 and c.state.state == MotorState.Id.MOVE, "and the player moves on the stick")

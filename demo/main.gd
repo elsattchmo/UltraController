@@ -77,7 +77,10 @@ func _ready() -> void:
 			DirAccess.make_dir_recursive_absolute(path.get_base_dir())
 			get_viewport().get_texture().get_image().save_png(path)
 			print("screenshot ", path))
-	if _wants_session():
+	var to_menu := Engine.has_meta("ultra_to_menu")
+	if to_menu:
+		Engine.remove_meta("ultra_to_menu")
+	if _wants_session() and not to_menu:
 		start_from_args()
 	elif headless:
 		UltraNet.start_offline(1)

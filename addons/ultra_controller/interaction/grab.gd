@@ -113,6 +113,7 @@ static func _release(c: UltraCharacter, s: MotorState, throw_charge: float, repl
 			var dv := lerpf(4.0, 14.0, throw_charge) / sqrt(maxf(rb.mass, 0.2))
 			rb.linear_velocity = s.vel * 0.8 + (aim + Vector3.UP * 0.15).normalized() * dv
 			rb.angular_velocity += Vector3(randf_range(-2, 2), randf_range(-2, 2), randf_range(-2, 2))
+			mark_thrown(rb, c.net_id)
 	elif rb and not replaying:
 		_set_exceptions(c, rb, false)
 	if o:
@@ -123,6 +124,9 @@ static func _release(c: UltraCharacter, s: MotorState, throw_charge: float, repl
 		rb.remove_meta("held_for")
 	if rb and rb.has_meta("far_for"):
 		rb.remove_meta("far_for")
+	for k in ["hold_pt", "hold_arrived"]:
+		if rb and rb.has_meta(k):
+			rb.remove_meta(k)
 	c.emit_item_event(&"throw" if throw_charge > 0.0 else &"drop", {"id": s.held_id}, replaying)
 	s.held_id = 0
 	s.held_mass = 0.0
@@ -166,6 +170,22 @@ static func hold_target(c: UltraCharacter, rb: RigidBody3D) -> Vector3:
 	# inside it and the arms can wrap its sides.
 	var y := s.height * 0.61 + pitch * 0.12 - support(rb, Vector3.UP) * 0.15
 	return s.pos + Vector3.UP * y + fwd * (r - 0.05 + support(rb, -fwd))
+
+
+## A fresh grab brings the prop in at a believable pace (it doesn't snap to your hands): the
+## point the hold steers to starts where the prop is and travels to `target` at most
+## APPROACH_SPEED m/s, then follows it exactly.
+const APPROACH_SPEED := 2.6
+
+
+static func approach(rb: RigidBody3D, target: Vector3, dt: float) -> Vector3:
+	var cur: Vector3 = rb.get_meta("hold_pt", rb.global_position)
+	var arrived := bool(rb.get_meta("hold_arrived", false))
+	var nxt := target if arrived else cur.move_toward(target, APPROACH_SPEED * dt)
+	if not arrived and nxt.distance_to(target) < 0.01:
+		rb.set_meta("hold_arrived", true)
+	rb.set_meta("hold_pt", nxt)
+	return nxt
 
 
 ## How far the body's collision shape reaches from its centre in world direction `dir`.
@@ -213,6 +233,87 @@ static func _size(rb: RigidBody3D) -> float:
 	return clampf(r, 0.1, 1.0)
 
 
+# ---------------------------------------------------------------- thrown props hitting people
+
+const THROWN_TIME := 2.5             ## s a thrown prop can still hurt someone
+const IMPACT_MIN := 5.0              ## kg*m/s below which a hit is just a bump
+static var _thrown: Array[RigidBody3D] = []
+
+
+## Authority, once per tick: a thrown prop that reaches a character (swept over this tick,
+## before the physics bounce eats its speed) shoves them, hurts a little (region from where it
+## struck) and, past their profile's `impact_knockdown`, knocks them into a ragdoll.
+## One hit per throw; the thrower can't hit themself.
+static func mark_thrown(rb: RigidBody3D, by_id: int) -> void:
+	rb.set_meta("thrown_by", by_id)
+	rb.set_meta("thrown_left", THROWN_TIME)
+	if not _thrown.has(rb):
+		_thrown.append(rb)
+
+
+static func impacts(chars: Array, dt: float) -> void:
+	for i in range(_thrown.size() - 1, -1, -1):
+		var rb := _thrown[i]
+		if not is_instance_valid(rb):
+			_thrown.remove_at(i)
+			continue
+		var left := float(rb.get_meta("thrown_left", 0.0)) - dt
+		rb.set_meta("thrown_left", left)
+		var v := rb.linear_velocity
+		if left <= 0.0 or v.length() < 1.5:
+			_end_throw(rb)
+			_thrown.remove_at(i)
+			continue
+		var p := rb.global_position
+		var reach := _size(rb) * 0.75
+		for c: UltraCharacter in chars:
+			if not c.is_authority() or c.net_id == int(rb.get_meta("thrown_by", 0)) \
+					or c.state.state == MotorState.Id.DEAD:
+				continue
+			var rad := c.profile.radius if c.profile else 0.3
+			var a := c.state.pos + Vector3.UP * rad
+			var b := c.state.pos + Vector3.UP * maxf(c.state.height - rad, rad)
+			var pts := Geometry3D.get_closest_points_between_segments(p, p + v * dt, a, b)
+			if pts[0].distance_to(pts[1]) > rad + reach:
+				continue
+			_strike(c, rb, pts[0])
+			_end_throw(rb)
+			_thrown.remove_at(i)
+			break
+
+
+static func _strike(c: UltraCharacter, rb: RigidBody3D, at: Vector3) -> void:
+	var rel := rb.linear_velocity - c.state.vel
+	var mom := rb.mass * rel.length()
+	if mom < IMPACT_MIN:
+		return
+	var dir := rel.normalized()
+	var flat := Vector3(dir.x, 0.0, dir.z).normalized() if Vector2(dir.x, dir.z).length() > 0.01 else Vector3.ZERO
+	var spot := UltraHitboxes.closest(c, at)
+	var info := UltraCombat.DamageInfo.new()
+	info.kind = &"impact"
+	info.amount = clampf((mom - IMPACT_MIN) * 0.25, 1.0, 20.0)
+	info.dir = dir
+	info.point = spot.point
+	info.normal = -dir
+	info.region = int(spot.region)
+	info.attacker_id = int(rb.get_meta("thrown_by", 0))
+	info.collider = c
+	var knock := mom >= (c.profile.impact_knockdown if c.profile else 40.0)
+	c.apply_damage(info)
+	if knock:
+		c.knock_down(flat * clampf(mom / 12.0, 2.5, 8.0) + Vector3.UP * 1.2)
+	elif c.state.state not in [MotorState.Id.DEAD, MotorState.Id.RAGDOLL, MotorState.Id.GET_UP]:
+		c.state.vel += flat * minf(mom / 70.0, 2.5)
+	rb.linear_velocity = rb.linear_velocity * 0.3 - dir * 0.5
+
+
+static func _end_throw(rb: RigidBody3D) -> void:
+	for k in ["thrown_by", "thrown_left"]:
+		if rb.has_meta(k):
+			rb.remove_meta(k)
+
+
 ## Server: apply holding forces for every holder (once per server tick).
 static func server_tick(chars: Array, dt: float) -> void:
 	var team := {}               # held id -> [carriers]
@@ -242,7 +343,7 @@ static func _hold_single(c: UltraCharacter, rb: RigidBody3D, dt: float) -> void:
 			if c.get_slide_collision(k).get_collider() == rb:
 				_release(c, s, 0.0, false)
 				return
-	var target := hold_target(c, rb)
+	var target := approach(rb, hold_target(c, rb), dt)
 	var p := rb.global_position
 	# A fresh grab gets a moment to bring the prop in (it starts on the floor, out of reach of
 	# the hold point); after that, pulling it away (snagged, blocked) breaks the hold.

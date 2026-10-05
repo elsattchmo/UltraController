@@ -5,7 +5,7 @@ extends SkeletonModifier3D
 ## spring so hands reach and release smoothly. The elbow keeps its animated bend plane,
 ## nudged outward/down by `pole_hint`.
 
-enum Hand { LEFT, RIGHT }
+enum Hand { LEFT, RIGHT, LEFT_FOOT, RIGHT_FOOT }
 
 class Goal:
 	var target := Transform3D()
@@ -21,8 +21,8 @@ class Goal:
 	var line_dir := Vector3.ZERO
 	var line_range := Vector2(-0.8, 0.8)
 
-var goals := [Goal.new(), Goal.new()]
-var last_error := [0.0, 0.0]
+var goals := [Goal.new(), Goal.new(), Goal.new(), Goal.new()]
+var last_error := [0.0, 0.0, 0.0, 0.0]
 
 var _arms := []
 
@@ -52,6 +52,8 @@ func _resolve() -> void:
 	_arms = []
 	for side in ["Left", "Right"]:
 		_arms.append([sk.find_bone(side + "UpperArm"), sk.find_bone(side + "LowerArm"), sk.find_bone(side + "Hand")])
+	for side in ["Left", "Right"]:
+		_arms.append([sk.find_bone(side + "UpperLeg"), sk.find_bone(side + "LowerLeg"), sk.find_bone(side + "Foot")])
 
 
 ## Reach `hand` to `world_xform` (the hand bone's desired world transform).
@@ -79,6 +81,34 @@ func release(hand: int, speed := 6.0) -> void:
 	g.speed = speed
 
 
+var _palm_local := [Vector3.ZERO, Vector3.ZERO]
+
+
+## World basis for the hand bone so its fingers point along `fingers` and the palm faces
+## `palm`. The palm direction in the bone's own frame is learned from the animated (curled)
+## fingers the first time it's asked.
+func hand_basis(hand: int, fingers: Vector3, palm: Vector3) -> Basis:
+	var sk := get_skeleton()
+	if sk == null or hand > 1:
+		return Basis()
+	if _palm_local[hand] == Vector3.ZERO:
+		var side := "Left" if hand == 0 else "Right"
+		var hb := sk.get_bone_global_pose(sk.find_bone(side + "Hand"))
+		var tip := Vector3.ZERO
+		for f in ["MiddleDistal", "RingDistal", "IndexDistal"]:
+			tip += sk.get_bone_global_pose(sk.find_bone(side + f)).origin / 3.0
+		var v := hb.basis.orthonormalized().inverse() * (tip - hb.origin)
+		v.y = 0.0
+		if v.length() < 0.005:
+			return Basis()
+		_palm_local[hand] = v.normalized()
+	var src_p: Vector3 = _palm_local[hand]
+	var src := Basis(Vector3.UP.cross(src_p), Vector3.UP, src_p)
+	var f := fingers.normalized()
+	var p := (palm - f * palm.dot(f)).normalized()
+	return Basis(f.cross(p), f, p) * src.inverse()
+
+
 func hand_bone(hand: int) -> int:
 	return _arms[hand][2] if _arms.size() > hand else -1
 
@@ -88,7 +118,7 @@ func _process_modification_with_delta(delta: float) -> void:
 	if sk == null or _arms.size() < 2:
 		return
 	var inv := sk.global_transform.affine_inverse()
-	for i in 2:
+	for i in mini(goals.size(), _arms.size()):
 		var g: Goal = goals[i]
 		g.weight = move_toward(g.weight, g.want_weight, delta * g.speed)
 		var w := smoothstep(0.0, 1.0, g.weight)
@@ -104,7 +134,7 @@ func _process_modification_with_delta(delta: float) -> void:
 			t_sk.origin = t_sk.origin + ld * along
 		# Out of reach? Roll the clavicle toward the target first (shoulders come forward when
 		# you push a pistol out), up to ~25°.
-		var clav := sk.get_bone_parent(arm[0])
+		var clav := sk.get_bone_parent(arm[0]) if i < 2 else -1
 		if clav >= 0:
 			var sh := sk.get_bone_global_pose(arm[0]).origin
 			var reach := sh.distance_to(sk.get_bone_global_pose(arm[1]).origin) + sk.get_bone_global_pose(arm[1]).origin.distance_to(sk.get_bone_global_pose(arm[2]).origin)
@@ -119,10 +149,10 @@ func _process_modification_with_delta(delta: float) -> void:
 				if axis.length() > 1e-5:
 					cg.basis = Basis(axis.normalized(), ang) * cg.basis
 					sk.set_bone_global_pose(clav, cg)
-		var pole := Vector3(1.0 if i == 0 else -1.0, -0.6, -0.3)   # skeleton space: out & down
+		var pole := Vector3(1.0 if i == 0 else -1.0, -0.6, -0.3) if i < 2 else Vector3(0, 0, 1)   # skeleton space
 		var basis: Variant = t_sk.basis.orthonormalized() if g.use_rotation else null
 		last_error[i] = UltraIK.two_bone(sk, arm[0], arm[1], arm[2], t_sk.origin, w, basis, pole)
-		if g.open > 0.0:
+		if g.open > 0.0 and i < 2:
 			# Fingers flatten onto the surface (rest pose = straight), keeping a slight curl.
 			for fb: int in _fingers[i]:
 				var rest := sk.get_bone_rest(fb).basis.get_rotation_quaternion()

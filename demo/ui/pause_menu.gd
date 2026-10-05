@@ -20,7 +20,7 @@ func _ready() -> void:
 	_box.position = Vector2(-140, -90)
 	_box.custom_minimum_size = Vector2(280, 0)
 	bg.add_child(_box)
-	for spec in [["Resume", _resume], ["Controls", _controls], ["Quit", func() -> void: get_tree().quit()]]:
+	for spec in [["Resume", _resume], ["Respawn", _respawn], ["Controls", _controls], ["Main menu", _main_menu], ["Quit", func() -> void: get_tree().quit()]]:
 		var b := Button.new()
 		b.text = spec[0]
 		b.custom_minimum_size = Vector2(0, 40)
@@ -41,6 +41,22 @@ func _resume() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	resumed.emit()
 	queue_free()
+
+
+func _respawn() -> void:
+	for p in UltraNet.local_players:
+		if p.character and UltraNet.is_server():
+			UltraNet.respawn_character(p.character)
+		elif p.character and p.character.input_source is LocalInputSource:
+			(p.character.input_source as LocalInputSource).pulse(InputFrame.B_RESPAWN)
+	_resume()
+
+
+## Leave the session and go back to the title menu.
+func _main_menu() -> void:
+	UltraNet.stop()
+	Engine.set_meta("ultra_to_menu", true)
+	get_tree().reload_current_scene()
 
 
 func _controls() -> void:

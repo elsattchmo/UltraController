@@ -121,7 +121,7 @@ func _drive_held_prop(delta: float) -> void:
 		return
 	if character.net_role == UltraCharacter.ROLE_PREDICTED and s.held_grip < 0:
 		o.set_meta("held_locally", true)
-		var target := UltraGrab.hold_target(character, rb)
+		var target := UltraGrab.approach(rb, UltraGrab.hold_target(character, rb), delta)
 		rb.global_position = rb.global_position.lerp(target, 1.0 - exp(-18.0 * delta))
 	_hands_on_prop(rb, s)
 	_owns_prop = true

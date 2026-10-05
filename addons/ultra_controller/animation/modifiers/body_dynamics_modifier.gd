@@ -96,6 +96,7 @@ func _process_modification_with_delta(_delta: float) -> void:
 		g.basis = r * g.basis
 		sk.set_bone_global_pose(b, g)
 	_stabilize_head(sk)
+	_calm_head(sk, _delta)
 
 
 ## People keep their head steady while the shoulders swing (the sprint clip turns the head
@@ -109,6 +110,8 @@ var sway_weight := 0.0
 var _hip_x_lp := NAN
 var _head_ref := Vector3.ZERO
 var _head_dev := 0.0
+## 0..1 how much of the stabiliser applies (0 while the body is down / getting up).
+var stabilize_w := 1.0
 var _head_yaw_lp := NAN
 
 
@@ -129,10 +132,10 @@ func _measure_head(sk: Skeleton3D, delta: float) -> void:
 
 ## Take most of that swing back out (split over neck and head so the neck doesn't kink).
 func _stabilize_head(sk: Skeleton3D) -> void:
-	if head_stabilize == 0.0 or _chain.size() < 5:
+	if head_stabilize == 0.0 or _chain.size() < 5 or stabilize_w <= 0.0:
 		return
 	# (Skeleton space is the model's mirrored frame: undo the swing by turning the same way.)
-	var dy := _head_dev * head_stabilize
+	var dy := _head_dev * head_stabilize * stabilize_w
 	for pair: Array in [[_chain[3], 0.4], [_chain[4], 0.6]]:
 		var b: int = pair[0]
 		if b < 0:
@@ -140,3 +143,30 @@ func _stabilize_head(sk: Skeleton3D) -> void:
 		var gb := sk.get_bone_global_pose(b)
 		gb.basis = Basis(Vector3.UP, dy * pair[1]) * gb.basis
 		sk.set_bone_global_pose(b, gb)
+
+
+## 0..1: low-pass the neck and head against the chest. Get-up clips (mocap) whip the head
+## around, worse when played faster to fit the get-up time; this keeps where it looks and
+## drops the wobble.
+var head_calm := 0.0
+var _calm_q: Array[Quaternion] = [Quaternion(), Quaternion()]
+var _calm_live := false
+
+
+func _calm_head(sk: Skeleton3D, delta: float) -> void:
+	if head_calm <= 0.0 or _chain.size() < 5 or _chain[3] < 0 or _chain[4] < 0:
+		_calm_live = false
+		return
+	var chest := _chain[2] if _chain[2] >= 0 else _chain[1]
+	var base := sk.get_bone_global_pose(chest).basis.get_rotation_quaternion()
+	var rels: Array[Quaternion] = []
+	for j in 2:
+		rels.append(base.inverse() * sk.get_bone_global_pose(_chain[3 + j]).basis.get_rotation_quaternion())
+	var k := 1.0 - exp(-5.0 * maxf(delta, 0.0))
+	for j in 2:
+		_calm_q[j] = rels[j] if not _calm_live else _calm_q[j].slerp(rels[j], k)
+		var g := sk.get_bone_global_pose(_chain[3 + j])          # (head: after the neck moved)
+		var want := base * _calm_q[j].slerp(rels[j], 1.0 - head_calm)
+		g.basis = Basis(want) * Basis.from_scale(g.basis.get_scale())
+		sk.set_bone_global_pose(_chain[3 + j], g)
+	_calm_live = true

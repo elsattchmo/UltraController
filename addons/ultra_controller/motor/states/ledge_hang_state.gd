@@ -4,7 +4,7 @@ extends MotorStateHandler
 ## there's room, back/crouch drops.
 
 const Id := MotorState.Id
-const SHIMMY_SPEED := 0.9
+const SHIMMY_SPEED := 0.5
 
 
 func _hang_pos(s: MotorState) -> Vector3:

@@ -68,6 +68,19 @@ static func find(id: int) -> UltraRope:
 	return null
 
 
+## Climbing input on this rope, -1 (down) .. 1 (up). Climb ropes: forward / back. Swing
+## ropes: forward while looking up climbs, forward while looking down slides down (looking
+## level, forward / back pumps the swing).
+static func climb_input(rope: UltraRope, i: InputFrame) -> float:
+	if rope == null:
+		return 0.0
+	if rope.kind == Kind.CLIMB:
+		return clampf(i.move.y, -1.0, 1.0)
+	if i.move.y > 0.3 and absf(i.pitch) > deg_to_rad(28.0):
+		return signf(i.pitch) * i.move.y
+	return 0.0
+
+
 ## A rope the character's hands can catch (hands ~2 m above the feet).
 static func find_catch(feet: Vector3) -> UltraRope:
 	var hands := feet + Vector3.UP * 2.0

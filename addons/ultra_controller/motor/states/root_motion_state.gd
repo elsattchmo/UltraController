@@ -11,7 +11,28 @@ func next(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 		if not s.is_grounded():
 			return Id.FALL
 		return Id.MOVE if i.move.length() > 0.1 else Id.IDLE
+	# Once the move has done its travelling, the rest is an in-place recovery: input (moving
+	# or jumping) takes over right away instead of waiting for the clip to finish.
+	if s.is_grounded() and s.rm_t >= _travel_end(c) and (i.move.length() > 0.1 or i.has(InputFrame.B_JUMP)):
+		return Id.MOVE
 	return -1
+
+
+## Time by which the curve has covered 97 % of its horizontal travel (cached per curve).
+static func _travel_end(c: RootMotionCurve) -> float:
+	if c.has_meta("travel_end"):
+		return float(c.get_meta("travel_end"))
+	var total := c.sample_pos(c.length) * Vector3(1, 0, 1)
+	var t_end := c.length
+	if total.length() > 0.3:
+		var n := 60
+		for k in n + 1:
+			var t := c.length * k / n
+			if (c.sample_pos(t) * Vector3(1, 0, 1)).length() >= total.length() * 0.97:
+				t_end = t
+				break
+	c.set_meta("travel_end", t_end)
+	return t_end
 
 
 func exit(_m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
