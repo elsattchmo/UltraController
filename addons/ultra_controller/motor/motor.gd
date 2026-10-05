@@ -553,33 +553,48 @@ func _push_bodies() -> void:
 			body.velocity += n * follow
 
 
-## Falling: how hard (m/s) and how soon (s) we'll hit the ground on the current course, from
-## pure world raycasts (straight down and where the arc lands) - {} if not landing on solid
-## ground in reach (water, a moving platform, nothing below).
+## Falling: how hard (m/s) and how soon (s) we'll hit the ground on the current course - the
+## ballistic arc swept as a sphere (the feet's width) against the static world, so a jump to
+## the next platform lands on that platform, not on the floor below the gap. {} if it comes
+## down in water, on a moving platform, or nowhere within 3 s.
 func predict_impact(s: MotorState) -> Dictionary:
 	var space := body.get_world_3d().direct_space_state
 	var g := gravity * profile.fall_gravity_mult
-	var vy := -s.vel.y
-	var hv := horizontal(s.vel)
-	var best := {}
-	for pass_i in 2:
-		var from := s.pos + Vector3.UP * 0.1
-		if pass_i == 1:
-			if best.is_empty() or hv.length() < 0.5:
-				break
-			from += hv * float(best.time)                  # where the arc comes down
-		var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 80.0, body.collision_mask & (UltraLayers.WORLD_STATIC | UltraLayers.CLIMBABLE), [body.get_rid()])
-		var hit := space.intersect_ray(q)
-		if hit.is_empty() or hit.collider is TickPlatform:
-			return {}
-		var h := maxf(s.pos.y - (hit.position as Vector3).y, 0.0)
-		if not UltraWater.all.is_empty() and UltraWater.find_column(hit.position as Vector3 + Vector3.UP * 0.05):
-			return {}                                         # landing in water
-		var v_imp := minf(sqrt(vy * vy + 2.0 * g * h), profile.max_fall_speed)
-		var t := (v_imp - vy) / g
-		if best.is_empty() or v_imp < float(best.speed):
-			best = {"speed": v_imp, "time": t}               # the kinder of the two
-	return best
+	if _arc_shape == null:
+		_arc_shape = SphereShape3D.new()
+		_arc_shape.radius = 0.25
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = _arc_shape
+	q.collision_mask = body.collision_mask & (UltraLayers.WORLD_STATIC | UltraLayers.CLIMBABLE)
+	q.exclude = [body.get_rid()]
+	var step := 0.05
+	var p0 := s.pos + Vector3.UP * 0.3                    # sphere resting on the soles
+	var v := s.vel
+	var t := 0.0
+	while t < 3.0:
+		var v1 := Vector3(v.x, maxf(v.y - g * step, -profile.max_fall_speed), v.z)
+		var d := (v + v1) * 0.5 * step
+		q.transform = Transform3D(Basis(), p0)
+		q.motion = d
+		var r := space.cast_motion(q)
+		if r.size() == 2 and float(r[0]) < 1.0:
+			var f := float(r[0])
+			var at := p0 + d * f
+			var vy := -lerpf(v.y, v1.y, f)
+			q.transform = Transform3D(Basis(), at + d.normalized() * 0.02)
+			var hits := space.intersect_shape(q, 1)
+			if not hits.is_empty() and hits[0].collider is TickPlatform:
+				return {}
+			if not UltraWater.all.is_empty() and UltraWater.find_column(at):
+				return {}                                  # coming down in water
+			return {"speed": maxf(vy, 0.0), "time": t + step * f, "point": at - Vector3.UP * 0.3}
+		p0 += d
+		v = v1
+		t += step
+	return {}
+
+
+var _arc_shape: SphereShape3D
 
 
 func gravity_for(s: MotorState, input: InputFrame) -> float:

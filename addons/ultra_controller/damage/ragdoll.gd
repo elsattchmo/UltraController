@@ -46,7 +46,9 @@ const BRACE_CLIP := "Death_A"
 const BRACE_TIME := 3.3
 
 var _ctl: Array[Dictionary] = []          ## per controlled bone
-var _t := 0.0
+var _t := 0.0                    ## since the body is down on the ground
+var _t_limp := 0.0               ## since it went limp
+var _airborne := false
 var getup_front := false                  ## presentation: lying face down when getting up
 var getup_yaw := NAN                      ## world yaw the get-up clip should start facing
 var limit_violation := 0.0
@@ -183,13 +185,21 @@ func _snapshot_pose() -> void:
 
 ## Muscles + joint limits + speed limits, as velocity changes (stable at 60 Hz).
 func _drive(delta: float) -> void:
-	_t += delta
+	# Two clocks: since going limp, and since the body hit the ground (it can go limp well before
+	# - a fall known to be too hard - and must not stiffen, settle or let go of the capsule in
+	# mid-air: that all starts at the impact).
+	_t_limp += delta
+	if _airborne and character.state.is_grounded():
+		_airborne = false
+		_tumble()
+	if not _airborne:
+		_t += delta
 	var dead := character.state.state == MotorState.Id.DEAD
 	var tone := lerpf(tone_start, tone_down, smoothstep(0.0, 1.2, _t))
 	if dead:
 		tone = lerpf(tone, tone_dead, smoothstep(0.3, 2.0, _t))
 	# Arms come out to break the fall, then relax once down.
-	var brace_w := smoothstep(0.12, 0.55, _t) * lerpf(1.0, 0.35, smoothstep(0.9, 1.6, _t)) * (0.5 if dead else 1.0)
+	var brace_w := smoothstep(0.12, 0.55, _t_limp) * lerpf(1.0, 0.35, smoothstep(0.9, 1.6, _t)) * (0.5 if dead else 1.0)
 	# Once down, the body loses energy fast (it lies still instead of twitching).
 	var settle := smoothstep(0.8, 1.6, _t)
 	for pb in bones:
@@ -269,6 +279,29 @@ func _drive(delta: float) -> void:
 			pb.angular_velocity = pb.angular_velocity.normalized() * max_joint_speed * 2.0
 
 
+## Hitting the ground limp while travelling: the body pitches over the way it was going - a
+## rigid spin about the axis across the travel (forward roll), stronger the faster it goes.
+@export var tumble_spin := 1.6          ## rad/s per m/s of ground speed
+@export var tumble_spin_max := 9.0
+
+
+func _tumble() -> void:
+	var v := character.state.vel
+	var hv := Vector3(v.x, 0, v.z)
+	if hv.length() < 1.5 or bones.is_empty() or character.state.land_impact < 6.0:
+		return                          # (a shove on flat ground isn't a fall to roll out of)
+	var w := Vector3.UP.cross(hv.normalized()) * minf(hv.length() * tumble_spin, tumble_spin_max)
+	var com := Vector3.ZERO
+	var mass := 0.0
+	for pb in bones:
+		com += pb.global_position * pb.mass
+		mass += pb.mass
+	com /= maxf(mass, 0.001)
+	for pb in bones:
+		pb.angular_velocity += w
+		pb.linear_velocity += w.cross(pb.global_position - com)
+
+
 ## World axis * angle that turns the child onto `goal` (relative to the parent).
 static func _rot_err(pw: Basis, cw: Basis, goal: Quaternion) -> Vector3:
 	var want := pw * Basis(goal)
@@ -339,6 +372,8 @@ func start() -> void:
 		pb.angular_velocity = Vector3.ZERO
 		pb.angular_damp = 1.5
 	_t = 0.0
+	_t_limp = 0.0
+	_airborne = not character.state.is_grounded()
 	limit_violation = 0.0
 	_snapshot_pose()
 

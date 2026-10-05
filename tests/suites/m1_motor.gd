@@ -288,26 +288,59 @@ func test_fall_ragdolls_mid_air_and_tumbles_on() -> void:
 			rest = c.state.pos
 	var slide := Vector2(rest.x - touch.x, rest.z - touch.z).length() if touch != Vector3.INF else 0.0
 	info("went limp at y %.2f (ground 0); tumbled %.2f m after touching down" % [limp_y, slide])
-	check(limp_y > 0.6 and limp_y < 9.0, "goes limp in the air, before hitting the ground")
+	check(limp_y > 6.0 and limp_y < 9.5, "goes limp early in the fall, as soon as the hard landing is certain (y %.2f)" % limp_y)
 	check(slide > 1.0, "keeps its momentum along the ground (no dead stop)")
 
 
-## A hard landing you can take while running: roll out of it and keep going.
-func test_hard_landing_rolls_out_at_a_run() -> void:
+## A hard landing you can take while running: on your feet, no roll, and you keep moving.
+func test_hard_landing_at_a_run_keeps_going() -> void:
 	var c := spawn("drop_4", "res://addons/ultra_controller/profiles/fps.tres", false)
 	await ticks(3)
 	bot(c).set_steps([{"ticks": 300, "move": FWD, "buttons": InputFrame.B_SPRINT}])
 	var states := {}
 	var min_speed_after := INF
-	var landed := false
+	var landed_at := -1
 	for i in 300:
 		await ticks(1)
 		states[MotorState.Id.keys()[c.state.state]] = true
-		if landed and c.state.state != MotorState.Id.ROOT_MOTION:
+		if landed_at < 0 and c.state.is_grounded() and states.has("FALL"):
+			landed_at = i
+		if landed_at >= 0 and i > landed_at + 2 and i < landed_at + 60:
 			min_speed_after = minf(min_speed_after, Vector2(c.state.vel.x, c.state.vel.z).length())
-		landed = landed or (c.state.is_grounded() and states.has("FALL"))
-		if landed and states.has("ROOT_MOTION") and c.state.state == MotorState.Id.MOVE and c.state.state_time > 0.5:
-			break
-	info("4 m drop at a sprint: %s; slowest after the roll %.2f m/s" % [states.keys(), min_speed_after])
-	check(states.has("ROOT_MOTION") and not states.has("RAGDOLL"), "rolls out of the landing")
+	info("4 m drop at a sprint: %s; slowest after landing %.2f m/s" % [states.keys(), min_speed_after])
+	check(landed_at >= 0 and not states.has("ROOT_MOTION") and not states.has("RAGDOLL"), "lands on its feet - no roll, no fall over")
 	check(min_speed_after > 1.0, "and keeps moving")
+
+
+## Medium drops land on the feet; jumping across a gap from one block to a lower one (over a
+## 9 m pit) lands on the block - neither is a ragdoll.
+func test_no_ragdoll_for_medium_drops_and_gap_jumps() -> void:
+	var c := spawn("drop_6", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	bot(c).set_steps([{"ticks": 200, "move": FWD, "buttons": InputFrame.B_SPRINT}])
+	var states := {}
+	for i in 200:
+		await ticks(1)
+		states[MotorState.Id.keys()[c.state.state]] = true
+	info("6 m drop at a sprint: %s (impact %.1f m/s)" % [states.keys(), c.state.land_impact])
+	check(not states.has("RAGDOLL") and states.has("FALL"), "6 m drop: lands on its feet")
+	c.queue_free()
+	chars.erase(c)
+	# Gap jump: from the 9 m block across the 2 m gap onto the 6 m block.
+	var j := spawn("drop_9", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	var west := deg_to_rad(90.0)
+	bot(j).live_yaw = west
+	bot(j).set_steps([{"ticks": 20, "yaw": west}, {"ticks": int(GAP_RUN_TICKS), "move": FWD, "buttons": InputFrame.B_SPRINT, "yaw": west},
+		{"ticks": 2, "move": FWD, "buttons": InputFrame.B_SPRINT, "tap": InputFrame.B_JUMP, "yaw": west}, {"ticks": 60, "yaw": west}])
+	states = {}
+	for i in 140:
+		await ticks(1)
+		states[MotorState.Id.keys()[j.state.state]] = true
+	info("gap jump 9 m -> 6 m block: %s, ended at y %.2f x %.2f" % [states.keys(), j.state.pos.y, j.state.pos.x])
+	check(j.state.pos.y > 5.5 and not states.has("RAGDOLL"), "landed on the lower block, no ragdoll")
+	j.queue_free()
+	chars.erase(j)
+
+
+const GAP_RUN_TICKS := 16

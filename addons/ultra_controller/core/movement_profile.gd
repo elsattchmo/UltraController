@@ -96,7 +96,7 @@ enum Gait { WALK, JOG }
 
 @export_group("Landing")
 ## Landing faster than this (m/s) crumples you into a ragdoll (13.5 m/s ~ a 9 m drop).
-@export_range(2, 30, 0.5) var hard_land_speed := 13.5
+@export_range(2, 30, 0.5) var hard_land_speed := 15.5
 @export_range(0, 1, 0.01) var land_recover_time := 0.22
 @export_range(0, 1, 0.01) var hard_land_recover_time := 0.6
 ## A thrown prop hitting this hard (kg*m/s, relative to you) knocks you over; softer hits

@@ -6,6 +6,8 @@ extends MotorStateHandler
 const Id := MotorState.Id
 const LIE_HEIGHT := 0.5
 const GET_UP_TIME := 2.8
+const TUMBLE_SHARE := 0.2           ## of the landing speed that goes into the tumble
+const TUMBLE_MAX := 3.5             ## m/s
 
 
 func enter(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
@@ -42,7 +44,8 @@ func tick(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 		m.set_height(s, move_toward(s.height, LIE_HEIGHT, 4.0 * m.dt))
 		# A body tumbling along the ground keeps rolling while it's fast, then stops quickly.
 		var sp := m.horizontal(v).length()
-		var decel := lerpf(10.0, 3.5, smoothstep(1.5, 5.0, sp)) if s.is_grounded() else 1.5
+		# (In the air a limp body keeps nearly all its speed.)
+		var decel := lerpf(10.0, 3.5, smoothstep(1.5, 5.0, sp)) if s.is_grounded() else 0.3
 		var hv := m.horizontal(v).move_toward(Vector3.ZERO, decel * m.dt)
 		v = Vector3(hv.x, v.y, hv.z)
 	else:
@@ -54,3 +57,9 @@ func tick(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 	v.y = v.y - m.gravity * m.dt if not s.is_grounded() else minf(v.y, 0.0)
 	m.body.velocity = v
 	m.move(s, false)
+	# Hitting the ground limp while travelling: part of the fall turns into a tumble along the
+	# way we were going (a body landing at an angle rolls on rather than stopping dead).
+	if s.state == Id.RAGDOLL and s.is_grounded() and not s.has(MotorState.F_WAS_GROUNDED):
+		var hv := m.horizontal(m.body.velocity)
+		if hv.length() > 0.5:
+			m.body.velocity += hv.normalized() * minf(s.land_impact * TUMBLE_SHARE, TUMBLE_MAX)

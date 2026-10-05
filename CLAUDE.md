@@ -150,11 +150,16 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Stepping down a stair keeps you grounded (`UltraMotor._snap_down`, a ray under the capsule's
   centre; never on a TickPlatform - a raycast can see its pose a frame stale during replay);
   the fall clip waits 0.15 s of real air before showing.
-- Hard landings (> hard_land_speed 13.5 m/s, ~9 m): falling, `UltraMotor.predict_impact`
-  (world rays straight down + where the arc lands; not water / platforms) goes RAGDOLL in the
-  air 0.45 s before impact (at once if > 1.35x) keeping the full velocity; on the ground the
-  ragdoll capsule keeps rolling while fast (decel 3.5 -> 10 m/s2). Hard-but-OK landings at a
-  run (> 0.55x, moving forward) roll out (ROOT_MOTION roll); LAND keeps 85 % speed.
+- Hard landings (> hard_land_speed 15.5 m/s, ~8 m; the 6 m drop lands on its feet): falling,
+  `UltraMotor.predict_impact` sweeps a sphere along the ballistic arc against the static world
+  (a jump to the next platform lands on it - vertical rays saw the pit below and ragdolled
+  platform jumps); {} for water / moving platforms. 0.6 s before a hard impact the body goes
+  RAGDOLL keeping its speed (air drag 0.3 m/s2); rope catches are untouched. At touchdown 20 %
+  of the landing speed (<= 3.5 m/s) goes into the slide along the travel
+  (`ragdoll_state.TUMBLE_*`) and the physics body gets a forward roll (`UltraRagdoll._tumble`,
+  only if land_impact >= 6); its settle / tone / capsule-pull clocks start at touchdown (`_t`),
+  not when it went limp (`_t_limp`). No landing roll (the user didn't want it): LAND keeps
+  85 % speed.
 - Edge balance (`UltraMotor.update_balance`, after every ground move): nothing under the
   capsule's middle within a step and a drop > `balance_drop` (0.45 m) below = perched on a
   lip. Walking out over the drop steps off (normal FALL); stepping back recovers; otherwise
