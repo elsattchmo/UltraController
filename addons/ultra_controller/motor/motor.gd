@@ -530,6 +530,35 @@ func _push_bodies() -> void:
 			body.velocity += n * follow
 
 
+## Falling: how hard (m/s) and how soon (s) we'll hit the ground on the current course, from
+## pure world raycasts (straight down and where the arc lands) - {} if not landing on solid
+## ground in reach (water, a moving platform, nothing below).
+func predict_impact(s: MotorState) -> Dictionary:
+	var space := body.get_world_3d().direct_space_state
+	var g := gravity * profile.fall_gravity_mult
+	var vy := -s.vel.y
+	var hv := horizontal(s.vel)
+	var best := {}
+	for pass_i in 2:
+		var from := s.pos + Vector3.UP * 0.1
+		if pass_i == 1:
+			if best.is_empty() or hv.length() < 0.5:
+				break
+			from += hv * float(best.time)                  # where the arc comes down
+		var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 80.0, body.collision_mask & (UltraLayers.WORLD_STATIC | UltraLayers.CLIMBABLE), [body.get_rid()])
+		var hit := space.intersect_ray(q)
+		if hit.is_empty() or hit.collider is TickPlatform:
+			return {}
+		var h := maxf(s.pos.y - (hit.position as Vector3).y, 0.0)
+		if not UltraWater.all.is_empty() and UltraWater.find_column(hit.position as Vector3 + Vector3.UP * 0.05):
+			return {}                                         # landing in water
+		var v_imp := minf(sqrt(vy * vy + 2.0 * g * h), profile.max_fall_speed)
+		var t := (v_imp - vy) / g
+		if best.is_empty() or v_imp < float(best.speed):
+			best = {"speed": v_imp, "time": t}               # the kinder of the two
+	return best
+
+
 func gravity_for(s: MotorState, input: InputFrame) -> float:
 	var g := gravity
 	if body.velocity.y > 0.0:

@@ -67,9 +67,22 @@ func tick(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 	if hit:
 		p = prev + col.get_travel()
 		grounded = col.get_normal().y > 0.7 and s.state_time > 0.3 and v.y <= 0.5
+	var v_swing := v
 	v = (p - prev) / m.dt               # the motion actually made (no radial part, no wall)
 	if hit and not grounded:
-		v -= col.get_normal() * minf(v.dot(col.get_normal()), 0.0)
+		var n := col.get_normal()
+		v -= n * minf(v.dot(n), 0.0)
+		# Swinging into a loose prop knocks it away (momentum along the contact): a light one
+		# flies and you swing on; a heavy one barely moves and you bounce off it.
+		var rb := col.get_collider() as RigidBody3D
+		if rb and not rb.freeze:
+			var v_in := -v_swing.dot(n)
+			if v_in > 0.1:
+				var mc := m.profile.mass
+				var j := 1.3 * v_in * mc * rb.mass / (mc + rb.mass)
+				if m.apply_pushes:
+					rb.apply_impulse(-n * j, col.get_position() - rb.global_position)
+				v += -n * (v_in - j / mc)
 	# Body follows the rope; keep the radial part out of the stored velocity.
 	s.trav_from = v
 	m.body.global_position = p

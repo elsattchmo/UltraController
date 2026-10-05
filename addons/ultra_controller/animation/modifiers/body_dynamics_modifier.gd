@@ -75,7 +75,14 @@ func _process_modification_with_delta(_delta: float) -> void:
 	hips_g.basis = r_hips * hips_g.basis
 	hips_g.origin += pelvis_offset
 	sk.set_bone_global_pose(_hips, hips_g)
-	# Spine chain: counter the warp, spread aim, lean and hunch.
+	# Spine chain: counter the warp, spread aim, lean and hunch. Climbing (spine_aim_scale < 1)
+	# the chest stays on the wall: the look goes mostly into the neck and head.
+	var s_sc := spine_aim_scale
+	var pw_arr := aim_pitch_weights if aim_pitch >= 0.0 else aim_pitch_down_weights
+	var spine_p := pw_arr[0] + pw_arr[1] + pw_arr[2]
+	var head_p := maxf(pw_arr[3] + pw_arr[4], 0.01)
+	var spine_y := aim_yaw_weights[0] + aim_yaw_weights[1] + aim_yaw_weights[2]
+	var head_y := maxf(aim_yaw_weights[3] + aim_yaw_weights[4], 0.01)
 	for k in _chain.size():
 		var b := _chain[k]
 		if b < 0:
@@ -85,6 +92,14 @@ func _process_modification_with_delta(_delta: float) -> void:
 		var yw := lerpf(aim_yaw_weights[k], weapon_yaw_weights[k], weapon_aim)
 		var yaw := -warp_yaw * warp_counter_weights[k] + aim_yaw * yw
 		var pw := aim_pitch_weights[k] if aim_pitch >= 0.0 else aim_pitch_down_weights[k]
+		if s_sc < 1.0:
+			if k < 3:
+				pw *= s_sc
+				yw *= s_sc
+			else:
+				pw *= 1.0 + (1.0 - s_sc) * spine_p * 0.75 / head_p
+				yw *= 1.0 + (1.0 - s_sc) * spine_y * 0.75 / head_y
+			yaw = -warp_yaw * warp_counter_weights[k] + aim_yaw * yw
 		pw = lerpf(pw, weapon_pitch_weights[k], weapon_aim)
 		var pitch := aim_pitch * pw - (hunch * (0.4 if k < 3 else 0.1))
 		var roll := lean_roll * (0.25 if k < 3 else 0.0)
@@ -97,6 +112,7 @@ func _process_modification_with_delta(_delta: float) -> void:
 		sk.set_bone_global_pose(b, g)
 	_stabilize_head(sk)
 	_calm_head(sk, _delta)
+	_swing_arms(sk)
 
 
 ## People keep their head steady while the shoulders swing (the sprint clip turns the head
@@ -110,6 +126,9 @@ var sway_weight := 0.0
 var _hip_x_lp := NAN
 var _head_ref := Vector3.ZERO
 var _head_dev := 0.0
+## 1 = the look is spread down the spine; lower keeps the chest still and turns the neck/head
+## (climbing: the hands stay on the wall when you look up).
+var spine_aim_scale := 1.0
 ## 0..1 how much of the stabiliser applies (0 while the body is down / getting up).
 var stabilize_w := 1.0
 var _head_yaw_lp := NAN
@@ -170,3 +189,43 @@ func _calm_head(sk: Skeleton3D, delta: float) -> void:
 		g.basis = Basis(want) * Basis.from_scale(g.basis.get_scale())
 		sk.set_bone_global_pose(_chain[3 + j], g)
 	_calm_live = true
+
+
+## 0..1: swing the arms from the legs (each arm opposite its own leg) - for leg sets whose own
+## upper body is replaced by a still one.
+var arm_swing := 0.0
+@export_range(0, 2, 0.05) var arm_swing_gain := 0.7
+var _swing_bones := PackedInt32Array()
+
+
+func _swing_arms(sk: Skeleton3D) -> void:
+	if arm_swing <= 0.001:
+		return
+	if _swing_bones.is_empty():
+		for n in ["LeftUpperLeg", "LeftLowerLeg", "RightUpperLeg", "RightLowerLeg", "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm"]:
+			_swing_bones.append(sk.find_bone(n))
+		if _swing_bones.has(-1):
+			return
+	var lul := sk.get_bone_global_pose(_swing_bones[0]).origin
+	var rul := sk.get_bone_global_pose(_swing_bones[2]).origin
+	var right := (rul - lul)
+	right.y = 0.0
+	if right.length() < 0.01:
+		return
+	right = right.normalized()
+	var fwd := Vector3.UP.cross(right)       # the way the hips face
+	for side in 2:
+		var hip := sk.get_bone_global_pose(_swing_bones[side * 2]).origin
+		var knee := sk.get_bone_global_pose(_swing_bones[side * 2 + 1]).origin
+		var thigh := (knee - hip).normalized()
+		var leg := atan2(thigh.dot(fwd), -thigh.y)            # + = this leg forward
+		var ang := -leg * arm_swing_gain * arm_swing
+		var arm := _swing_bones[4 + side]
+		var g := sk.get_bone_global_pose(arm)
+		g.basis = Basis(right, ang) * g.basis
+		sk.set_bone_global_pose(arm, g)
+		# The forearm bends a little more on the forward swing.
+		var fa := _swing_bones[6 + side]
+		var gf := sk.get_bone_global_pose(fa)
+		gf.basis = Basis(right, maxf(ang, 0.0) * 0.5) * gf.basis
+		sk.set_bone_global_pose(fa, gf)

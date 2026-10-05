@@ -1,6 +1,7 @@
 class_name UltraHUD
 extends CanvasLayer
-## Per-player HUD: crosshair + hit marker, interaction prompt, ammo, health, hotbar, short
+## Per-player HUD: crosshair (where you look) + gun dot (where the gun points, free aim) + hit
+## marker, interaction prompt, ammo, health, hotbar, short
 ## messages, and the inventory window (Tab / pad Back). Mouse: drag to move, right-click to
 ## drop, double-click to use or equip. Keyboard / pad: D-pad, stick or arrows move the
 ## selection, accept uses / equips, inv_drop drops, inv_move picks up and puts down, cancel
@@ -15,6 +16,12 @@ var scanner: UltraInteractionScanner
 
 var _root: Control
 var _cross: Control
+var _aim_layer: Control          ## full-pane overlay for the gun dot
+## Gun dot: screen position (pane pixels) of where the gun points, and how visible it is.
+var dot_pos := Vector2.ZERO
+var dot_visible := false
+var _dot_a := 0.0
+var _armed_a := 0.0
 var _prompt: Label
 var _ammo: Label
 var _health: ProgressBar
@@ -38,6 +45,9 @@ var _carry_style: StyleBoxFlat
 
 func _ready() -> void:
 	layer = 10
+	# After the camera rig (100) and the equipment (110): the gun dot is projected through this
+	# frame's camera.
+	process_priority = 120
 	_root = Control.new()
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -47,6 +57,11 @@ func _ready() -> void:
 	_cross.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_cross.draw.connect(_draw_cross)
 	_root.add_child(_cross)
+	_aim_layer = Control.new()
+	_aim_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_aim_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_aim_layer.draw.connect(_draw_gun_dot)
+	_root.add_child(_aim_layer)
 	_prompt = _label(_root, 22, Control.PRESET_CENTER, Vector2(-300, 40), Vector2(600, 40))
 	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_ammo = _label(_root, 28, Control.PRESET_BOTTOM_RIGHT, Vector2(-260, -110), Vector2(240, 40))
@@ -134,22 +149,88 @@ func _label(parent: Control, size: int, preset: int, pos: Vector2, sz: Vector2) 
 	return l
 
 
+## Centre of the pane = where you look. Empty hands: a small dot. With a gun out: an open
+## cross (no centre - the gun dot is the only dot on screen), fading out aiming down sights.
 func _draw_cross() -> void:
 	var ads := 0.0
-	var eq := character.get_node_or_null("Equipment") as UltraEquipmentVisual if _has_character() else null
+	var eq := _equipment()
 	if eq:
 		ads = eq.ads
-	var gap := lerpf(7.0, 2.0, ads)
-	var len := lerpf(9.0, 0.0, ads)
 	var c := Color(1, 1, 1, 0.85)
-	_cross.draw_circle(Vector2.ZERO, 1.6, c)
-	if len > 0.5:
+	var shade := Color(0, 0, 0, 0.35)
+	var armed := _armed_a
+	if armed < 0.99:
+		_cross.draw_circle(Vector2.ZERO, 2.4, Color(shade, shade.a * (1.0 - armed)))
+		_cross.draw_circle(Vector2.ZERO, 1.6, Color(c, c.a * (1.0 - armed)))
+	var a := armed * (1.0 - smoothstep(0.2, 0.8, ads))
+	if a > 0.01:
+		var gap := 9.0
+		var len := 8.0
 		for d: Vector2 in [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN]:
-			_cross.draw_line(d * gap, d * (gap + len), c, 2.0)
+			_cross.draw_line(d * gap, d * (gap + len), Color(shade, shade.a * a), 3.5)
+			_cross.draw_line(d * gap, d * (gap + len), Color(c, 0.8 * a), 1.5)
+	if _hit_t > 0.0 and not dot_visible:
+		_draw_hit(_cross, Vector2.ZERO)
+
+
+## Gun dot: where the gun points (raycast along the free-aim direction, projected). Aiming
+## down sights it sits on the sights; it lags turns, bobs with the gait and drops sprinting.
+func _draw_gun_dot() -> void:
+	if not dot_visible or _dot_a <= 0.01:
+		return
+	var eq := _equipment()
+	var ads := eq.ads if eq else 0.0
+	var r := lerpf(2.6, 1.8, ads)
+	_aim_layer.draw_circle(dot_pos, r + 1.6, Color(0, 0, 0, 0.55 * _dot_a))
+	_aim_layer.draw_circle(dot_pos, r, Color(1.0, 0.93, 0.6, 0.95 * _dot_a))
 	if _hit_t > 0.0:
-		var hc := Color(1, 0.2, 0.2, _hit_t / 0.25)
-		for d: Vector2 in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
-			_cross.draw_line(d.normalized() * 8.0, d.normalized() * 16.0, hc, 2.5)
+		_draw_hit(_aim_layer, dot_pos)
+
+
+func _draw_hit(ci: CanvasItem, at: Vector2) -> void:
+	var hc := Color(1, 0.2, 0.2, _hit_t / 0.25)
+	for d: Vector2 in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
+		ci.draw_line(at + d.normalized() * 8.0, at + d.normalized() * 16.0, hc, 2.5)
+
+
+func _equipment() -> UltraEquipmentVisual:
+	return character.get_node_or_null("Equipment") as UltraEquipmentVisual if _has_character() else null
+
+
+## Where the gun points, on this pane: the shot ray (simulated eye, gun direction) to the first
+## thing it hits (or its range), projected through this player's camera.
+func _update_gun_dot(delta: float) -> void:
+	var s := character.state
+	var def := character.held_def()
+	var eq := _equipment()
+	var armed := def != null and def.kind == ItemDefinition.Kind.FIREARM and eq != null and s.held_uid != 0 \
+			and s.action in [UltraActionLayer.Action.EQUIPPING, UltraActionLayer.Action.READY, UltraActionLayer.Action.RELOADING]
+	_armed_a = move_toward(_armed_a, 1.0 if armed else 0.0, delta * 8.0)
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	dot_visible = false
+	if not armed or cam == null:
+		_dot_a = 0.0
+		return
+	var ray := eq.gun_ray()
+	var origin: Vector3 = ray.origin
+	var dir: Vector3 = ray.dir
+	var far := origin + dir * float(def.stat("range", 100.0))
+	var space := character.get_world_3d().direct_space_state if character.get_world_3d() else null
+	var point := far
+	if space:
+		var excl: Array[RID] = [character.get_rid()]
+		if character.hit_volume:
+			excl.append(character.hit_volume.get_rid())
+		var q := PhysicsRayQueryParameters3D.create(origin, far, UltraCombat.MASK, excl)
+		var hit := space.intersect_ray(q)
+		if not hit.is_empty():
+			point = hit.position
+	if cam.is_position_behind(point):
+		return
+	dot_pos = cam.unproject_position(point)
+	dot_visible = true
+	var want := 0.35 if s.action != UltraActionLayer.Action.READY else 1.0
+	_dot_a = move_toward(_dot_a, want, delta * 6.0)
 
 
 ## Fit the bottom bar to the pane: narrow split-screen panes shrink the hotbar slots and lift
@@ -191,7 +272,9 @@ func _process(delta: float) -> void:
 	var s := character.state
 	var fp := character.is_first_person()
 	_cross.visible = fp or s.equipped != 0
+	_update_gun_dot(delta)
 	_cross.queue_redraw()
+	_aim_layer.queue_redraw()
 	_hit_t = maxf(_hit_t - delta, 0.0)
 	_msg_t = maxf(_msg_t - delta, 0.0)
 	_msg.visible = _msg_t > 0.0

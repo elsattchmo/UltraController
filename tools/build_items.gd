@@ -6,6 +6,7 @@ extends Node
 ## Run: godot --headless --path . res://tools/tool_runner.tscn -- --tool=res://tools/build_items.gd
 
 const MANNEQUIN := "res://assets/characters/mannequin/"
+const RIFLE := "res://assets/items/rifle/"
 
 
 func _ready() -> void:
@@ -15,6 +16,7 @@ func _ready() -> void:
 	var lib: AnimationLibrary = load(MANNEQUIN + "anims/ual.res")
 	_world_scenes_first()
 	_pistol(skel, lib)
+	_rifle(skel, lib)
 	_ammo()
 	_misc()
 	_keys()
@@ -70,6 +72,10 @@ func _world_scenes_first() -> void:
 	gun.name = "Visual"
 	_world_scene("res://assets/items/pistol/pistol_world.tscn", &"pistol", gun, Vector3(0.04, 0.14, 0.2), Vector3(0, 0.0, 0.0))
 	_world_scene("res://assets/items/ammo/ammo_9mm_world.tscn", &"ammo_9mm", _box_visual(Vector3(0.14, 0.07, 0.09), Color(0.25, 0.35, 0.15)), Vector3(0.14, 0.07, 0.09))
+	var rifle := (load(RIFLE + "rifle.glb") as PackedScene).instantiate() as Node3D
+	rifle.name = "Visual"
+	_world_scene(RIFLE + "rifle_world.tscn", &"rifle", rifle, Vector3(0.06, 0.2, 1.1), Vector3(0, 0.0, -0.17))
+	_world_scene("res://assets/items/ammo/ammo_556_world.tscn", &"ammo_556", _box_visual(Vector3(0.18, 0.09, 0.11), Color(0.42, 0.36, 0.2)), Vector3(0.18, 0.09, 0.11))
 	_world_scene("res://assets/items/medkit/medkit_world.tscn", &"medkit", _box_visual(Vector3(0.22, 0.09, 0.16), Color(0.9, 0.9, 0.9)), Vector3(0.22, 0.09, 0.16))
 	for k in [["red", Color(0.9, 0.15, 0.1)], ["blue", Color(0.15, 0.35, 0.95)], ["green", Color(0.15, 0.8, 0.25)]]:
 		_world_scene("res://assets/items/keys/key_%s_world.tscn" % k[0], StringName("key_" + k[0]), _box_visual(Vector3(0.09, 0.025, 0.035), k[1], true), Vector3(0.09, 0.03, 0.04))
@@ -131,6 +137,128 @@ func _pistol(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	print("pistol support_offset ", d.support_offset)
 	var err := ResourceSaver.save(d, "res://assets/items/pistol/pistol_item.tres")
 	print("saved pistol item ", err)
+
+
+## Two-handed carbine: right hand fitted to the pistol grip (UltraGripFit, same as the pistol),
+## left hand on the handguard - where Mixamo's rifle-aiming clip puts it if that clip is in and
+## its hand is on the handguard, otherwise palm up under the handguard at M_SupportGrip.
+## Slung across the back (UpperChest frame) when not in hand: muzzle up over the left shoulder.
+func _rifle(skel: Skeleton3D, lib: AnimationLibrary) -> void:
+	var mix: AnimationLibrary = load(MANNEQUIN + "anims/mixamo.res") if ResourceLoader.exists(MANNEQUIN + "anims/mixamo.res") else null
+	var aim: Animation = null
+	for n in ["Rifle_Idle_Aiming"]:
+		if aim == null and mix and mix.has_animation(n):
+			aim = mix.get_animation(n)
+			print("rifle: grip from mixamo/", n)
+	var from_clip := aim != null
+	if aim == null:
+		aim = lib.get_animation("Pistol_Aim_Neutral")
+	UltraPoseSampler.pose(aim, skel, 0.1)
+	var gun_node := (load(RIFLE + "rifle.glb") as PackedScene).instantiate() as Node3D
+	var rh := UltraPoseSampler.global_pose(skel, skel.find_bone("RightHand"))
+	var lh := UltraPoseSampler.global_pose(skel, skel.find_bone("LeftHand"))
+	var grip := UltraGripFit.fit(skel, gun_node)
+	var gun_model := rh * grip
+	var contact := gun_model * UltraPoseSampler.marker(gun_node, "M_SupportGrip").origin
+	var lh_gun := gun_model.affine_inverse() * lh.origin
+	var bdir := -gun_model.basis.z.normalized()        # skeleton space: +Z forward, +X left
+	var hips := UltraPoseSampler.global_pose(skel, skel.find_bone("Hips"))
+	var aim_offset := Vector2(rad_to_deg(atan2(bdir.x, bdir.z)), rad_to_deg(asin(bdir.y)))
+	print("rifle: barrel in the aiming pose: yaw %.1f deg (+ = left of the model's forward), pitch %.1f deg; hips yaw %.1f deg" % [aim_offset.x, aim_offset.y, rad_to_deg(atan2(hips.basis.z.x, hips.basis.z.z))])
+	print("rifle: clip left hand in the gun frame ", lh_gun, " (support marker ", UltraPoseSampler.marker(gun_node, "M_SupportGrip").origin, ")")
+	var support := gun_model.affine_inverse() * _support_hand(skel, gun_model, contact)
+	if from_clip and absf(lh_gun.x) < 0.07 and lh_gun.y > -0.12 and lh_gun.y < 0.06 and lh_gun.z < -0.15 and lh_gun.z > -0.5:
+		support = gun_model.affine_inverse() * lh
+		print("rifle: support hand from the clip")
+	gun_node.free()
+	var d := ItemDefinition.new()
+	d.id = &"rifle"
+	d.display_name = "Carbine"
+	d.description = "Select-fire 5.56 mm carbine. 30-round magazine."
+	d.kind = ItemDefinition.Kind.FIREARM
+	d.mass = 3.2
+	d.max_stack = 1
+	d.equip_scene = load(RIFLE + "rifle.glb")
+	d.world_scene = load(RIFLE + "rifle_world.tscn") if ResourceLoader.exists(RIFLE + "rifle_world.tscn") else null
+	d.equip_slots = ItemDefinition.EquipSlot.MAIN_HAND | ItemDefinition.EquipSlot.BACK
+	d.grip_offset = grip
+	d.support_offset = support
+	d.two_handed = true
+	# Back: UpperChest frame in an idle pose. Skeleton space: +Z forward, +Y up, +X = the
+	# character's left. Muzzle up over the left shoulder, sights against the back.
+	UltraPoseSampler.pose(lib.get_animation("Idle_A"), skel, 0.5)
+	var chest := UltraPoseSampler.global_pose(skel, skel.find_bone("UpperChest"))
+	var barrel := Vector3(0.62, 1.0, 0.0).normalized()
+	var z := -barrel
+	var y := (Vector3(0, 0, 1) - barrel * barrel.z).normalized()
+	var b := Basis(y.cross(z), y, z)
+	var centre_local := Vector3(0, 0.03, -0.17)
+	var centre := Vector3(chest.origin.x - 0.02, chest.origin.y - 0.06, chest.origin.z - 0.17)
+	d.holster_bone = &"UpperChest"
+	d.holster_offset = chest.affine_inverse() * Transform3D(b, centre - b * centre_local)
+	d.anim_roles = {"idle": "rifle_idle", "aim": "rifle_aim", "fire": "rifle_aim", "reload": "rifle_reload"}
+	d.aim_clip_offset = aim_offset.snappedf(0.1) if from_clip else Vector2.ZERO
+	d.anim_clips = {
+		"rifle_idle": ["mixamo/Rifle_Idle", "Pistol_Idle"],
+		"rifle_aim": ["mixamo/Rifle_Idle_Aiming", "Pistol_Aim_Neutral"],
+		"rifle_reload": ["mixamo/Rifle_Reload", "Pistol_Reload"],
+	}
+	d.equip_time = 0.6
+	d.fire_mode = ItemDefinition.FireMode.AUTO
+	d.fp_hip_offset = Vector3(0.1, -0.15, 0.2)
+	d.fp_ads_distance = 0.15
+	# Heavier than the pistol: more inertia, slower to settle, a wider free-aim zone.
+	d.sway_inertia = 0.5
+	d.sway_return_hz = 1.6
+	d.sway_damping = 0.7
+	d.free_aim_deg = 6.0
+	d.sway_amount = 1.35
+	d.ads_sway_mult = 0.3
+	d.recoil_gun_deg = 1.1
+	d.sprint_lower_deg = Vector2(14.0, -24.0)
+	d.stats = {
+		"mag_size": 30, "fire_interval": 0.092, "damage": 30.0, "range": 300.0, "spread_deg": 1.4,
+		"ads_spread_deg": 0.06, "reload_time": 2.6, "reload_commit": 1.9, "ammo": "ammo_556",
+		"impulse": 7.0, "recoil_pitch_deg": 0.9, "recoil_yaw_deg": 0.35, "ads_fov": 52.0,
+	}
+	print("rifle grip_offset ", d.grip_offset)
+	print("rifle support_offset ", d.support_offset)
+	var err := ResourceSaver.save(d, RIFLE + "rifle_item.tres")
+	print("saved rifle item ", err)
+	var ammo := ItemDefinition.new()
+	ammo.id = &"ammo_556"
+	ammo.display_name = "5.56 mm rounds"
+	ammo.kind = ItemDefinition.Kind.AMMO
+	ammo.mass = 0.012
+	ammo.max_stack = 180
+	ammo.world_scene = load("res://assets/items/ammo/ammo_556_world.tscn")
+	ResourceSaver.save(ammo, "res://assets/items/ammo/ammo_556_item.tres")
+
+
+## Left hand bone (skeleton space) on the handguard at `contact` (the grip point under it):
+## palm against its left side, fingers forward and down so they curl in under it (out of the
+## sight picture), thumb along the top. The palm's direction in the hand bone's frame comes
+## from the posed fingers (like UltraEquipmentVisual._hand_basis).
+func _support_hand(skel: Skeleton3D, gun: Transform3D, contact: Vector3) -> Transform3D:
+	var hb := UltraPoseSampler.global_pose(skel, skel.find_bone("LeftHand"))
+	var tip := Vector3.ZERO
+	for f in ["MiddleDistal", "RingDistal", "IndexDistal"]:
+		tip += UltraPoseSampler.global_pose(skel, skel.find_bone("Left" + f)).origin / 3.0
+	var v := hb.basis.orthonormalized().inverse() * (tip - hb.origin)
+	v.y = 0.0
+	var p_local := v.normalized() if v.length() > 0.005 else Vector3(0, 0, 1)
+	var gx := gun.basis.x.normalized()
+	var gy := gun.basis.y.normalized()
+	var fwd := -gun.basis.z.normalized()
+	var fingers := (fwd * 0.75 - gy * 0.6 + gx * 0.1).normalized()
+	var palm := gx
+	palm = (palm - fingers * palm.dot(fingers)).normalized()
+	var src := Basis(Vector3.UP.cross(p_local), Vector3.UP, p_local)
+	var dst := Basis(fingers.cross(palm), fingers, palm)
+	var basis := (dst * src.inverse()).orthonormalized()
+	# From the grip point under the handguard to the middle of its left side.
+	var side := contact + gy * 0.028 - gx * 0.027
+	return Transform3D(basis, side - fingers * 0.07 - palm * 0.025)
 
 
 func _ammo() -> void:

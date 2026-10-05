@@ -6,6 +6,7 @@ extends SceneTree
 ## Run: godot --headless --path . --script res://tools/build_animset.gd
 
 const DIR := "res://assets/characters/mannequin/"
+const AnimMeasure := preload("res://tools/anim_measure.gd")
 const ROLES := {
 	&"idle": "Idle_A", &"idle_alt": "Idle_Subtle", &"idle_hurt": "Idle_Hurt",
 	&"walk_f": "Walk", &"walk_b": "Walk_Backwards", &"strafe_l": "mixamo/Strafe_Walk_L", &"strafe_r": "mixamo/Strafe_Walk_R",
@@ -18,7 +19,11 @@ const ROLES := {
 	&"roll": "Roll_RM", &"dodge_back": "Dodge_back_RM", &"dodge_left": "Dodge_left_RM", &"dodge_right": "Dodge_right_RM",
 	&"knockback": "Hit_Knockback_RM", &"climb_up_1m": "ClimbUp_1m_RM", &"crawl_rm": "Crawl_RM",
 	&"ladder_idle": "Ladder_Idle", &"ladder_climb": "mixamo/Ladder_Climb", &"wall_climb": "Climb_Wall", &"pipe_climb": "Pipe_Climb",
-	&"ledge_hang": "Ledge_Hang", &"hang_idle": "mixamo/Braced_Catch", &"shimmy_l": "mixamo/Shimmy_L", &"shimmy_r": "mixamo/Shimmy_R", &"limp_f": "mixamo/Injured_Walk", &"limp_b": "mixamo/Injured_Walk_Back", &"teeter": "mixamo/Lose_Balance", &"swim_idle": "Swim_Idle", &"swim_f": "Swim_Fwd",
+	&"ledge_hang": "Ledge_Hang", &"hang_idle": "mixamo/Braced_Catch", &"shimmy_l": "mixamo/Shimmy_L", &"shimmy_r": "mixamo/Shimmy_R", &"limp_f": "mixamo/Injured_Walk", &"limp_b": "mixamo/Injured_Walk_Back", &"teeter": "mixamo/Lose_Balance",
+	&"e_walk_f": "mixamo/R_Walk_F", &"e_walk_fr": "mixamo/R_Walk_FR", &"e_walk_r": "mixamo/R_Walk_R", &"e_walk_br": "mixamo/R_Walk_BR", &"e_walk_b": "mixamo/R_Walk_B", &"e_walk_bl": "mixamo/R_Walk_BL", &"e_walk_l": "mixamo/R_Walk_L", &"e_walk_fl": "mixamo/R_Walk_FL", &"e_run_f": "mixamo/R_Run_F", &"e_run_fr": "mixamo/R_Run_FR", &"e_run_r": "mixamo/R_Run_R", &"e_run_br": "mixamo/R_Run_BR", &"e_run_b": "mixamo/R_Run_B", &"e_run_bl": "mixamo/R_Run_BL", &"e_run_l": "mixamo/R_Run_L", &"e_run_fl": "mixamo/R_Run_FL", &"e_sprint_f": "mixamo/R_Sprint_F", &"e_sprint_fr": "mixamo/R_Sprint_FR", &"e_sprint_fl": "mixamo/R_Sprint_FL",
+	&"rifle_idle": "mixamo/Rifle_Idle", &"rifle_aim": "mixamo/Rifle_Idle_Aiming", &"rifle_reload": "mixamo/Rifle_Reload",
+	&"u_walk_f": "mixamo/U_Walk_F", &"u_walk_r": "mixamo/U_Walk_R", &"u_walk_b": "mixamo/U_Walk_B", &"u_walk_l": "mixamo/U_Walk_L",
+	&"u_run_f": "mixamo/U_Run_F", &"u_run_r": "mixamo/U_Run_R", &"u_run_b": "mixamo/U_Run_B", &"u_run_l": "mixamo/U_Run_L", &"u_sprint_f": "mixamo/U_Sprint_F", &"swim_idle": "Swim_Idle", &"swim_f": "Swim_Fwd",
 	&"interact": "Interact", &"pickup": "PickUp_Table", &"push": "Push", &"throw": "OverhandThrow", &"throw_object": "Throw_Object",
 	&"consume": "Consume", &"open_chest": "Chest_Open", &"kick_door": "Kick_Breach",
 	&"pistol_idle": "Pistol_Idle", &"pistol_aim_up": "Pistol_Aim_Up", &"pistol_aim_neutral": "Pistol_Aim_Neutral",
@@ -44,7 +49,7 @@ func _init() -> void:
 	for clip: String in MEASURE:
 		if not lib.has_animation(clip):
 			continue
-		var m := _measure(lib.get_animation(clip), skel)
+		var m := AnimMeasure.measure(lib.get_animation(clip), skel)
 		set.authored_speed[clip] = m[0]
 		set.plant_phase[clip] = m[1]
 		print("%-14s speed=%.3f m/s  plant=%.3f  len=%.3f" % [clip, m[0], m[1], lib.get_animation(clip).length])
@@ -61,77 +66,3 @@ func _init() -> void:
 	var err := ResourceSaver.save(set, DIR + "mannequin_animset.tres")
 	print("saved animset err=", err, " roles=", set.roles.size(), " rm=", rm.size())
 	quit()
-
-
-## Returns [ground speed m/s, left-foot plant phase 0..1]. The clip is in place, so during
-## stance the planted foot slides backwards under the body at exactly the authored speed.
-func _measure(anim: Animation, skel: Skeleton3D, bone_l := "LeftToes", bone_r := "RightToes") -> Array:
-	## Returns [ground speed m/s, left-foot plant phase 0..1]. The clip is in place, so the
-	## supporting foot (the lower one, while on the ground) slides backwards under the body
-	## at exactly the authored speed. Same rule the foot-slide test uses in-engine.
-	var n := 240
-	var feet := [skel.find_bone(bone_l), skel.find_bone(bone_r)]
-	var pos := [[], []]
-	for i in n:
-		_pose(anim, skel, anim.length * i / n)
-		for f in 2:
-			pos[f].append(_global(skel, feet[f]).origin)
-	var miny := [INF, INF]
-	for f in 2:
-		for p: Vector3 in pos[f]:
-			miny[f] = minf(miny[f], p.y)
-	var dt := anim.length / n
-	var vels: Array[Vector2] = []
-	for i in n:
-		var j := (i + 1) % n
-		var lo := 0 if (pos[0][i] as Vector3).y <= (pos[1][i] as Vector3).y else 1
-		var p: Vector3 = pos[lo][i]
-		var q: Vector3 = pos[lo][j]
-		if p.y > miny[lo] + 0.03 or q.y > miny[lo] + 0.03:
-			continue
-		vels.append(Vector2(q.x - p.x, q.z - p.z) / dt)
-	var mean := Vector2.ZERO
-	for v in vels:
-		mean += v
-	var dir := mean.normalized()
-	var speeds: Array[float] = []
-	for v in vels:
-		speeds.append(maxf(v.dot(dir), 0.0))
-	speeds.sort()
-	var med := speeds[speeds.size() / 2] if not speeds.is_empty() else 0.0
-	# Left-foot plant: first frame the left foot becomes the low, grounded foot.
-	var plant := 0.0
-	var was := true
-	for i in n:
-		var lo := 0 if (pos[0][i] as Vector3).y <= (pos[1][i] as Vector3).y else 1
-		var down: bool = lo == 0 and (pos[0][i] as Vector3).y < float(miny[0]) + 0.03
-		if down and not was:
-			plant = float(i) / n
-			break
-		was = down
-	return [med, plant]
-
-
-func _global(skel: Skeleton3D, bone: int) -> Transform3D:
-	var xf := skel.get_bone_pose(bone)
-	var p := skel.get_bone_parent(bone)
-	while p >= 0:
-		xf = skel.get_bone_pose(p) * xf
-		p = skel.get_bone_parent(p)
-	return xf
-
-
-func _pose(anim: Animation, skel: Skeleton3D, t: float) -> void:
-	for b in skel.get_bone_count():
-		skel.reset_bone_pose(b)
-	for tr in anim.get_track_count():
-		var bone := skel.find_bone(String(anim.track_get_path(tr).get_concatenated_subnames()))
-		if bone < 0:
-			continue
-		match anim.track_get_type(tr):
-			Animation.TYPE_POSITION_3D:
-				skel.set_bone_pose_position(bone, anim.position_track_interpolate(tr, t) * skel.motion_scale)
-			Animation.TYPE_ROTATION_3D:
-				skel.set_bone_pose_rotation(bone, anim.rotation_track_interpolate(tr, t))
-			Animation.TYPE_SCALE_3D:
-				skel.set_bone_pose_scale(bone, anim.scale_track_interpolate(tr, t))

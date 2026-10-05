@@ -73,6 +73,7 @@ func _drive(tick: int, _src: BotInputSource) -> InputFrame:
 		if s.has("tap") and _now() - _t0 < 0.05:
 			f.buttons |= int(s["tap"])
 		_bot.live_yaw += deg_to_rad(float(s.get("yaw_rate", 0.0))) / Engine.physics_ticks_per_second
+		f.yaw = _bot.live_yaw        # (after the rate, or it never accumulates)
 	if _bot.view_tp:
 		f.buttons |= InputFrame.B_VIEW_TP
 	f.want_slot = _slot

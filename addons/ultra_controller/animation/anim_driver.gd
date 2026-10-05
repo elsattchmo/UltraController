@@ -151,6 +151,7 @@ var _limp_w := 0.0
 ## 0..1 while teetering on an edge (MotorState.teeter): arms flail on the upper body.
 var teeter := 0.0
 var _teeter_w := 0.0
+var _climb_look := 0.0
 ## Face-down get-up: Death_A from where it lies on its front (3.85 s) back to standing (1.6 s).
 const FRONT_GETUP_FROM := 1.6
 const FRONT_GETUP_LEN := 2.25
@@ -247,44 +248,65 @@ func _build() -> AnimationNodeBlendTree:
 	bs.sync_mode = 2                      # Cyclic Mutable: shared phase, length interpolated
 	bs.min_space = Vector2(-2, -2)
 	bs.max_space = Vector2(2, 8)
-	bs.add_blend_point(_anim(&"walk_f"), Vector2(0, _walk_speed), -1, &"walk")
-	# A brisk walk: the same cycle played faster (its stride is right; the jog's 2.8 m bound
-	# is not a walk), so normal walking speeds never pull the jog in.
-	var brisk := _anim(&"walk_f")
-	var walk_len := brisk.timeline_length
-	if walk_len > 0.0:
-		brisk.timeline_length = walk_len / BRISK_RATE
-		brisk.stretch_time_scale = true
-		brisk.start_offset /= BRISK_RATE
-		bs.add_blend_point(brisk, Vector2(0, _walk_speed * BRISK_RATE), -1, &"walk_brisk")
-	bs.add_blend_point(_anim(&"jog_f"), Vector2(0, anim_set.speed_of(&"jog_f", 4.7)), -1, &"jog")
-	bs.add_blend_point(_anim(&"sprint_f"), Vector2(0, _sprint_speed), -1, &"sprint")
-	bs.add_blend_point(_anim(&"walk_b"), Vector2(0, -_back_speed), -1, &"back")
 	var sr := _anim(&"strafe_l") if _mirror_strafe() else _anim(&"strafe_r")
 	if _mirror_strafe():
 		sr.animation = _mirrored(sr.animation)
 	var brisk_side := _side_brisk()
-	bs.add_blend_point(sr, _hull[1] / brisk_side, -1, &"strafe_r")
-	bs.add_blend_point(_anim(&"strafe_l"), _hull[3] / brisk_side, -1, &"strafe_l")
-	# Brisk side-steps (the same cycles faster) for short shuffle clips; a real walking
-	# side-step (e.g. Mixamo's) already covers walking speed.
-	for spec: Array in ([] if brisk_side == 1.0 else [[sr, _hull[1], &"strafe_r_brisk"], [_anim(&"strafe_l"), _hull[3], &"strafe_l_brisk"]]):
-		var b := (spec[0] as AnimationNodeAnimation).duplicate() as AnimationNodeAnimation
-		if b.timeline_length > 0.0:
-			b.timeline_length /= BRISK_RATE
-			b.stretch_time_scale = true
-			b.start_offset /= BRISK_RATE
-		bs.add_blend_point(b, spec[1], -1, spec[2])
+	_eight_way = EIGHT_WAY_ROLES.all(func(r: StringName) -> bool: return _role_anim(r) != null)
+	_four_way = not _eight_way and FOUR_WAY_ROLES.all(func(r: StringName) -> bool: return _role_anim(r) != null)
+	if _eight_way:
+		_build_eight_way(bs)
+	elif _four_way:
+		_build_four_way(bs)
+	else:
+		bs.add_blend_point(_anim(&"walk_f"), Vector2(0, _walk_speed), -1, &"walk")
+		# A brisk walk: the same cycle played faster (its stride is right; the jog's 2.8 m bound
+		# is not a walk), so normal walking speeds never pull the jog in.
+		var brisk := _anim(&"walk_f")
+		var walk_len := brisk.timeline_length
+		if walk_len > 0.0:
+			brisk.timeline_length = walk_len / BRISK_RATE
+			brisk.stretch_time_scale = true
+			brisk.start_offset /= BRISK_RATE
+			bs.add_blend_point(brisk, Vector2(0, _walk_speed * BRISK_RATE), -1, &"walk_brisk")
+		bs.add_blend_point(_anim(&"jog_f"), Vector2(0, anim_set.speed_of(&"jog_f", 4.7)), -1, &"jog")
+		bs.add_blend_point(_anim(&"sprint_f"), Vector2(0, _sprint_speed), -1, &"sprint")
+		bs.add_blend_point(_anim(&"walk_b"), Vector2(0, -_back_speed), -1, &"back")
+		bs.add_blend_point(sr, _hull[1] / brisk_side, -1, &"strafe_r")
+		bs.add_blend_point(_anim(&"strafe_l"), _hull[3] / brisk_side, -1, &"strafe_l")
+		# Brisk side-steps (the same cycles faster) for short shuffle clips; a real walking
+		# side-step (e.g. Mixamo's) already covers walking speed.
+		for spec: Array in ([] if brisk_side == 1.0 else [[sr, _hull[1], &"strafe_r_brisk"], [_anim(&"strafe_l"), _hull[3], &"strafe_l_brisk"]]):
+			var b := (spec[0] as AnimationNodeAnimation).duplicate() as AnimationNodeAnimation
+			if b.timeline_length > 0.0:
+				b.timeline_length /= BRISK_RATE
+				b.stretch_time_scale = true
+				b.start_offset /= BRISK_RATE
+			bs.add_blend_point(b, spec[1], -1, spec[2])
 	ground.add_node("move", bs, Vector2(0, 0))
 	ground.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
 	ground.connect_node("rate", 0, "move")
+	var move_out := "rate"
+	if _eight_way:
+		# The 8-way legs come from a rifle set: swap its upper body for a relaxed one (the arms
+		# swing from the legs in BodyDynamicsModifier.arm_swing).
+		var relax := AnimationNodeBlend2.new()
+		relax.filter_enabled = true
+		for b in _upper_body_bones():
+			relax.set_filter_path(NodePath("%GeneralSkeleton:" + b), true)
+		ground.add_node("relax", relax, Vector2(320, 0))
+		ground.add_node("relax_src", _anim(&"idle"), Vector2(200, 120))
+		ground.connect_node("relax", 0, "rate")
+		ground.connect_node("relax", 1, "relax_src")
+		move_out = "relax"
 	# Limping: the same space with Mixamo's injured walks (forward / back), one copy per bad
 	# leg (mirrored where the clip favours the other leg), mixed in by how hurt the legs are.
 	_has_limp = _role_anim(&"limp_f") != null and _role_anim(&"limp_b") != null
 	if _has_limp:
 		_limp_f_speed = anim_set.speed_of(&"limp_f", 0.7)
 		_limp_b_speed = anim_set.speed_of(&"limp_b", 0.7)
-		_limp_hull = PackedVector2Array([Vector2(0, _limp_f_speed), _hull[1] / brisk_side, Vector2(0, -_limp_b_speed), _hull[3] / brisk_side])
+		var side_pts := [Vector2(_ring_radius(_fw_walk, Vector2.RIGHT), 0), Vector2(-_ring_radius(_fw_walk, Vector2.LEFT), 0)] if (_four_way or _eight_way) else [_hull[1] / brisk_side, _hull[3] / brisk_side]
+		_limp_hull = PackedVector2Array([Vector2(0, _limp_f_speed), side_pts[0], Vector2(0, -_limp_b_speed), side_pts[1]])
 		for side: String in ["l", "r"]:
 			var ls := AnimationNodeBlendSpace2D.new()
 			ls.sync = true
@@ -299,8 +321,8 @@ func _build() -> AnimationNodeBlendTree:
 			if side != LIMP_B_BAD_LEG:
 				lb.animation = _mirrored(lb.animation)
 			ls.add_blend_point(lb, Vector2(0, -_limp_b_speed), -1, &"back")
-			ls.add_blend_point(sr.duplicate(), _hull[1] / brisk_side, -1, &"strafe_r")
-			ls.add_blend_point(_anim(&"strafe_l"), _hull[3] / brisk_side, -1, &"strafe_l")
+			ls.add_blend_point(_side_walk_anim(true, sr), side_pts[0], -1, &"strafe_r")
+			ls.add_blend_point(_side_walk_anim(false, sr), side_pts[1], -1, &"strafe_l")
 			ground.add_node("limp_" + side, ls, Vector2(0, 500 + (100 if side == "r" else 0)))
 		ground.add_node("limp_side", AnimationNodeBlend2.new(), Vector2(200, 550))
 		ground.connect_node("limp_side", 0, "limp_l")
@@ -308,7 +330,7 @@ func _build() -> AnimationNodeBlendTree:
 		ground.add_node("limp_rate", AnimationNodeTimeScale.new(), Vector2(350, 550))
 		ground.connect_node("limp_rate", 0, "limp_side")
 		ground.add_node("limp", AnimationNodeBlend2.new(), Vector2(450, 0))
-		ground.connect_node("limp", 0, "rate")
+		ground.connect_node("limp", 0, move_out)
 		ground.connect_node("limp", 1, "limp_rate")
 	var turn := AnimationNodeBlend3.new()
 	ground.add_node("idle", _anim(&"idle"), Vector2(0, 200))
@@ -322,7 +344,7 @@ func _build() -> AnimationNodeBlendTree:
 	ground.connect_node("turn_rate", 0, "turn")
 	ground.add_node("mix", AnimationNodeBlend2.new(), Vector2(600, 100))
 	ground.connect_node("mix", 0, "turn_rate")
-	ground.connect_node("mix", 1, "limp" if _has_limp else "rate")
+	ground.connect_node("mix", 1, "limp" if _has_limp else move_out)
 	ground.connect_node("output", 0, "mix")
 	loco.add_node("ground", ground, Vector2(0, 0))
 
@@ -693,45 +715,57 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	# only runs turn the hips. Backwards the side-steps blend badly, so it warps sooner.
 	var target_warp := 0.0
 	var blend_dir := theta
-	if moving:
-		var base := PI if backwards else 0.0
-		var rel := angle_difference(base, theta)
-		if backwards:
-			# Backwards the legs only turn a little (looking down you'd see them cross under
-			# you); the back + side-step clips blend for the rest of the angle.
-			var lim := deg_to_rad(back_warp_deg)
-			target_warp = clampf(rel, -lim, lim) * smoothstep(_walk_speed * 1.0, _walk_speed * 1.45, speed)
-		else:
-			# Walking: never blend the walk with a side-step (diagonals skate). Below ~45 deg
-			# off forward play the walk with the hips turned toward travel; beyond it play the
-			# side-step with the hips turned back. Running: the forward cycle, hips turned.
-			var a2 := absf(rel)
-			if _side_step and a2 < deg_to_rad(38.0):
-				_side_step = false
-			elif not _side_step and a2 > deg_to_rad(52.0):
-				_side_step = true
-			_side_g = move_toward(_side_g, 1.0 if _side_step else 0.0, delta * 4.0)
-			var g := smoothstep(0.0, 1.0, _side_g)
-			var walk_warp := signf(rel) * (a2 - g * PI * 0.5)
-			var run_w := smoothstep(2.2, 3.2, speed)
-			var walk_w := smoothstep(_walk_speed * 0.6, _walk_speed * 1.2, speed)
-			target_warp = lerpf(walk_warp * walk_w, clampf(rel, -PI * 0.5, PI * 0.5), run_w)
-		blend_dir = theta - target_warp
-	_warp = lerp_angle(_warp, target_warp, 1.0 - exp(-10.0 * delta))
-	var bp := Vector2(sin(blend_dir), cos(blend_dir)) * speed
-	var clamped := _clamp_to_hull(bp)
+	var bp := Vector2.ZERO
+	var clamped := Vector2.ZERO
 	var rate := 1.0
-	if clamped.length() > 0.01:
-		rate = clampf(speed / clamped.length(), 1.0, 2.4 if backwards else 1.4)
-	# Side-stepping slower than the side-step clip was authored: stay on the side-step point
-	# and slow its cycle. (Off the points, the blend mixes the forward walk and the backpedal
-	# into the side-step: a shorter stride under feet that keep cycling, so they skate and
-	# the legs pop between poses.)
-	var side_r := absf(_hull[1].x if bp.x > 0.0 else _hull[3].x)
-	var side_k := smoothstep(0.8, 0.97, absf(bp.x) / maxf(bp.length(), 0.001)) * smoothstep(0.0, 1.0, _side_g)
-	if side_k > 0.0 and speed < side_r and not backwards:
-		clamped = clamped.lerp(Vector2(signf(bp.x) * side_r, 0.0), side_k)
-		rate = lerpf(rate, maxf(speed / side_r, 0.4), side_k)
+	var side_r := 0.0
+	var side_k := 0.0
+	if _four_way or _eight_way:
+		var fw := _four_way_point(theta, speed, moving)
+		# (The limp clips play their own direction: no clip-snapping hip turn under them.)
+		target_warp = fw[0] * (1.0 - _limp_w)
+		clamped = fw[1]
+		rate = fw[2]
+		bp = Vector2(sin(theta), cos(theta)) * speed       # the true travel (limp space)
+	else:
+		if moving:
+			var base := PI if backwards else 0.0
+			var rel := angle_difference(base, theta)
+			if backwards:
+				# Backwards the legs only turn a little (looking down you'd see them cross under
+				# you); the back + side-step clips blend for the rest of the angle.
+				var lim := deg_to_rad(back_warp_deg)
+				target_warp = clampf(rel, -lim, lim) * smoothstep(_walk_speed * 1.0, _walk_speed * 1.45, speed)
+			else:
+				# Walking: never blend the walk with a side-step (diagonals skate). Below ~45 deg
+				# off forward play the walk with the hips turned toward travel; beyond it play the
+				# side-step with the hips turned back. Running: the forward cycle, hips turned.
+				var a2 := absf(rel)
+				if _side_step and a2 < deg_to_rad(38.0):
+					_side_step = false
+				elif not _side_step and a2 > deg_to_rad(52.0):
+					_side_step = true
+				_side_g = move_toward(_side_g, 1.0 if _side_step else 0.0, delta * 4.0)
+				var g := smoothstep(0.0, 1.0, _side_g)
+				var walk_warp := signf(rel) * (a2 - g * PI * 0.5)
+				var run_w := smoothstep(2.2, 3.2, speed)
+				var walk_w := smoothstep(_walk_speed * 0.6, _walk_speed * 1.2, speed)
+				target_warp = lerpf(walk_warp * walk_w, clampf(rel, -PI * 0.5, PI * 0.5), run_w)
+			blend_dir = theta - target_warp
+		bp = Vector2(sin(blend_dir), cos(blend_dir)) * speed
+		clamped = _clamp_to_hull(bp)
+		if clamped.length() > 0.01:
+			rate = clampf(speed / clamped.length(), 1.0, 2.4 if backwards else 1.4)
+		# Side-stepping slower than the side-step clip was authored: stay on the side-step point
+		# and slow its cycle. (Off the points, the blend mixes the forward walk and the backpedal
+		# into the side-step: a shorter stride under feet that keep cycling, so they skate and
+		# the legs pop between poses.)
+		side_r = absf(_hull[1].x if bp.x > 0.0 else _hull[3].x)
+		side_k = smoothstep(0.8, 0.97, absf(bp.x) / maxf(bp.length(), 0.001)) * smoothstep(0.0, 1.0, _side_g)
+		if side_k > 0.0 and speed < side_r and not backwards:
+			clamped = clamped.lerp(Vector2(signf(bp.x) * side_r, 0.0), side_k)
+			rate = lerpf(rate, maxf(speed / side_r, 0.4), side_k)
+	_warp = lerp_angle(_warp, target_warp, 1.0 - exp(-10.0 * delta))
 	# Limp: the cycle hurries through the bad leg's stance (short step) and lingers on the good
 	# one, so the asymmetry comes from the real clip's timing rather than an overlay.
 	if limp > 0.0 and moving and skeleton:
@@ -747,6 +781,10 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 		_bad_stance = false
 	tree.set(LOCO + "ground/move/blend_position", clamped)
 	tree.set(LOCO + "ground/rate/scale", rate)
+	if _eight_way:
+		tree.set(LOCO + "ground/relax/blend_amount", 1.0)
+		var on_ground := state in [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.LAND]
+		modifier.arm_swing = move_toward(modifier.arm_swing, (smoothstep(0.2, 1.0, speed) * (1.0 - smoothstep(0.0, 1.0, _item_w))) if on_ground else 0.0, delta * 4.0)
 	if _has_limp:
 		_limp_w = move_toward(_limp_w, smoothstep(0.0, 0.6, limp), get_process_delta_time() * 1.5)
 		tree.set(LOCO + "ground/limp/blend_amount", _limp_w)
@@ -793,6 +831,292 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	if state in [MotorState.Id.CROUCH, MotorState.Id.CRAWL] and moving:
 		var rel2 := angle_difference(PI if backwards else 0.0, theta)
 		_warp = lerp_angle(_warp, clampf(rel2, -1.2, 1.2), 1.0 - exp(-10.0 * delta))
+
+
+# ---------------------------------------------------------------- four-way locomotion
+
+## A clip set with these roles gets the four-way ground blend space (one mocap session: walk and
+## run forward / right / back / left plus a forward sprint).
+const FOUR_WAY_ROLES: Array[StringName] = [&"u_walk_f", &"u_walk_r", &"u_walk_b", &"u_walk_l",
+	&"u_run_f", &"u_run_r", &"u_run_b", &"u_run_l", &"u_sprint_f"]
+var _four_way := false
+var _fw_walk := PackedVector2Array()       ## walk ring points F, R, B, L (x = right, y = forward)
+var _fw_run := PackedVector2Array()        ## run ring
+var _fw_hull := PackedVector2Array()       ## outer hull: sprint, run R, run B, run L
+
+
+## Walk ring, run ring and the sprint point, with explicit triangles: a direction between two
+## clips only ever mixes those two (and the ring above / below), never a far clip.
+func _build_four_way(bs: AnimationNodeBlendSpace2D) -> void:
+	var dirs := [Vector2(0, 1), Vector2(1, 0), Vector2(0, -1), Vector2(-1, 0)]
+	var names := ["f", "r", "b", "l"]
+	_fw_walk = PackedVector2Array()
+	_fw_run = PackedVector2Array()
+	for k in 4:
+		var role := StringName("u_walk_" + names[k])
+		_fw_walk.append(dirs[k] * anim_set.speed_of(role, 1.3))
+	for k in 4:
+		var role := StringName("u_run_" + names[k])
+		_fw_run.append(dirs[k] * anim_set.speed_of(role, 3.4))
+	var sprint := Vector2(0, anim_set.speed_of(&"u_sprint_f", 5.0))
+	_fw_hull = PackedVector2Array([sprint, _fw_run[1], _fw_run[2], _fw_run[3]])
+	bs.auto_triangles = false
+	for k in 4:
+		bs.add_blend_point(_anim(StringName("u_walk_" + names[k])), _fw_walk[k], -1, StringName("walk_" + names[k]))
+	for k in 4:
+		bs.add_blend_point(_anim(StringName("u_run_" + names[k])), _fw_run[k], -1, StringName("run_" + names[k]))
+	bs.add_blend_point(_anim(&"u_sprint_f"), sprint, -1, &"sprint")
+	for q in 4:
+		var n := (q + 1) % 4
+		bs.add_triangle(q, n, 4 + n)
+		bs.add_triangle(q, 4 + n, 4 + q)
+	bs.add_triangle(7, 4, 8)
+	bs.add_triangle(4, 5, 8)
+	# Speeds the rest of the driver reads.
+	_walk_speed = _fw_walk[0].y
+	_back_speed = -_fw_walk[2].y
+	_sprint_speed = sprint.y
+	_hull = _fw_hull
+
+
+## Where to sample the four-way space for travelling at `speed` in direction `theta`
+## (0 = forward, + = right): [hips warp, blend point, playback rate].
+## Slower than the walk ring: on the ring, cycle slowed (strides stay true, feet don't skate);
+## between the rings: blended; faster than the run ring going forward-ish: the forward sprint
+## with the hips turned toward travel (there's no sideways sprint).
+func _four_way_point(theta: float, speed: float, moving: bool) -> Array:
+	if not moving:
+		return [0.0, _fw_walk[0], 1.0]
+	var dir := Vector2(sin(theta), cos(theta))
+	var r_walk := _ring_radius(_fw_walk, dir)
+	var r_run := _ring_radius(_fw_run, dir)
+	if _eight_way and not _fw_sprint.is_empty() and speed > r_run * 1.05 and absf(theta) < deg_to_rad(75.0):
+		# Sprinting: the nearest sprint clip, hips turned the rest of the way (no run mixed in).
+		var best := _fw_sprint[0]
+		for sp_pt in _fw_sprint:
+			if absf(angle_difference(atan2(sp_pt.x, sp_pt.y), theta)) < absf(angle_difference(atan2(best.x, best.y), theta)):
+				best = sp_pt
+		var w8 := clampf(angle_difference(atan2(best.x, best.y), theta), -deg_to_rad(30.0), deg_to_rad(30.0))
+		var k := smoothstep(r_run * 1.05, best.length() * 0.95, speed)
+		var c8 := (dir * r_run).lerp(best, k)
+		return [w8 * k, c8, clampf(speed / maxf(c8.length(), 0.01), 0.8, 1.4)]
+	if speed > r_run * 1.05 and absf(theta) < deg_to_rad(75.0):
+		var warp_lim := deg_to_rad(20.0 if _eight_way else 60.0)
+		var warp := clampf(theta, -warp_lim, warp_lim) * smoothstep(r_run, r_run * 1.25, speed)
+		var bd := theta - warp
+		var c := _clamp_to_hull(Vector2(sin(bd), cos(bd)) * speed, _fw_hull)
+		return [warp, c, clampf(speed / maxf(c.length(), 0.01), 1.0, 1.4)]
+	# Eight-way: play (nearly) one real clip - the nearest direction - with the hips turned the
+	# rest of the way (<= 22.5 deg); neighbours only crossfade in a narrow band halfway between.
+	# (Blending two clips 45 deg apart across the whole sector shortened the stride: skating.)
+	var warp := 0.0
+	if _eight_way:
+		var snapped := _snap_dir(theta)
+		warp = angle_difference(snapped, theta)
+		dir = Vector2(sin(snapped), cos(snapped))
+		r_walk = _ring_radius(_fw_walk, dir)
+		r_run = _ring_radius(_fw_run, dir)
+	if speed < r_walk:
+		return [warp, dir * r_walk, maxf(speed / r_walk, 0.45)]
+	var sp := minf(speed, r_run)
+	return [warp, dir * sp, clampf(speed / sp, 1.0, 1.5)]
+
+
+## The travel direction pulled onto a clip direction of the walk ring: the current clip holds
+## until the travel is more than EIGHT_WAY_HYST past halfway to a neighbour, then it switches
+## in one go (the inertial blend smooths the pose; mixing two neighbouring clips skates).
+const EIGHT_WAY_HYST := deg_to_rad(6.0)
+var _snap_ang := NAN
+func _snap_dir(theta: float) -> float:
+	var angs: Array[float] = []
+	for p in _fw_walk:
+		angs.append(atan2(p.x, p.y))
+	var best := angs[0]
+	for a in angs:
+		if absf(angle_difference(a, theta)) < absf(angle_difference(best, theta)):
+			best = a
+	if is_nan(_snap_ang):
+		_snap_ang = best
+	elif best != _snap_ang:
+		# Halfway to the neighbour is |gap|/2 from the current clip: switch past that + hysteresis.
+		var gap := absf(angle_difference(_snap_ang, best))
+		if absf(angle_difference(_snap_ang, theta)) > gap * 0.5 + EIGHT_WAY_HYST:
+			_snap_ang = best
+			if inertial:
+				inertial.trigger()
+	return _snap_ang
+
+
+# ---------------------------------------------------------------- eight-way locomotion
+
+## An 8-direction walk / run (+ forward sprints) set from one capture. The Mixamo rifle pack is
+## bladed (pelvis ~40 deg off the travel direction): each clip is turned so its pelvis faces
+## forward, which moves its travel direction by the same angle - still a ring of 8 directions,
+## now with a square-on body. The upper body is replaced by a relaxed one (arms swung from the
+## legs by BodyDynamicsModifier) - see the "upper" Blend2 in the ground tree.
+const EIGHT_WAY_DIRS := ["f", "fr", "r", "br", "b", "bl", "l", "fl"]
+var EIGHT_WAY_ROLES: Array[StringName] = _eight_roles()
+var _eight_way := false
+var _walk_turn := 0.0
+var _fw_sprint := PackedVector2Array()
+
+
+static func _eight_roles() -> Array[StringName]:
+	var out: Array[StringName] = []
+	for gait in ["walk", "run"]:
+		for d: String in EIGHT_WAY_DIRS:
+			out.append(StringName("e_%s_%s" % [gait, d]))
+	return out
+
+
+func _build_eight_way(bs: AnimationNodeBlendSpace2D) -> void:
+	bs.auto_triangles = false
+	var rings := {}
+	for gait in ["walk", "run", "sprint"]:
+		# One turn per gait (the set's mean stance): the directions stay evenly spread (the
+		# stance differs a little per direction; turning clips one by one would bunch them up).
+		var mean := Vector2.ZERO
+		for d: String in EIGHT_WAY_DIRS:
+			var role0 := StringName("e_%s_%s" % [gait, d])
+			if _role_anim(role0) != null:
+				var f := _hips_facing(_clip(role0))
+				mean += Vector2(sin(f), cos(f))
+		var turn := -atan2(mean.x, mean.y) if mean.length() > 0.01 else 0.0
+		if gait == "walk":
+			_walk_turn = turn
+		var pts := []
+		for d: String in EIGHT_WAY_DIRS:
+			var role := StringName("e_%s_%s" % [gait, d])
+			if _role_anim(role) == null:
+				continue
+			var a := _anim(role)
+			a.animation = _turned(a.animation, turn)
+			var tdir := _travel_of(role).rotated(turn)           # (blend space x = right)
+			var p := tdir * anim_set.speed_of(role, 1.7 if gait == "walk" else 4.5)
+			pts.append([p, a, StringName("%s_%s" % [gait, d])])
+		pts.sort_custom(func(x: Array, y: Array) -> bool: return atan2((x[0] as Vector2).x, (x[0] as Vector2).y) < atan2((y[0] as Vector2).x, (y[0] as Vector2).y))
+		rings[gait] = pts
+	var idx := {}
+	for gait in ["walk", "run", "sprint"]:
+		var ids := []
+		for e: Array in rings[gait]:
+			ids.append(bs.get_blend_point_count())
+			bs.add_blend_point(e[1], e[0], -1, e[2])
+		idx[gait] = ids
+	var w: Array = idx["walk"]
+	var r: Array = idx["run"]
+	var n := w.size()
+	for i in n:
+		var j := (i + 1) % n
+		bs.add_triangle(w[i], w[j], r[j])
+		bs.add_triangle(w[i], r[j], r[i])
+	_fw_walk = PackedVector2Array(rings["walk"].map(func(e: Array) -> Vector2: return e[0]))
+	_fw_run = PackedVector2Array(rings["run"].map(func(e: Array) -> Vector2: return e[0]))
+	# Sprints (forward-ish only): fan out from the run points nearest to them.
+	var hull := _fw_run.duplicate()
+	for k in (rings["sprint"] as Array).size():
+		var sp: Vector2 = rings["sprint"][k][0]
+		var near := 0
+		for i in n:
+			if _fw_run[i].normalized().dot(sp.normalized()) > _fw_run[near].normalized().dot(sp.normalized()):
+				near = i
+		hull[near] = sp
+		var nb := (near + 1) % n
+		var pb := (near - 1 + n) % n
+		bs.add_triangle(r[near], r[nb], idx["sprint"][k])
+		bs.add_triangle(r[pb], r[near], idx["sprint"][k])
+	_fw_hull = hull
+	_fw_sprint = PackedVector2Array(rings["sprint"].map(func(e: Array) -> Vector2: return e[0]))
+	_walk_speed = _ring_radius(_fw_walk, Vector2(0, 1))
+	_back_speed = _ring_radius(_fw_walk, Vector2(0, -1))
+	_sprint_speed = _ring_radius(_fw_hull, Vector2(0, 1))
+	_hull = _fw_hull
+
+
+## The clip's travel direction in blend space (x = right, y = forward), from its role name.
+func _travel_of(role: StringName) -> Vector2:
+	var d := String(role).get_slice("_", 2)
+	var v := Vector2.ZERO
+	if d.contains("f"):
+		v.y += 1.0
+	if d.contains("b"):
+		v.y -= 1.0
+	if d.contains("r"):
+		v.x += 1.0
+	if d.contains("l"):
+		v.x -= 1.0
+	return v.normalized()
+
+
+## Mean facing of a clip's hip line (radians, + = toward the character's left / -x).
+func _hips_facing(clip: StringName) -> float:
+	var a := _lib_anim(clip)
+	if a == null:
+		return 0.0
+	var l := skeleton.find_bone("LeftUpperLeg")
+	var r := skeleton.find_bone("RightUpperLeg")
+	var sum := Vector2.ZERO
+	for k in 12:
+		UltraPoseSampler.pose(a, skeleton, a.length * k / 12.0)
+		var f := Vector3.UP.cross(UltraPoseSampler.global_pose(skeleton, r).origin - UltraPoseSampler.global_pose(skeleton, l).origin)
+		sum += Vector2(f.x, f.z).normalized()
+	for b in skeleton.get_bone_count():
+		skeleton.reset_bone_pose(b)
+	return atan2(sum.x, sum.y)
+
+
+## A copy of `clip` turned `angle` radians about the vertical (Hips rotation + position).
+func _turned(clip: StringName, angle: float) -> StringName:
+	var s := String(clip)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var clip_name := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	if l == null or not l.has_animation(clip_name) or absf(angle) < 0.01:
+		return clip
+	var rname := "%s_turn%d" % [clip_name, int(round(rad_to_deg(angle)))]
+	if not l.has_animation(rname):
+		var a := l.get_animation(clip_name).duplicate(true) as Animation
+		var q := Quaternion(Vector3.UP, angle)
+		for t in a.get_track_count():
+			if String(a.track_get_path(t).get_concatenated_subnames()) != "Hips":
+				continue
+			for k in a.track_get_key_count(t):
+				match a.track_get_type(t):
+					Animation.TYPE_ROTATION_3D:
+						a.track_set_key_value(t, k, q * (a.track_get_key_value(t, k) as Quaternion))
+					Animation.TYPE_POSITION_3D:
+						a.track_set_key_value(t, k, q * (a.track_get_key_value(t, k) as Vector3))
+		l.add_animation(rname, a)
+	return StringName((lib + "/" if lib != "" else "") + rname)
+
+
+func _lib_anim(clip: StringName) -> Animation:
+	var s := String(clip)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var clip_name := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	return l.get_animation(clip_name) if l and l.has_animation(clip_name) else null
+
+
+## The walking side-step used by the limp space: the ring set's own clip (turned), or the
+## classic strafe clips.
+func _side_walk_anim(right: bool, sr: AnimationNodeAnimation) -> AnimationNodeAnimation:
+	if _eight_way:
+		var role := &"e_walk_r" if right else &"e_walk_l"
+		var a := _anim(role)
+		a.animation = _turned(a.animation, _walk_turn)
+		return a
+	if _four_way:
+		return _anim(&"u_walk_r" if right else &"u_walk_l")
+	return sr.duplicate() if right else _anim(&"strafe_l")
+
+
+static func _ring_radius(ring: PackedVector2Array, dir: Vector2) -> float:
+	for i in ring.size():
+		var hit: Variant = Geometry2D.segment_intersects_segment(Vector2.ZERO, dir * 50.0, ring[i], ring[(i + 1) % ring.size()])
+		if hit != null:
+			return maxf((hit as Vector2).length(), 0.1)
+	return ring[0].length()
 
 
 func _clamp_to_hull(p: Vector2, hull := PackedVector2Array()) -> Vector2:
@@ -848,7 +1172,13 @@ func _drive_body(delta: float) -> void:
 	modifier.warp_yaw = _warp
 	_aim_w = move_toward(_aim_w, aim_weight, delta * 4.0)
 	var yaw_off := clampf(-angle_difference(body_yaw, aim_yaw), -deg_to_rad(80.0), deg_to_rad(80.0))
-	modifier.aim_pitch = clampf(aim_pitch, -1.35, 1.35) * _aim_w
+	# Climbing / hanging: look with the head, not the chest (the hands stay on the wall).
+	var climbing := state in [MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.LEDGE_HANG,
+		MotorState.Id.LEDGE_CLIMB, MotorState.Id.MANTLE, MotorState.Id.ROPE]
+	_climb_look = move_toward(_climb_look, 1.0 if climbing else 0.0, delta * 4.0)
+	modifier.spine_aim_scale = lerpf(1.0, 0.15, smoothstep(0.0, 1.0, _climb_look))
+	var pitch_lim := lerpf(1.35, 0.95, _climb_look)
+	modifier.aim_pitch = clampf(aim_pitch, -pitch_lim, pitch_lim) * _aim_w
 	modifier.aim_yaw = yaw_off * _aim_w
 	if look and skeleton:
 		# Free third person: the head (not the spine) follows where the player looks.

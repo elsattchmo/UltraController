@@ -65,6 +65,9 @@ func _ready() -> void:
 		push_warning("session ended: " + reason)
 		if args.has("quit-on-end"):
 			get_tree().quit(2))
+	UltraNet.session_started.connect(func(_m: int) -> void:
+		if UltraNet.is_server():
+			_stock_range())
 	if args.has("bot") or args.has("tour"):
 		UltraNet.local_input_factory = _make_bot_input
 	if args.has("quit-after"):
@@ -193,13 +196,27 @@ func _on_player_added(p: NetPlayer) -> void:
 		menu = null
 
 
-## Playground loadout: a pistol and some ammo (the server grants it; owners get it replicated).
+## Playground loadout: a pistol (slot 1), the carbine (slot 2) and ammo for both (the server
+## grants it; owners get it replicated).
 func _give_starting_kit(c: UltraCharacter) -> void:
 	if args.has("no-kit"):
 		return
 	UltraItems.give(c, &"pistol", 1)
+	UltraItems.give(c, &"rifle", 1)
 	UltraItems.give(c, &"ammo_9mm", 36)
+	UltraItems.give(c, &"ammo_556", 90)
 	UltraItems.give(c, &"medkit", 1)
+
+
+## The shooting range bench also has a carbine and a box of 5.56 on it (server-spawned
+## pickups, replicated like any dropped item), next to the pistol the map places.
+func _stock_range() -> void:
+	var r := map.find_child("ShootingRange", true, false) as Node3D if map else null
+	if r == null or ItemDB.get_def(&"rifle") == null:
+		return
+	var on_side := Basis(Vector3.UP, PI * 0.5) * Basis(Vector3.BACK, PI * 0.5)     # barrel along the bench
+	UltraNet.world.spawn("res://assets/items/rifle/rifle_world.tscn", r.global_transform * Transform3D(on_side, Vector3(1.6, 1.08, 1.0)), {"item_id": &"rifle", "count": 1})
+	UltraNet.world.spawn("res://assets/items/ammo/ammo_556_world.tscn", r.global_transform * Transform3D(Basis(), Vector3(-1.4, 1.1, 1.0)), {"item_id": &"ammo_556", "count": 60})
 
 
 func _process(delta: float) -> void:

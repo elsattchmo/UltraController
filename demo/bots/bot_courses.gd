@@ -9,7 +9,7 @@ static func get_course(name: String) -> Array:
 		"idle":
 			return [{"ticks": 60}]
 		"gunplay":
-			# Draw, fire a magazine while strafing, reload, holster, repeat.
+			# Draw, fire a magazine while strafing, reload, holster, then the carbine; repeat.
 			var out := [{"ticks": 30, "slot": 1}]
 			for i in 12:
 				out.append({"ticks": 2, "slot": 1, "tap": InputFrame.B_PRIMARY, "move": Vector2(0.6 if i % 4 < 2 else -0.6, 0)})
@@ -18,6 +18,16 @@ static func get_course(name: String) -> Array:
 			out.append({"ticks": 150, "slot": 1})
 			out.append({"ticks": 40, "slot": 1, "buttons": InputFrame.B_SECONDARY, "move": Vector2(0, 0.5)})
 			out.append({"ticks": 2, "slot": 1, "buttons": InputFrame.B_SECONDARY, "tap": InputFrame.B_PRIMARY})
+			# The carbine (slot 2 in the playground kit): automatic bursts while moving and
+			# turning (free aim swinging the gun), one sprinting, reload, put it away.
+			out.append({"ticks": 50, "slot": 2})
+			for i in 3:
+				out.append({"ticks": 18, "slot": 2, "buttons": InputFrame.B_PRIMARY, "move": Vector2(0.5 if i % 2 == 0 else -0.5, 0), "yaw_rate": 0.9})
+				out.append({"ticks": 15, "slot": 2, "buttons": InputFrame.B_SECONDARY if i == 1 else 0})
+			out.append({"ticks": 40, "slot": 2, "yaw": 0.0, "move": Vector2(0, 1), "buttons": InputFrame.B_SPRINT})
+			out.append({"ticks": 6, "slot": 2, "yaw": 0.0, "move": Vector2(0, 1), "buttons": InputFrame.B_SPRINT | InputFrame.B_PRIMARY})
+			out.append({"ticks": 2, "slot": 2, "tap": InputFrame.B_RELOAD})
+			out.append({"ticks": 170, "slot": 2, "yaw": PI})
 			out.append({"ticks": 40, "slot": 0})
 			return out
 		"carry":

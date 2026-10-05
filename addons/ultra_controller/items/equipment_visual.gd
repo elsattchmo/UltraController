@@ -11,13 +11,20 @@ var left_hand_attach: BoneAttachment3D
 var _side := 1                        ## 1 right hand, -1 left (right arm out of action)
 var hip_attach: BoneAttachment3D
 var held_node: Node3D                 ## instance of the held item's equip_scene
-var holster_node: Node3D
+var holster_node: Node3D              ## what's in the hip holster (first hip item not in hand)
+var back_node: Node3D                 ## what's slung on the back (first back item not in hand)
 var held_def: ItemDefinition
 var ads := 0.0                        ## 0..1, presentation blend
 var camera: Camera3D                  ## set for the local first-person viewer
 
 var _held_uid := -1
-var _holster_uid := -1
+## Holstered / slung items: bone name -> {"uid": int, "node": Node3D}.
+var _stowed := {}
+var _stow_attach := {}
+## Free-aim offset of the last two ticks (MotorState.sway), for smooth presentation.
+var _sway_prev := Vector2.ZERO
+var _sway_cur := Vector2.ZERO
+var _sway_tick := -1
 var _slide_kick := 0.0
 var _mag_hidden := false
 var _recoil := UltraSpring.new(Vector3.ZERO, 6.0, 0.55)
@@ -29,8 +36,6 @@ var _reload_w := 0.0
 ## First-person gun life: step bob, look lag, sprint lowering.
 var _bob_phase := 0.0
 var _bob_amp := 0.0
-var _sway := Vector2.ZERO
-var _last_look := Vector2(NAN, NAN)
 var _sprint_w := 0.0
 
 
@@ -51,7 +56,29 @@ func setup(c: UltraCharacter) -> void:
 	hip_attach.name = "HipAttach"
 	hip_attach.bone_name = "Hips"
 	sk.add_child(hip_attach)
+	_stow_attach["Hips"] = hip_attach
 	c.item_event.connect(_on_item_event)
+	_add_item_roles()
+
+
+## Items can bring the animation roles they need (ItemDefinition.anim_clips): a role the
+## character's AnimationSet doesn't define gets the first of the item's clips that exists.
+func _add_item_roles() -> void:
+	var anim := character.anim
+	if anim == null or anim.anim_set == null or anim.player == null:
+		return
+	for d in ItemDB.all():
+		for role: StringName in d.anim_clips:
+			if anim.anim_set.has_role(role):
+				continue
+			var opts: Variant = d.anim_clips[role]
+			if not (opts is Array):
+				opts = [opts]
+			for clip: String in opts:
+				var full := clip if clip.contains("/") or anim.library_name == &"" else "%s/%s" % [anim.library_name, clip]
+				if anim.player.has_animation(full):
+					anim.anim_set.roles[StringName(role)] = clip
+					break
 
 
 func _process(delta: float) -> void:
@@ -72,18 +99,8 @@ func _process(delta: float) -> void:
 			(hand_attach if _side == 1 else left_hand_attach).add_child(held_node)
 			held_node.transform = grip()
 			_set_layers(held_node)
-	# --- holster: first firearm in the inventory that isn't in hand
-	var hol := _holster_item()
-	var hol_uid := hol.uid if hol else 0
-	if hol_uid != _holster_uid:
-		_holster_uid = hol_uid
-		if holster_node:
-			holster_node.queue_free()
-			holster_node = null
-		if hol and hol.def().equip_scene:
-			holster_node = hol.def().equip_scene.instantiate() as Node3D
-			hip_attach.add_child(holster_node)
-			holster_node.transform = hol.def().holster_offset
+	# --- holster / sling: the first hip item and the first back item that aren't in hand
+	_update_stowed()
 	# --- slide blowback + magazine during reload
 	_slide_kick = move_toward(_slide_kick, 0.0, delta * 0.6)
 	if held_node:
@@ -98,6 +115,111 @@ func _process(delta: float) -> void:
 			mag.visible = not hide
 	_drive_hands(delta)
 	_drive_held_prop(delta)
+	_aim_body()
+
+
+## Free-aim offset now (radians, x = yaw, y = pitch): the simulated MotorState.sway,
+## interpolated between the last two ticks.
+func sway_now() -> Vector2:
+	if character == null:
+		return Vector2.ZERO
+	if character.tick != _sway_tick:
+		_sway_prev = _sway_cur if _sway_tick >= 0 and character.tick == _sway_tick + 1 else character.state.sway
+		_sway_cur = character.state.sway
+		_sway_tick = character.tick
+	return _sway_prev.lerp(_sway_cur, clampf(Engine.get_physics_interpolation_fraction(), 0.0, 1.0))
+
+
+## The shot ray as it will go (presentation): from the simulated eye along the gun's direction
+## (this frame's aim + the free-aim offset). The HUD's gun dot is where it meets the world.
+func gun_ray() -> Dictionary:
+	var src := character.input_source
+	var yaw := src.live_yaw if src else character.last_input.yaw
+	var pitch := src.live_pitch if src else character.last_input.pitch
+	var origin := character.visual_feet + Vector3.UP * (character.state.height - 0.16)
+	return {"origin": origin, "dir": UltraActionLayer.gun_dir(yaw, pitch, sway_now())}
+
+
+## World rotation from the aim onto the gun (free aim), about wherever it is applied.
+func sway_rotation() -> Basis:
+	var src := character.input_source
+	var yaw := src.live_yaw if src else character.last_input.yaw
+	var pitch := src.live_pitch if src else character.last_input.pitch
+	return UltraActionLayer.sway_basis(yaw, pitch, sway_now())
+
+
+## Third person: the arms (spine, via the body modifier's weapon aim) follow the gun's
+## direction, so the gun visibly lags turns, bobs and drops for a sprint like the dot does.
+## (First person poses the gun from the camera instead.) Runs after the AnimDriver set the
+## modifier for this frame; the skeleton applies it at the end of the frame.
+func _aim_body() -> void:
+	var anim := character.anim
+	if anim == null or anim.modifier == null or camera != null:
+		return
+	# (Breathing - a few hundredths of a degree - isn't worth twisting the spine for at this
+	# distance: only what's past a 0.25 deg deadband turns the body.)
+	var sw := sway_now()
+	sw -= sw.limit_length(deg_to_rad(0.25))
+	var w := anim.modifier.weapon_aim
+	if w <= 0.0 or held_def == null:
+		return
+	# The aiming clip's own barrel direction, taken back out (a bladed rifle clip points the
+	# gun off to one side of the chest).
+	var clip := held_def.aim_clip_offset * Vector2(float(_side), 1.0)
+	anim.modifier.aim_yaw += (deg_to_rad(clip.x) - sw.x) * w
+	anim.modifier.aim_pitch += (sw.y - deg_to_rad(clip.y)) * w
+
+
+func _update_stowed() -> void:
+	var want := {}
+	var inv := character.inventory
+	if inv:
+		for i in Inventory.HOTBAR:
+			var it := inv.get_slot(i)
+			if it == null or it.uid == character.state.held_uid or it.def() == null or it.def().equip_scene == null:
+				continue
+			var d := it.def()
+			if not (d.can_equip(ItemDefinition.EquipSlot.HIP) or d.can_equip(ItemDefinition.EquipSlot.BACK)):
+				continue
+			var bone := String(d.holster_bone)
+			if not want.has(bone):
+				want[bone] = it
+	for bone: String in _stowed.keys():
+		if not want.has(bone) or (want[bone] as ItemInstance).uid != int(_stowed[bone].uid):
+			var n: Node3D = _stowed[bone].node
+			if is_instance_valid(n):
+				n.queue_free()
+			_stowed.erase(bone)
+	for bone: String in want:
+		if _stowed.has(bone):
+			continue
+		var it: ItemInstance = want[bone]
+		var att := _attach_for(bone)
+		if att == null:
+			continue
+		var n := it.def().equip_scene.instantiate() as Node3D
+		att.add_child(n)
+		n.transform = it.def().holster_offset
+		_stowed[bone] = {"uid": it.uid, "node": n}
+	holster_node = _stowed["Hips"].node if _stowed.has("Hips") else null
+	back_node = null
+	for bone: String in _stowed:
+		if bone != "Hips":
+			back_node = _stowed[bone].node
+
+
+func _attach_for(bone: String) -> BoneAttachment3D:
+	if _stow_attach.has(bone):
+		return _stow_attach[bone]
+	var sk := character.skeleton
+	if sk == null or sk.find_bone(bone) < 0:
+		return null
+	var a := BoneAttachment3D.new()
+	a.name = bone + "StowAttach"
+	a.bone_name = bone
+	sk.add_child(a)
+	_stow_attach[bone] = a
+	return a
 
 
 ## Hands on a held prop; the owner's own client shows the predicted hold (the server's
@@ -189,19 +311,9 @@ func _hand_basis(hand: int, fingers: Vector3, palm: Vector3) -> Basis:
 	return dst * src.inverse()
 
 
-func _holster_item() -> ItemInstance:
-	var inv := character.inventory
-	if inv == null:
-		return null
-	for i in Inventory.HOTBAR:
-		var it := inv.get_slot(i)
-		if it and it.uid != character.state.held_uid and it.def() and it.def().can_equip(ItemDefinition.EquipSlot.HIP):
-			return it
-	return null
-
-
-## Make the first-person gun move like it's held: a figure-eight bob in step with the gait,
-## a lag behind fast look movement, and lowered and canted while sprinting. ADS keeps a little.
+## Make the first-person gun move like it's held: a small step bob of the hands in time with
+## the gait, canted and pulled in while sprinting. Where the barrel POINTS (the lag behind
+## turns, the sway, the sprint drop, recoil) is the simulated free aim, applied afterwards.
 func _gun_motion(gun: Transform3D, cam: Transform3D, delta: float, ads_e: float) -> Transform3D:
 	var s := character.state
 	var speed := Vector2(s.vel.x, s.vel.z).length()
@@ -213,27 +325,18 @@ func _gun_motion(gun: Transform3D, cam: Transform3D, delta: float, ads_e: float)
 	var amp := _bob_amp * lerpf(1.0, 0.15, ads_e)
 	var right := cam.basis.x
 	var up := cam.basis.y
-	var fwd := -cam.basis.z
 	var pos := right * sin(_bob_phase) * 0.011 * amp + up * -absf(cos(_bob_phase)) * 0.013 * amp
 	var roll := sin(_bob_phase) * 0.04 * amp
-	# Look lag: the gun trails quick turns a little and settles back.
-	var look := Vector2(character.input_source.live_yaw if character.input_source else 0.0, character.input_source.live_pitch if character.input_source else 0.0)
-	if is_nan(_last_look.x):
-		_last_look = look
-	var dl := Vector2(angle_difference(_last_look.x, look.x), look.y - _last_look.y) / maxf(delta, 0.001)
-	_last_look = look
-	_sway = _sway.lerp((dl * -0.012).limit_length(0.09), 1.0 - exp(-10.0 * delta))
-	var sway := _sway * lerpf(1.0, 0.3, ads_e)
-	pos += right * sway.x * 0.25 + up * -sway.y * 0.25
-	# Sprinting: gun down and canted in, out of the way.
+	# Sprinting: hands down and in, gun canted (the simulated free aim points it low).
 	var sprinting := s.has(MotorState.F_SPRINTING) and speed > character.profile.jog_speed * 0.9
 	_sprint_w = move_toward(_sprint_w, 1.0 if sprinting and ads_e < 0.1 else 0.0, delta * 5.0)
 	var sw := smoothstep(0.0, 1.0, _sprint_w)
-	pos += up * -0.07 * sw + right * -0.03 * sw * _side
-	var r := Basis(fwd, roll + 0.45 * sw * _side) * Basis(up, sway.x) * Basis(right, sway.y - 0.55 * sw)
+	pos += up * -0.05 * sw + right * -0.03 * sw * _side
+	# Roll about the barrel's own axis: cants the gun without changing where it points.
+	var axis := (gun.basis * Vector3.FORWARD).normalized()
 	var g := gun
-	g.basis = (r * g.basis).orthonormalized()
-	g.origin = gun.origin + pos                           # turn about the grip
+	g.basis = (Basis(axis, roll + 0.45 * sw * _side) * g.basis).orthonormalized()
+	g.origin = gun.origin + pos
 	return g
 
 
@@ -266,15 +369,20 @@ func _drive_hands(delta: float) -> void:
 		var cup := cam.basis.y
 		var aim_basis := Basis.looking_at(fwd, cup)
 		# Hip: low and to the right, toed in a touch so it converges on the crosshair ~20 m out.
-		var hip_pos := cam.origin + fwd * 0.42 + right * 0.16 * _side + cup * -0.17
+		var ho := held_def.fp_hip_offset
+		var hip_pos := cam.origin + fwd * ho.z + right * ho.x * _side + cup * ho.y
 		var hip_basis := Basis.looking_at((cam.origin + fwd * 20.0) - hip_pos, cup)
 		var hip_gun := Transform3D(hip_basis, hip_pos - hip_basis * rear.origin)
-		var ads_gun := Transform3D(aim_basis, cam.origin + fwd * 0.37 - aim_basis * rear.origin)
+		var ads_gun := Transform3D(aim_basis, cam.origin + fwd * held_def.fp_ads_distance - aim_basis * rear.origin)
 		var e := smoothstep(0.0, 1.0, ads)
 		var target_gun := hip_gun.interpolate_with(ads_gun, e)
 		target_gun = _gun_motion(target_gun, cam, delta, e)
 		target_gun.origin += target_gun.basis * (_recoil.value as Vector3) * lerpf(1.0, 0.5, e)
-		target_gun.basis = target_gun.basis * Basis(Vector3.RIGHT, (_recoil.value as Vector3).y * 0.25)
+		# Free aim: turn the gun onto the simulated gun direction - about the rear sight at the
+		# hip, about the eye when aiming (so the sights stay in line with the eye and the dot).
+		var rot := sway_rotation()
+		var pivot := (target_gun * rear.origin).lerp(cam.origin, e)
+		target_gun = Transform3D(rot, pivot - rot * pivot) * target_gun
 		var hand_target := target_gun * grip().affine_inverse()
 		var w := smoothstep(0.0, 1.0, _fp_w)
 		var gun_hand := HandIKModifier.Hand.RIGHT if _side == 1 else HandIKModifier.Hand.LEFT
@@ -292,12 +400,43 @@ func _drive_hands(delta: float) -> void:
 				_owns[h] = false
 	# Support hand follows the gun wherever it goes (two working hands only).
 	if ready and _side == 1 and UltraInjury.two_hands(s) and held_def and held_def.two_handed and held_def.support_offset != Transform3D.IDENTITY:
-		anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, gun * held_def.support_offset, 1.0, true, 10.0)
+		var sup := gun * held_def.support_offset
+		# A long gun held low can put the handguard grip out of the arm's reach: the hand
+		# slides back along the handguard (up to 15 cm) instead of floating off it.
+		sup = _within_reach(sup, (gun.basis * Vector3.BACK).normalized(), 0.15)
+		anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, sup, 1.0, true, 10.0)
 		_owns[HandIKModifier.Hand.LEFT] = true
 	elif _side == 1 and _owns[HandIKModifier.Hand.LEFT]:
 		anim.hand_ik.release(HandIKModifier.Hand.LEFT, 8.0)
 		_owns[HandIKModifier.Hand.LEFT] = false
 	_drive_reload(delta)
+
+
+var _left_reach := 0.0
+
+
+## Slide a left-hand target along `dir` (at most `max_slide` m) until the left arm can reach it.
+func _within_reach(t: Transform3D, dir: Vector3, max_slide: float) -> Transform3D:
+	var sk := character.skeleton
+	var ua := sk.find_bone("LeftUpperArm")
+	var la := sk.find_bone("LeftLowerArm")
+	var hb := sk.find_bone("LeftHand")
+	if ua < 0 or la < 0 or hb < 0:
+		return t
+	if _left_reach <= 0.0:
+		_left_reach = sk.get_bone_rest(la).origin.length() + sk.get_bone_rest(hb).origin.length()
+		_left_reach *= sk.global_basis.get_scale().x
+	# (The shoulder as animated, before IK: HandIK rolls the clavicle forward a little more
+	# when the arm comes up short, worth a few cm.)
+	var shoulder := sk.global_transform * sk.get_bone_global_pose(ua).origin
+	var r := _left_reach + 0.03
+	var out := t
+	var steps := 6
+	for k in steps:
+		if shoulder.distance_to(out.origin) <= r:
+			break
+		out.origin += dir * (max_slide / steps)
+	return out
 
 
 ## Reload. Third person: the clip as authored (with the fitted grip it reads right: gun up by

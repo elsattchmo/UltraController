@@ -103,7 +103,8 @@ func kick(pitch: float, yaw: float) -> void:
 	_kick.impulse(Vector2(yaw, pitch) * 30.0)
 
 
-## Recoil: ~30 % stays in the aim (you have to pull down), the rest springs back.
+## Recoil: the gun itself kicks in the simulation (free aim, UltraActionLayer._recoil); the
+## view gets a little: ~30 % stays in the aim (you have to pull down), a short shake on top.
 func _on_item_event(kind: StringName, _data: Dictionary) -> void:
 	if kind != &"fire" or character.input_source == null:
 		return
@@ -114,7 +115,7 @@ func _on_item_event(kind: StringName, _data: Dictionary) -> void:
 	var p := deg_to_rad(float(def.stat("recoil_pitch_deg", 2.0))) * lerpf(1.0, 0.6, ads)
 	var y := deg_to_rad(float(def.stat("recoil_yaw_deg", 0.5))) * randf_range(-1.0, 1.0)
 	character.input_source.add_aim_offset(y * 0.3, p * 0.3)
-	kick(p * 0.7, y * 0.7)
+	kick(p * 0.35, y * 0.35)
 	if character.input_source is LocalInputSource:
 		(character.input_source as LocalInputSource).rumble(0.3, 0.15, 0.08)
 

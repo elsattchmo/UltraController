@@ -11,6 +11,8 @@ Commands
   mirror           Make a left/right mirrored copy of an action (--action X --out Y).
   make-pistol      Rebuild the pistol model + markers and export assets/items/pistol/pistol.glb
                    (the same build the project shipped with).
+  make-rifle       Build the carbine (two-handed: pistol grip, handguard, stock, iron sights,
+                   magazine, markers) and export assets/items/rifle/rifle.glb.
   mixamo-test      Write intake/mixamo/<name>.fbx: the mannequin renamed to Mixamo bone names
                    with one action — exercises the Mixamo intake without a Mixamo account.
 
@@ -268,6 +270,144 @@ def cmd_make_pistol(args):
     log("wrote", out)
 
 
+class _Kit:
+    """Box / cylinder / marker helpers for procedural props (blender units = metres).
+    Authoring frame like the pistol: barrel toward -Y, up +Z; the root is turned 180 deg about Z
+    before export so the barrel ends up on Godot's -Z (forward) and authored -X on Godot's +X."""
+
+    def __init__(self, coll):
+        import bmesh
+        self.bmesh = bmesh
+        self.coll = coll
+
+    def mat(self, name, rgb, metal=0.0, rough=0.6):
+        m = bpy.data.materials.new(name)
+        m.use_nodes = True
+        bsdf = next(n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+        bsdf.inputs["Base Color"].default_value = (*rgb, 1)
+        bsdf.inputs["Metallic"].default_value = metal
+        bsdf.inputs["Roughness"].default_value = rough
+        m.diffuse_color = (*rgb, 1)
+        return m
+
+    def box(self, name, size, loc, rot=(0, 0, 0), material=None, parent=None, bevel=0.0015, taper=None):
+        me = bpy.data.meshes.new(name)
+        bm = self.bmesh.new()
+        self.bmesh.ops.create_cube(bm, size=1.0)
+        for v in bm.verts:
+            x, y, z = v.co.x * size[0], v.co.y * size[1], v.co.z * size[2]
+            if taper and v.co.z < 0:          # narrower / shorter at the bottom
+                x *= taper[0]
+                y *= taper[1]
+            v.co = Vector((x, y, z))
+        bm.to_mesh(me); bm.free()
+        o = bpy.data.objects.new(name, me)
+        self.coll.objects.link(o)
+        o.location = loc
+        o.rotation_euler = Euler([math.radians(r) for r in rot])
+        if material: me.materials.append(material)
+        if bevel > 0:
+            b = o.modifiers.new("Bevel", "BEVEL"); b.width = bevel; b.segments = 2
+        if parent:
+            o.parent = parent
+        return o
+
+    def cyl(self, name, r, depth, loc, rot, material, parent, segments=12, r2=None):
+        me = bpy.data.meshes.new(name)
+        bm = self.bmesh.new()
+        self.bmesh.ops.create_cone(bm, cap_ends=True, segments=segments, radius1=r, radius2=r if r2 is None else r2, depth=depth)
+        bm.to_mesh(me); bm.free()
+        o = bpy.data.objects.new(name, me)
+        self.coll.objects.link(o)
+        o.location = loc
+        o.rotation_euler = Euler([math.radians(x) for x in rot])
+        me.materials.append(material)
+        o.parent = parent
+        return o
+
+    def empty(self, name, loc, parent):
+        e = bpy.data.objects.new(name, None)
+        e.empty_display_type = 'ARROWS'; e.empty_display_size = 0.01
+        self.coll.objects.link(e)
+        e.location = loc
+        e.parent = parent
+        return e
+
+    def export(self, root, out):
+        root.matrix_world = Matrix.Rotation(math.pi, 4, 'Z')        # barrel -> glTF -Z (Godot forward)
+        bpy.context.view_layer.update()
+        for o in self.coll.objects:
+            o.select_set(True)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        bpy.ops.export_scene.gltf(filepath=out, use_selection=True, export_apply=True, export_yup=True, export_animations=False)
+        log("wrote", out)
+
+
+def cmd_make_rifle(args):
+    """A compact 5.56 carbine. Origin at the top of the pistol grip (like the pistol, so the
+    same grip fit holds it); the grip has the pistol's rake so the hand sits the same way."""
+    fresh_scene()
+    coll = bpy.data.collections.new("Rifle")
+    bpy.context.scene.collection.children.link(coll)
+    k = _Kit(coll)
+    black = k.mat("Rifle_Polymer", (0.04, 0.042, 0.045), 0.0, 0.7)
+    metal = k.mat("Rifle_Metal", (0.11, 0.115, 0.12), 0.8, 0.38)
+    tan = k.mat("Rifle_Furniture", (0.42, 0.36, 0.26), 0.0, 0.75)
+    magm = k.mat("Rifle_Magazine", (0.08, 0.08, 0.085), 0.35, 0.55)
+    dot = k.mat("Rifle_SightDot", (1.0, 0.45, 0.05), 0.0, 0.4)
+    root = bpy.data.objects.new("Rifle", None)
+    coll.objects.link(root)
+    bore = 0.055
+    # Receivers.
+    k.box("LowerReceiver", (0.028, 0.19, 0.036), (0, -0.025, 0.014), material=black, parent=root)
+    k.box("UpperReceiver", (0.030, 0.25, 0.046), (0, -0.035, bore + 0.002), material=metal, parent=root)
+    k.box("TopRail", (0.022, 0.25, 0.009), (0, -0.035, bore + 0.030), material=metal, parent=root, bevel=0.001)
+    k.box("ChargingHandle", (0.022, 0.024, 0.012), (0, 0.098, bore + 0.016), material=metal, parent=root)
+    k.box("EjectionPort", (0.004, 0.052, 0.017), (-0.0155, -0.022, bore + 0.004), material=black, parent=root, bevel=0.0)
+    k.box("ForwardAssist", (0.012, 0.022, 0.014), (-0.019, 0.045, bore + 0.006), material=metal, parent=root, bevel=0.001)
+    # Grip (same rake and place under the bore as the pistol's), trigger, guard.
+    k.box("GripBody", (0.030, 0.045, 0.105), (0, 0.012, -0.034), rot=(-16, 0, 0), material=black, parent=root, taper=(0.9, 0.9))
+    k.box("Trigger", (0.006, 0.006, 0.022), (0, -0.040, -0.006), rot=(-15, 0, 0), material=metal, parent=root)
+    k.box("GuardBottom", (0.012, 0.075, 0.006), (0, -0.052, -0.026), material=black, parent=root)
+    # Magazine well + a curved-looking (tapered, tilted) 30-round magazine.
+    k.box("MagWell", (0.032, 0.078, 0.046), (0, -0.098, -0.010), material=black, parent=root)
+    mag = k.box("Magazine", (0.024, 0.066, 0.175), (0, -0.112, -0.105), rot=(-14, 0, 0), material=magm, parent=root, taper=(1.0, 0.92))
+    k.box("MagBaseplate", (0.030, 0.070, 0.010), (0, 0, -0.090), material=black, parent=mag)
+    # Handguard (tan) with rails, barrel, gas block / front sight, muzzle device.
+    k.box("Handguard", (0.052, 0.30, 0.056), (0, -0.312, bore), material=tan, parent=root, bevel=0.004)
+    k.box("HandguardRail", (0.022, 0.29, 0.008), (0, -0.312, bore + 0.032), material=metal, parent=root, bevel=0.001)
+    k.box("HandStop", (0.016, 0.018, 0.022), (0, -0.215, bore - 0.036), material=black, parent=root)
+    k.cyl("Barrel", 0.0095, 0.22, (0, -0.57, bore), (90, 0, 0), metal, root)
+    k.box("FrontSightBase", (0.018, 0.024, 0.040), (0, -0.445, bore + 0.040), material=metal, parent=root)
+    k.box("FrontSightEarL", (0.003, 0.010, 0.020), (0.008, -0.445, bore + 0.068), material=metal, parent=root, bevel=0.0)
+    k.box("FrontSightEarR", (0.003, 0.010, 0.020), (-0.008, -0.445, bore + 0.068), material=metal, parent=root, bevel=0.0)
+    k.box("FrontSight", (0.0035, 0.004, 0.018), (0, -0.445, bore + 0.066), material=metal, parent=root, bevel=0.0)
+    k.box("DotF", (0.0035, 0.002, 0.0035), (0, -0.4425, bore + 0.073), material=dot, parent=root, bevel=0.0)
+    k.cyl("MuzzleDevice", 0.013, 0.05, (0, -0.705, bore), (90, 0, 0), metal, root, segments=8)
+    k.cyl("Bore", 0.0055, 0.051, (0, -0.7055, bore), (90, 0, 0), black, root)
+    # Rear sight: two short ears over a base; the notch is the gap between them.
+    k.box("RearSightBase", (0.024, 0.026, 0.016), (0, 0.072, bore + 0.040), material=metal, parent=root)
+    k.box("RearSightEarL", (0.004, 0.010, 0.016), (0.0075, 0.072, bore + 0.064), material=metal, parent=root, bevel=0.0)
+    k.box("RearSightEarR", (0.004, 0.010, 0.016), (-0.0075, 0.072, bore + 0.064), material=metal, parent=root, bevel=0.0)
+    k.box("DotL", (0.003, 0.002, 0.003), (0.0075, 0.0665, bore + 0.069), material=dot, parent=root, bevel=0.0)
+    k.box("DotR", (0.003, 0.002, 0.003), (-0.0075, 0.0665, bore + 0.069), material=dot, parent=root, bevel=0.0)
+    # Stock: buffer tube, body, butt pad.
+    k.cyl("BufferTube", 0.016, 0.21, (0, 0.19, bore - 0.004), (90, 0, 0), metal, root)
+    k.box("Stock", (0.040, 0.165, 0.062), (0, 0.272, bore - 0.020), material=tan, parent=root, bevel=0.004)
+    k.box("StockCheek", (0.036, 0.11, 0.016), (0, 0.255, bore + 0.016), material=tan, parent=root, bevel=0.003)
+    k.box("ButtPad", (0.044, 0.018, 0.115), (0, 0.362, bore - 0.034), material=black, parent=root, bevel=0.003)
+    # Markers (Godot reads them by name). Sight line: rear aperture -> front post, both at
+    # bore + 0.073.
+    sight = bore + 0.073
+    for name, loc in (("M_Grip", (0, 0, 0)), ("M_SupportGrip", (0, -0.29, bore - 0.028)),
+                      ("M_Muzzle", (0, -0.732, bore)), ("M_RearSight", (0, 0.072, sight)),
+                      ("M_FrontSight", (0, -0.445, sight)), ("M_EjectPort", (-0.020, -0.022, bore + 0.006)),
+                      ("M_MagWell", (0, -0.100, -0.040)), ("M_Stock", (0, 0.371, bore - 0.020)),
+                      ("M_Holster", (0, -0.17, bore))):
+        k.empty(name, loc, root)
+    k.export(root, args.out or os.path.join(PROJECT, "assets", "items", "rifle", "rifle.glb"))
+
+
 def main():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     p = argparse.ArgumentParser(prog="ultra_blender")
@@ -283,12 +423,14 @@ def main():
     m.add_argument("--out", required=True)
     mp = sub.add_parser("make-pistol")
     mp.add_argument("--out")
+    mr = sub.add_parser("make-rifle")
+    mr.add_argument("--out")
     mt = sub.add_parser("mixamo-test")
     mt.add_argument("--action")
     mt.add_argument("--name")
     a = p.parse_args(argv)
     {"make-edit": cmd_make_edit, "export-actions": cmd_export_actions, "mirror": cmd_mirror,
-     "make-pistol": cmd_make_pistol, "mixamo-test": cmd_mixamo_test}[a.cmd](a)
+     "make-pistol": cmd_make_pistol, "make-rifle": cmd_make_rifle, "mixamo-test": cmd_mixamo_test}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -71,6 +71,14 @@ var trav_kind: int = 0             ## UltraTraversal.Move
 ## Water.
 var breath: float = 20.0           ## seconds of air left
 var teeter: float = 0.0            ## seconds perched on an edge over a drop (loses balance)
+## Free aim (weapon inertia / sway, UltraActionLayer._free_aim): the gun points along the aim
+## plus `sway` (x = yaw, y = pitch, radians), a damped spring (`sway_v`, rad/s) that lags turns,
+## bobs with the gait (`sway_phase`) and takes the recoil. `aim_prev_*` is last tick's aim.
+var sway := Vector2.ZERO
+var sway_v := Vector2.ZERO
+var sway_phase: float = 0.0
+var aim_prev_yaw: float = 0.0
+var aim_prev_pitch: float = 0.0
 
 
 func has(f: int) -> bool:
@@ -110,6 +118,8 @@ func copy_from(o: MotorState) -> void:
 	trav_id = o.trav_id; trav_s = o.trav_s; trav_kind = o.trav_kind
 	breath = o.breath
 	teeter = o.teeter
+	sway = o.sway; sway_v = o.sway_v; sway_phase = o.sway_phase
+	aim_prev_yaw = o.aim_prev_yaw; aim_prev_pitch = o.aim_prev_pitch
 
 
 ## Error metric used by reconciliation (metres, plus a penalty for discrete mismatches).
@@ -122,6 +132,7 @@ func diff(o: MotorState) -> float:
 	if severed != o.severed or limb_hp != o.limb_hp:
 		d += 1.0
 	d += absf(action_t - o.action_t) + absf(hp - o.hp) * 0.01
+	d += (sway - o.sway).length() * 2.0 + (sway_v - o.sway_v).length() * 0.05
 	return d
 
 
@@ -172,6 +183,11 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_u8(trav_kind)
 	buf.put_u16(clampi(int(roundf(breath * 100.0)), 0, 65535))
 	buf.put_u8(clampi(int(roundf(teeter * 100.0)), 0, 255))
+	buf.put_16(_q(sway.x, 10000.0)); buf.put_16(_q(sway.y, 10000.0))
+	buf.put_16(_q(sway_v.x, 1000.0)); buf.put_16(_q(sway_v.y, 1000.0))
+	buf.put_u16(int(roundf(fposmod(sway_phase, TAU) / TAU * 65536.0)) % 65536)
+	buf.put_u16(int(roundf(fposmod(aim_prev_yaw, TAU) / TAU * 65536.0)) % 65536)
+	buf.put_16(int(roundf(clampf(aim_prev_pitch, -1.55, 1.55) * 20000.0)))
 
 
 func decode(buf: StreamPeerBuffer) -> void:
@@ -222,6 +238,11 @@ func decode(buf: StreamPeerBuffer) -> void:
 	trav_kind = buf.get_u8()
 	breath = buf.get_u16() / 100.0
 	teeter = buf.get_u8() / 100.0
+	sway = Vector2(buf.get_16() / 10000.0, buf.get_16() / 10000.0)
+	sway_v = Vector2(buf.get_16() / 1000.0, buf.get_16() / 1000.0)
+	sway_phase = buf.get_u16() / 65536.0 * TAU
+	aim_prev_yaw = buf.get_u16() / 65536.0 * TAU
+	aim_prev_pitch = buf.get_16() / 20000.0
 
 
 ## Round-trip through the codec, so a predicting client and the server hold the same bits.

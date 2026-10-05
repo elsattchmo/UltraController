@@ -6,6 +6,7 @@ extends Resource
 
 enum Kind { MISC, FIREARM, AMMO, KEY, CONSUMABLE, THROWABLE, TOOL }
 enum EquipSlot { NONE = 0, MAIN_HAND = 1, OFF_HAND = 2, HIP = 4, BACK = 8 }
+enum FireMode { SEMI, AUTO }
 
 @export var id: StringName
 @export var display_name := ""
@@ -28,11 +29,45 @@ enum EquipSlot { NONE = 0, MAIN_HAND = 1, OFF_HAND = 2, HIP = 4, BACK = 8 }
 ## LeftHand bone transform in the item's frame (support hand), or identity = one-handed.
 @export var support_offset := Transform3D.IDENTITY
 @export var two_handed := false
-## Item transform in the Hips bone frame when holstered.
+## Item transform in `holster_bone`'s frame when holstered (hip holster, slung on the back).
 @export var holster_offset := Transform3D.IDENTITY
+@export var holster_bone := &"Hips"
 ## Upper-body animation roles while held: {"idle": role, "aim": role, "fire": role, "reload": role}
 @export var anim_roles: Dictionary = {}
+## AnimationSet roles this item brings along: role -> clip, or a list of clips (first one the
+## character has wins). Only used for roles the character's AnimationSet doesn't define, so a
+## project can still map them to its own clips there.
+@export var anim_clips: Dictionary = {}
+## Where the "aim" clip points the gun (degrees, x = yaw to the left, y = pitch up) relative to
+## the model's straight ahead; third person turns the upper body back by it so the barrel
+## follows the aim. Measured by tools/build_items.gd.
+@export var aim_clip_offset := Vector2.ZERO
 @export_range(0.05, 2.0, 0.01) var equip_time := 0.35
+
+@export_group("Firearm")
+@export var fire_mode := FireMode.SEMI
+## First person, hip: where the rear sight sits relative to the eye (x right, y up, z forward).
+@export var fp_hip_offset := Vector3(0.16, -0.17, 0.42)
+## First person, aiming down sights: rear sight this far in front of the eye.
+@export_range(0.03, 0.8, 0.005) var fp_ads_distance := 0.37
+
+@export_group("Free aim")
+## The gun has its own direction: aim + an offset on a damped spring (MotorState.sway).
+## Fraction of a turn the gun doesn't follow straight away (inertia: heavier = more lag).
+@export_range(0.0, 1.0, 0.01) var sway_inertia := 0.3
+## How fast the gun swings back onto the aim (spring frequency, Hz) and its damping ratio.
+@export_range(0.2, 10.0, 0.05) var sway_return_hz := 2.4
+@export_range(0.05, 2.0, 0.01) var sway_damping := 0.75
+## Free-aim zone: how far (degrees) the gun may drift from the aim before it drags along.
+@export_range(0.0, 30.0, 0.1) var free_aim_deg := 4.0
+## Movement / breathing sway multiplier (1 = pistol).
+@export_range(0.0, 5.0, 0.01) var sway_amount := 1.0
+## Sway, lag and free-aim zone multiplier while aiming down sights.
+@export_range(0.0, 1.0, 0.01) var ads_sway_mult := 0.35
+## Upward kick of the gun per shot (degrees, the spring takes it back).
+@export_range(0.0, 20.0, 0.05) var recoil_gun_deg := 2.0
+## Sprinting carries the gun low: pitch (down, degrees) and yaw (toward the off side).
+@export var sprint_lower_deg := Vector2(10.0, -18.0)
 
 @export_group("Behaviour")
 ## Free-form numbers for the item's behaviour (fire interval, magazine size, damage...).

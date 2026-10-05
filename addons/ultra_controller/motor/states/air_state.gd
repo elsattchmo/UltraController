@@ -2,6 +2,7 @@ extends MotorStateHandler
 ## JUMP / FALL: gravity shaping (variable height, heavier fall), momentum-preserving air control.
 
 const Id := MotorState.Id
+const AIR_RAGDOLL_LEAD := 0.45      ## s before a ragdoll-hard landing that the body goes limp
 
 
 func enter(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
@@ -10,10 +11,20 @@ func enter(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 
 
 func next(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
+	# A fall we know we won't land on our feet: go limp in the air (keeping all our speed), so
+	# the body hits the ground tumbling instead of stopping dead and crumpling.
+	if s.state == Id.FALL and not s.is_grounded() and s.vel.y < -4.0:
+		var pred := m.predict_impact(s)
+		if not pred.is_empty() and float(pred.speed) > m.profile.hard_land_speed 				and (float(pred.time) < AIR_RAGDOLL_LEAD or float(pred.speed) > m.profile.hard_land_speed * 1.35):
+			s.trav_from = s.vel
+			return Id.RAGDOLL
 	if s.is_grounded() and s.state_time > 0.0:
 		var impact := s.land_impact
 		var moving_fwd := i.move.y > 0.5
-		if impact > m.profile.hard_land_speed * 0.75 and moving_fwd and i.has(InputFrame.B_CROUCH) and m.profile.enable_roll:
+		var run_speed := m.horizontal(s.vel).length()
+		# Landing hard while running forward: roll out of it and keep going (no dead stop).
+		var roll_out := impact > m.profile.hard_land_speed * 0.55 and i.move.y > 0.3 and run_speed > 2.5
+		if (roll_out or (impact > m.profile.hard_land_speed * 0.75 and moving_fwd and i.has(InputFrame.B_CROUCH))) and m.profile.enable_roll:
 			var idx := m.anim_set.rm_index(&"roll") if m.anim_set else -1
 			if idx >= 0:
 				s.rm_clip = idx

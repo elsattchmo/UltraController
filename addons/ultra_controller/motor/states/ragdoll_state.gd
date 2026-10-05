@@ -10,7 +10,9 @@ const GET_UP_TIME := 2.8
 
 func enter(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 	if s.state == Id.RAGDOLL:
-		m.body.velocity = Vector3(s.trav_from.x, maxf(s.trav_from.y, 0.0), s.trav_from.z)
+		# (Going limp mid-fall keeps the fall speed; a shove from the ground never pushes down.)
+		var vy := s.trav_from.y if s.trav_from.y < -1.0 and not s.is_grounded() else maxf(s.trav_from.y, 0.0)
+		m.body.velocity = Vector3(s.trav_from.x, vy, s.trav_from.z)
 		s.set_flag(MotorState.F_GROUNDED, false)
 		s.set_flag(MotorState.F_SPRINTING, false)
 	else:
@@ -38,8 +40,10 @@ func tick(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 	var v := m.body.velocity
 	if s.state == Id.RAGDOLL:
 		m.set_height(s, move_toward(s.height, LIE_HEIGHT, 4.0 * m.dt))
-		# A body tumbling along the ground stops quickly.
-		var hv := m.horizontal(v).move_toward(Vector3.ZERO, (11.0 if s.is_grounded() else 1.5) * m.dt)
+		# A body tumbling along the ground keeps rolling while it's fast, then stops quickly.
+		var sp := m.horizontal(v).length()
+		var decel := lerpf(10.0, 3.5, smoothstep(1.5, 5.0, sp)) if s.is_grounded() else 1.5
+		var hv := m.horizontal(v).move_toward(Vector3.ZERO, decel * m.dt)
 		v = Vector3(hv.x, v.y, hv.z)
 	else:
 		var want := m.profile.crawl_height if UltraInjury.must_crawl(s) else m.profile.stand_height

@@ -1,0 +1,60 @@
+[gd_resource type="Resource" script_class="ItemDefinition" format=3]
+
+[ext_resource type="PackedScene" path="res://assets/items/rifle/rifle.glb" id="1_jvcrb"]
+[ext_resource type="Script" path="res://addons/ultra_controller/items/item_definition.gd" id="2_vsd0n"]
+[ext_resource type="PackedScene" path="res://assets/items/rifle/rifle_world.tscn" id="3_t776o"]
+
+[resource]
+script = ExtResource("2_vsd0n")
+id = &"rifle"
+display_name = "Carbine"
+description = "Select-fire 5.56 mm carbine. 30-round magazine."
+kind = 1
+mass = 3.2
+world_scene = ExtResource("3_t776o")
+equip_scene = ExtResource("1_jvcrb")
+equip_slots = 9
+grip_offset = Transform3D(0.00056832284, 0.9540657, 0.29959655, 0.17491671, 0.294883, -0.9393871, -0.984583, 0.052938208, -0.1667141, 0.03322041, 0.13182968, 0.014325455)
+support_offset = Transform3D(-0.42926103, 0.10355608, 0.89722407, -0.732321, -0.62133646, -0.2786525, 0.5286219, -0.7766708, 0.34255186, -0.059114486, 0.09687626, -0.23765467)
+two_handed = true
+holster_offset = Transform3D(0.8262703, 0.22997542, -0.5141873, -0.5602435, 0.24097757, -0.7925004, -0.058347955, 0.94288975, 0.3279549, -0.15296769, -0.2398752, -0.11349854)
+holster_bone = &"UpperChest"
+anim_roles = {
+"aim": "rifle_aim",
+"fire": "rifle_aim",
+"idle": "rifle_idle",
+"reload": "rifle_reload"
+}
+anim_clips = {
+"rifle_aim": ["mixamo/Rifle_Idle_Aiming", "Pistol_Aim_Neutral"],
+"rifle_idle": ["mixamo/Rifle_Idle", "Pistol_Idle"],
+"rifle_reload": ["mixamo/Rifle_Reload", "Pistol_Reload"]
+}
+aim_clip_offset = Vector2(15.3, 2.3)
+equip_time = 0.6
+fire_mode = 1
+fp_hip_offset = Vector3(0.1, -0.15, 0.2)
+fp_ads_distance = 0.15
+sway_inertia = 0.5
+sway_return_hz = 1.6
+sway_damping = 0.7
+free_aim_deg = 6.0
+sway_amount = 1.35
+ads_sway_mult = 0.3
+recoil_gun_deg = 1.1
+sprint_lower_deg = Vector2(14, -24)
+stats = {
+"ads_fov": 52.0,
+"ads_spread_deg": 0.06,
+"ammo": "ammo_556",
+"damage": 30.0,
+"fire_interval": 0.092,
+"impulse": 7.0,
+"mag_size": 30,
+"range": 300.0,
+"recoil_pitch_deg": 0.9,
+"recoil_yaw_deg": 0.35,
+"reload_commit": 1.9,
+"reload_time": 2.6,
+"spread_deg": 1.4
+}

@@ -376,3 +376,67 @@ func test_rope_taut_when_held() -> void:
 	await ticks(20)
 	info("let go: rope end moved %.2f m in 0.33 s" % rope.point_at(rope.length).distance_to(p0))
 	check(rope.point_at(rope.length).distance_to(p0) > 0.3, "let go, the rope swings on")
+
+
+## Swinging into a loose prop knocks it away (and you keep swinging).
+func test_swing_knocks_props() -> void:
+	var c := spawn("parkour_rope", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	await drive(c, 200, func(_k: int, ch: UltraCharacter) -> InputFrame:
+		return frame(Vector2(0, 1), InputFrame.B_SPRINT | (InputFrame.B_JUMP if ch.state.pos.z < -55.4 and ch.state.is_grounded() else 0)),
+		func(ch: UltraCharacter) -> bool: return ch.state.state == Id.ROPE or ch.state.pos.y < 2.0)
+	if c.state.state != Id.ROPE:
+		check(false, "caught the rope")
+		return
+	await drive(c, 240, func(_k: int, ch: UltraCharacter) -> InputFrame:
+		return frame(Vector2(0, 1.0 if ch.state.vel.z < 0.0 else -1.0)), func(_ch: UltraCharacter) -> bool: return false)
+	var rope := UltraRope.find(c.state.trav_id)
+	var L := c.state.trav_s + 1.95
+	var bottom := rope.anchor() + Vector3.DOWN * (L - 1.0)
+	var rb := RigidBody3D.new()
+	rb.mass = 5.0
+	rb.gravity_scale = 0.0
+	rb.collision_layer = UltraLayers.WORLD_DYNAMIC
+	rb.collision_mask = UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC | UltraLayers.CHARACTER
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3.ONE * 0.4
+	cs.shape = bs
+	rb.add_child(cs)
+	add_child(rb)
+	rb.global_position = bottom
+	var start := rb.global_position
+	await drive(c, 150, func(_k: int, ch: UltraCharacter) -> InputFrame:
+		return frame(Vector2(0, 1.0 if ch.state.vel.z < 0.0 else -1.0)), func(_ch: UltraCharacter) -> bool: return rb.global_position.distance_to(start) > 1.5)
+	info("crate knocked %.2f m (speed %.1f m/s); still on the rope: %s" % [rb.global_position.distance_to(start), rb.linear_velocity.length(), c.state.state == Id.ROPE])
+	check(rb.global_position.distance_to(start) > 1.0, "the swing knocks the crate away")
+	check(c.state.state == Id.ROPE, "and you keep swinging")
+	rb.queue_free()
+
+
+## Looking up while on a ladder turns the head (and a little of the chest): the chest stays at
+## the ladder and the hands stay on the rungs.
+func test_ladder_look_up_keeps_hands_on() -> void:
+	var c := spawn("parkour_ladder")
+	await ticks(3)
+	await drive(c, 400, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2(0, 1)),
+		func(ch: UltraCharacter) -> bool: return ch.state.state == Id.LADDER and ch.state.state_time > 1.0)
+	var sk := c.skeleton
+	var lad := UltraLadder.find(c.state.trav_id)
+	var chest := sk.find_bone("Chest")
+	var res := {}
+	for pitch: float in [0.0, 1.2]:
+		await drive(c, 60, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2.ZERO, 0, 0.0, pitch), func(_ch: UltraCharacter) -> bool: return false)
+		var out := [0.0, 0.0]
+		var grab := func() -> void:
+			var p := sk.global_transform * sk.get_bone_global_pose(chest).origin
+			out[0] = (p - lad.global_position).dot(lad.normal())
+			out[1] = maxf(c.anim.hand_ik.last_error[0], c.anim.hand_ik.last_error[1])
+		sk.skeleton_updated.connect(grab)
+		await get_tree().process_frame
+		await get_tree().process_frame
+		sk.skeleton_updated.disconnect(grab)
+		res[pitch] = out.duplicate()
+	info("chest out from the ladder: level %.2f m, looking up %.2f m; hand IK error %.3f / %.3f m" % [res[0.0][0], res[1.2][0], res[0.0][1], res[1.2][1]])
+	check(absf(res[1.2][0] - res[0.0][0]) < 0.08, "looking up doesn't pull the chest off the ladder")
+	check(res[1.2][1] < 0.03, "the hands stay on the rungs")

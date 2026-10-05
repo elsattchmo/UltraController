@@ -54,7 +54,7 @@ func tick(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 		var hard := s.has(MotorState.F_HARD_LANDING)
 		var recover := m.profile.hard_land_recover_time if hard else m.profile.land_recover_time
 		var k := clampf(s.state_time / maxf(recover, 0.01), 0.0, 1.0)
-		speed *= lerpf(0.15 if hard else 0.7, 1.0, k)
+		speed *= lerpf(0.15 if hard else 0.85, 1.0, k)      # a landing keeps most of its momentum
 	var wish := i.move_world(i.yaw)
 	var hv := m.accelerate_ground(s, wish, speed, m.floor_friction)
 	m.body.velocity = Vector3(hv.x, minf(m.body.velocity.y, 0.0), hv.z)

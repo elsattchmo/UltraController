@@ -63,7 +63,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   Every rope swings and climbs (Kind is legacy): looking level, forward/back pumps; looking
   up/down > 25 deg, forward/back climbs toward the look (`UltraRope.climb_input`). The rope
   body collides (`test_move`): walls stop the swing, feet meeting the ground stand you up.
-  Swing period from the centre of mass (gravity scaled by L / (grip + 1 m)).
+  Swing period from the centre of mass (gravity scaled by L / (grip + 1 m)). Swinging into a
+  loose prop transfers momentum along the contact (profile.mass vs prop mass).
   The drawn rope (UltraRope, presentation) is a verlet chain at 120 Hz: taut from anchor to the
   climber's hands, free tail; floors are a height clamp inside the solve (+ static friction),
   walls a swept ray; characters (holder: a slim body capsule) and moving props push it;
@@ -110,6 +111,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   starts at the ragdoll's hips and yaw and eases onto the capsule. GET_UP_TIME 2.8. During
   GET_UP the neck/head are low-passed against the chest (`BodyDynamicsModifier.head_calm`):
   the prone clip, played 1.4x, whips the head.
+- Climbing / hanging / ropes: looks go to the neck and head (`spine_aim_scale` 0.15, pitch
+  <= 0.95 rad) so the chest and hands stay on the wall.
 - First person while down (RAGDOLL/DEAD/GET_UP): the camera is the head's real eye pushed
   15 cm out of the face (swept clear of the floor), view pitch >= -50 deg and roll <= 25 deg
   (`_tame_view`: heading from the top of the head when looking straight down, roll measured
@@ -117,11 +120,17 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   the view follows the head loosely (rate-limited 90 deg/s) and hands back to your aim.
 - Body materials dither away within 0.15-0.27 m of any camera (`_near_fade_mat`); the body and
   head meshes are both capped (`UltraMeshCap`, skin-coloured).
-- Walking never blends the walk with a side-step: below ~45 deg off forward the walk plays with
-  the hips turned, beyond it the side-step (hysteresis 38/52 deg). Side-steps are Mixamo
-  Strafe_Walk_L/R (1.62 m/s): slower strafing stays ON the side-step point and slows its cycle
-  (off-point blends mixed in walk + backpedal: the legs popped and skated). Brisk 1.75x points
-  only exist for short shuffle clips (< 1 m/s). Runs warp the hips from 2.2 m/s.
+- Ground locomotion = 8-way (`AnimDriver._build_eight_way`, roles e_walk_*/e_run_*/e_sprint_*
+  -> Mixamo Rifle 8-Way pack R_*; one capture, all 1.0 s / 0.5 s cycles, raw clips already in
+  step: their plant_phase is 0). The pack is bladed (pelvis ~35 deg off travel), so each gait's
+  clips are turned by the gait's MEAN hip facing (per-clip turns bunch directions up) - the
+  ring stays 45 deg apart with a square-on body. Playback: the nearest clip direction with the
+  hips turned the rest (<= 22.5 deg), switching with 6 deg hysteresis + inertial blend (mixing
+  two neighbours across the sector shortened the stride: skating). Slower than the walk ring:
+  on the ring, cycle slowed. Upper body: a filtered Blend2 "relax" puts the idle on top; the
+  arms swing from the legs (`BodyDynamicsModifier.arm_swing`). Fallbacks: 4-way (u_* roles)
+  then the classic walk/strafe space. Mixamo clips can carry a stance: check hip/shoulder
+  facing with `tools/measure_mixamo.gd` (Strafe_Walk_L turns the hips 68 deg!).
 - `knock_down` / death set state.vel from the push (they run outside a motor step).
 - Upper-body item clips can be mirrored at runtime (`UltraAnimMirror`; the skeleton is mirror
   symmetric). `BodyDynamicsModifier.item_hips_yaw` turns the spine by the item clip's own hips
@@ -138,7 +147,11 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Stepping down a stair keeps you grounded (`UltraMotor._snap_down`, a ray under the capsule's
   centre; never on a TickPlatform - a raycast can see its pose a frame stale during replay);
   the fall clip waits 0.15 s of real air before showing.
-- Hard landings (> hard_land_speed 13.5 m/s, ~9 m) crumple into RAGDOLL and get up.
+- Hard landings (> hard_land_speed 13.5 m/s, ~9 m): falling, `UltraMotor.predict_impact`
+  (world rays straight down + where the arc lands; not water / platforms) goes RAGDOLL in the
+  air 0.45 s before impact (at once if > 1.35x) keeping the full velocity; on the ground the
+  ragdoll capsule keeps rolling while fast (decel 3.5 -> 10 m/s2). Hard-but-OK landings at a
+  run (> 0.55x, moving forward) roll out (ROOT_MOTION roll); LAND keeps 85 % speed.
 - Edge balance (`UltraMotor.update_balance`, after every ground move): nothing under the
   capsule's middle within a step and a drop > `balance_drop` (0.45 m) below = perched on a
   lip. Walking out over the drop steps off (normal FALL); stepping back recovers; otherwise
@@ -186,6 +199,15 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Holding: two-handed props ride against the chest within reach; palms go flat on the side
   faces (`_hands_on_prop`, `UltraGrab.support/surface_point`, HandIK `open`). Fresh grabs get
   0.8 s to bring the prop in; the hold only breaks after 0.4 s out of reach.
+- Free aim (Arma/Sandstorm): the gun points along aim + `MotorState.sway` (damped spring:
+  turning lags it, gait bob / sprint lowering / breathing push it, ADS / crouch calm it,
+  recoil kicks it; tunables on ItemDefinition). Deterministic in the action layer; shots go
+  along `gun_dir()`. HUD: crosshair = look, dot = projected gun ray. A READY gun fires in any
+  state except the two-handed (stowed) ones. Remote players' sway isn't in snapshots yet.
+- Rifle ("Carbine", `rifle`): procedural model (`ultra_blender.py make-rifle`), slung on the
+  UpperChest, AUTO fire, support hand IK'd to the handguard, roles rifle_idle/aim/reload; its
+  bladed clip is compensated by `ItemDefinition.aim_clip_offset` (zero it if a stance turn is
+  ever added for item clips in the driver).
 - Demo playground has infinite ammo (`UltraActionLayer.infinite_ammo`; `--limited-ammo` off).
 - `teleport()` drops any traversal state (else a scripted move drags you back).
 - FP eye is swept from the capsule axis (`CameraRig._fp_guard`): the head bone dips into ledges.
@@ -236,6 +258,10 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Round-trip test (m1_import.test_intake_roundtrip): Blender path exact, Mixamo FBX path < 5 cm.
 - Some Mixamo clips are authored facing away (Ladder_Climb: hips yaw 177 deg) or off the ground;
   `_refit` handles both. Slide_Start is a whole slide (down and up): only its first 0.4 s is used.
+- Mixamo downloads: the export status is per character (one job at a time): run exports
+  strictly one after another and only accept a link whose file name matches the clip; links
+  expire in 5 min - export in groups of ~5 and fetch right away. Clip measuring helpers:
+  tools/anim_measure.gd (used by build_animset.gd and measure_mixamo.gd).
 - Mixamo names bones per character (`mixamorig:`, `mixamorig1:` ...): the intake detects the
   prefix and makes a matching bone map (`mixamo_humanoid_<prefix>.tres`). A clip that imports
   with 0 tracks means the bone map didn't match.

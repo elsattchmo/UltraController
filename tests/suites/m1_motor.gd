@@ -267,3 +267,47 @@ func test_edge_balance() -> void:
 		states[MotorState.Id.keys()[c.state.state]] = true
 	info("step back: %s, pos %s" % [states.keys(), c.state.pos])
 	check(not states.has("RAGDOLL") and c.state.pos.y > 0.9 and c.state.pos.x < 65.0, "stepping back from the edge keeps you on top")
+
+
+## A drop you won't land on your feet: the body goes limp in the air (before touching down)
+## and keeps its speed, tumbling on along the ground instead of stopping dead.
+func test_fall_ragdolls_mid_air_and_tumbles_on() -> void:
+	var c := spawn("drop_9", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	bot(c).set_steps([{"ticks": 60, "move": FWD, "buttons": InputFrame.B_SPRINT}, {"ticks": 400}])
+	var limp_y := INF
+	var touch := Vector3.INF
+	var rest := Vector3.ZERO
+	for i in 460:
+		await ticks(1)
+		if limp_y == INF and c.state.state == MotorState.Id.RAGDOLL:
+			limp_y = c.state.pos.y
+		if limp_y != INF and touch == Vector3.INF and c.state.is_grounded():
+			touch = c.state.pos
+		if c.state.state == MotorState.Id.GET_UP and rest == Vector3.ZERO:
+			rest = c.state.pos
+	var slide := Vector2(rest.x - touch.x, rest.z - touch.z).length() if touch != Vector3.INF else 0.0
+	info("went limp at y %.2f (ground 0); tumbled %.2f m after touching down" % [limp_y, slide])
+	check(limp_y > 0.6 and limp_y < 9.0, "goes limp in the air, before hitting the ground")
+	check(slide > 1.0, "keeps its momentum along the ground (no dead stop)")
+
+
+## A hard landing you can take while running: roll out of it and keep going.
+func test_hard_landing_rolls_out_at_a_run() -> void:
+	var c := spawn("drop_4", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	bot(c).set_steps([{"ticks": 300, "move": FWD, "buttons": InputFrame.B_SPRINT}])
+	var states := {}
+	var min_speed_after := INF
+	var landed := false
+	for i in 300:
+		await ticks(1)
+		states[MotorState.Id.keys()[c.state.state]] = true
+		if landed and c.state.state != MotorState.Id.ROOT_MOTION:
+			min_speed_after = minf(min_speed_after, Vector2(c.state.vel.x, c.state.vel.z).length())
+		landed = landed or (c.state.is_grounded() and states.has("FALL"))
+		if landed and states.has("ROOT_MOTION") and c.state.state == MotorState.Id.MOVE and c.state.state_time > 0.5:
+			break
+	info("4 m drop at a sprint: %s; slowest after the roll %.2f m/s" % [states.keys(), min_speed_after])
+	check(states.has("ROOT_MOTION") and not states.has("RAGDOLL"), "rolls out of the landing")
+	check(min_speed_after > 1.0, "and keeps moving")

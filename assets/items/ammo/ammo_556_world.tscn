@@ -1,0 +1,25 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/items/world_item.gd" id="1_ocfel"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_p144g"]
+albedo_color = Color(0.42, 0.36, 0.2, 1)
+metallic = 0.3
+roughness = 0.5
+
+[sub_resource type="BoxMesh" id="BoxMesh_e3ikj"]
+size = Vector3(0.18, 0.09, 0.11)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_ii4ki"]
+size = Vector3(0.18, 0.09, 0.11)
+
+[node name="Ammo556" type="RigidBody3D" unique_id=1527970662]
+script = ExtResource("1_ocfel")
+item_id = &"ammo_556"
+
+[node name="Visual" type="MeshInstance3D" parent="." unique_id=1908620513]
+material_override = SubResource("StandardMaterial3D_p144g")
+mesh = SubResource("BoxMesh_e3ikj")
+
+[node name="Shape" type="CollisionShape3D" parent="." unique_id=635098346]
+shape = SubResource("BoxShape3D_ii4ki")
