@@ -108,10 +108,30 @@ func _pool(w: Node3D) -> void:
 	b._label(p, "BOATHOUSE (blue key)", door_at + Vector3(0, 2.7, -0.2), 52)
 	m4._world_item(p, "res://assets/items/ammo/ammo_9mm_world.tscn", Vector3(59, 0.3, 101), 48)
 	m4._world_item(p, "res://assets/items/medkit/medkit_world.tscn", Vector3(61, 0.3, 101), 2)
+	_swing(p)
 	b._marker("pool", Vector3(49, 0.1, 65.5), 180)
 	b._marker("pool_deep_side", Vector3(41, 0.1, 86), -90)
 	b._marker("dive_tower", Vector3(49, 5.05, 94.6), 0)
 	b._marker("boathouse", door_at + Vector3(0, 0.1, -2.5), 180)
+
+
+## Rope swing: a launch deck on the west side and a swing rope at the pool's edge - a running
+## jump off the deck catches it, the swing carries you out over the deep end; let go (jump)
+## and drop in. Hit the water hard enough and you're knocked limp for a moment.
+func _swing(p: Node3D) -> void:
+	var top := 2.2
+	_slab(p, "SwingDeck", 33.5, 39.0, 81.0, 85.0, 0, top, b.grid_accent)
+	# Stairs up from the west.
+	for i in 6:
+		var h := top * (i + 1) / 7.0
+		_slab(p, "SwingStep%d" % i, 26.5 + i * 1.15, 27.65 + i * 1.15, 81.5, 84.5, 0, h, b.grid)
+	var anchor := Vector3(41.6, 9.0, 83.0)
+	m6._rope(p, "PoolSwingRope", anchor, 6.8, 0)
+	# Frame: two posts carrying the beam the rope hangs from.
+	for z in [81.9, 84.1]:
+		b._block(p, "SwingPost%d" % int(z), Vector3(0.3, anchor.y + 0.45, 0.3), anchor.x, z, anchor.y + 0.45, b.grid_dark)
+	b._label(p, "ROPE SWING  (run, jump, swing, let go)", Vector3(36.0, top + 2.2, 83.0), 44, -90)
+	b._marker("pool_swing", Vector3(34.5, top + 0.05, 83.0), -90)
 
 
 func _grotto(w: Node3D) -> void:

@@ -252,7 +252,13 @@ func target_ground_speed(s: MotorState, input: InputFrame) -> float:
 			speed = profile.crouch_speed
 		_:
 			var forwardish := input.move.y > 0.45 * mag
-			if input.has(InputFrame.B_SPRINT) and profile.enable_sprint and forwardish and mag > 0.5 and s.carry_mult > 0.55 and UltraInjury.can_sprint(s):
+			var want_sprint := input.has(InputFrame.B_SPRINT) and profile.enable_sprint and forwardish and mag > 0.5 and s.carry_mult > 0.55 and UltraInjury.can_sprint(s)
+			if want_sprint and s.action == UltraActionLayer.Action.RELOADING:
+				# Reloading holds you to a jog (the sprint picks up again after) - a sprint used to
+				# cancel the reload a tick after it started.
+				speed = profile.jog_speed
+				s.set_flag(MotorState.F_SPRINTING, false)
+			elif want_sprint:
 				speed = profile.sprint_speed
 				s.set_flag(MotorState.F_SPRINTING, true)
 			elif input.has(InputFrame.B_WALK):

@@ -4,6 +4,12 @@ extends RefCounted
 ## Registered as a motor transition hook (after traversal).
 
 const Id := MotorState.Id
+## Hitting the water this hard (falling at, or moving at, m/s) knocks you limp for a moment -
+## you surface and come round (RAGDOLL in the water, then SWIM).
+const PLUNGE_FALL_SPEED := 8.5
+const PLUNGE_SPEED := 11.5
+## How long you stay limp in the water.
+const STUN_TIME := 1.3
 
 
 static func hook(m: UltraMotor, s: MotorState, _i: InputFrame) -> int:
@@ -12,6 +18,11 @@ static func hook(m: UltraMotor, s: MotorState, _i: InputFrame) -> int:
 	match s.state:
 		Id.IDLE, Id.MOVE, Id.CROUCH, Id.CRAWL, Id.LAND, Id.TURN_IN_PLACE, Id.JUMP, Id.FALL, Id.SLIDE:
 			if m.water_depth >= m.profile.swim_depth:
+				# Hit hard (a high jump, a fast swing off a rope): limp for a moment. The water
+				# takes most of the speed.
+				if s.state in [Id.JUMP, Id.FALL] and (-s.vel.y > PLUNGE_FALL_SPEED or s.vel.length() > PLUNGE_SPEED):
+					s.trav_from = Vector3(s.vel.x * 0.35, s.vel.y * 0.3, s.vel.z * 0.35)
+					return Id.RAGDOLL
 				return Id.SWIM
 	return -1
 

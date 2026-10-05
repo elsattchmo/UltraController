@@ -25,6 +25,7 @@ var inertial: InertialBlendModifier
 var foot_ik: FootIKModifier
 var hand_ik: HandIKModifier
 var weapon_pose: WeaponPoseModifier
+var arm_clear: UltraArmClear
 var look: LookModifier
 var skeleton: Skeleton3D
 
@@ -121,6 +122,9 @@ func setup(p_player: AnimationPlayer, p_skeleton: Skeleton3D) -> void:
 	foot_ik = FootIKModifier.new()
 	foot_ik.name = "FootIK"
 	skeleton.add_child(foot_ik)
+	arm_clear = UltraArmClear.new()
+	arm_clear.name = "ArmClear"
+	skeleton.add_child(arm_clear)
 	weapon_pose = WeaponPoseModifier.new()
 	weapon_pose.name = "WeaponPose"
 	skeleton.add_child(weapon_pose)
@@ -144,6 +148,12 @@ const BRISK_RATE := 1.75
 ## so its bad leg is the left; Injured_Walk_Back the other way round).
 ## Lose_Balance: the stretch where the arms windmill (before the walk-off).
 const TEETER_SEG := Vector2(3.3, 4.4)
+## Mixamo "Running Jump" (from a sprint): take-off .. touchdown, and its apex in that segment.
+const RUN_JUMP_SEG := Vector2(0.04, 0.62)
+const RUN_JUMP_APEX := 0.28
+const RUN_JUMP_SPEED := 3.2
+var _run_jump := false
+var _jump_vy0 := 0.0
 ## Throwing a carried prop: the arms-out "Push" pose held briefly - the one-shot's quick fade
 ## in from the carry (hands at the chest) is the shove itself; faded out after PUSH_HOLD s.
 const PUSH_HOLD := 0.3
@@ -387,6 +397,19 @@ func _build() -> AnimationNodeBlendTree:
 	air_in.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO
 	air.add_transition("Start", "start", air_in)
 	loco.add_node("air", air, Vector2(400, 0))
+	# Running jump: a leap from a sprint, its time driven by the vertical speed (take-off ->
+	# apex -> touchdown), so it fits any jump height and speed.
+	if _role_anim(&"leap"):
+		var rj := AnimationNodeBlendTree.new()
+		var rja := AnimationNodeAnimation.new()
+		rja.animation = _segment(_clip(&"leap"), RUN_JUMP_SEG.x, RUN_JUMP_SEG.y)
+		rj.add_node("clip", rja, Vector2(0, 0))
+		rj.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		rj.add_node("hold", AnimationNodeTimeScale.new(), Vector2(400, 0))
+		rj.connect_node("seek", 0, "clip")
+		rj.connect_node("hold", 0, "seek")
+		rj.connect_node("output", 0, "hold")
+		loco.add_node("air_run", rj, Vector2(400, 100))
 	loco.add_node("fall", _anim(&"jump_air"), Vector2(400, 200))
 	# Landings: soft ones play the squat faster (less dip); the heavy one starts after its
 	# built-in fall (Land_Three_Point begins ~4.8 m up).
@@ -494,7 +517,7 @@ func _build() -> AnimationNodeBlendTree:
 		loco.add_node(n, a, Vector2(800, 200))
 
 	# Fully connected so travel() always crossfades directly.
-	var names := ["ground", "crouch", "crawl", "air", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b", "climb", "vault", "hang", "ladder", "pipe", "wall", "rope", "swim", "dive", "getup", "getup_front"]
+	var names := ["ground", "crouch", "crawl", "air", "air_run", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b", "climb", "vault", "hang", "ladder", "pipe", "wall", "rope", "swim", "dive", "getup", "getup_front"]
 	for a_name in names:
 		for b_name in names:
 			if a_name == b_name:
@@ -595,6 +618,8 @@ func _build() -> AnimationNodeBlendTree:
 
 
 static func _xfade(a: String, b: String) -> float:
+	if b == "air_run":
+		return 0.1
 	if b.begins_with("land"):
 		return 0.12
 	if a.begins_with("land") or b == "air":
@@ -660,11 +685,17 @@ func _drive_state(speed: float) -> void:
 	var Id := MotorState.Id
 	match state:
 		Id.JUMP:
-			want = "air"
+			# Jumping at a run: the running leap.
+			if _cur_loco != "air" and _cur_loco != "air_run":
+				_run_jump = speed > RUN_JUMP_SPEED and _role_anim(&"leap") != null
+				_jump_vy0 = 0.0
+			want = "air_run" if _run_jump else "air"
 		Id.FALL:
 			# Brief ungrounded moments (a kerb, a ledge lip) aren't a fall worth showing.
 			if air_time < 0.15 and _cur_loco in ["ground", "crouch", "crawl", "land"]:
 				want = _cur_loco
+			elif _cur_loco == "air_run" and air_time < 1.3:
+				want = "air_run"
 			else:
 				want = "fall" if _cur_loco != "air" else "air"
 		Id.LAND:
@@ -855,6 +886,16 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	# walking speed in a couple of ticks: the legs then cut from one pose to the other).
 	tree.set(LOCO + "ground/mix/blend_amount", _ease_w(&"ground", smoothstep(0.05, 0.45, speed), delta))
 	_drive_turn(moving, delta)
+	if _cur_loco == "air_run":
+		# Rising: take-off -> apex; falling: apex -> touchdown pose (held for a longer fall).
+		_jump_vy0 = maxf(_jump_vy0, velocity.y)
+		var v0 := maxf(_jump_vy0, 3.0)
+		var seg := RUN_JUMP_SEG.y - RUN_JUMP_SEG.x
+		var apex := RUN_JUMP_APEX - RUN_JUMP_SEG.x
+		var t := lerpf(0.02, apex, clampf(1.0 - velocity.y / v0, 0.0, 1.0)) if velocity.y > 0.0 \
+			else lerpf(apex, seg - 0.02, clampf(-velocity.y / v0, 0.0, 1.0))
+		tree.set(LOCO + "air_run/seek/seek_request", t)
+		tree.set(LOCO + "air_run/hold/scale", 0.0)
 	tree.set(LOCO + "land/speed/scale", lerpf(1.5, 1.0, clampf((land_impact - 3.0) / 6.0, 0.0, 1.0)))
 	tree.set(LOCO + "land/depth/blend_amount", lerpf(0.3, 1.0, smoothstep(3.0, 11.0, land_impact)))
 	# Climbing cycles run at the speed you climb (and hold still when you stop).
@@ -1514,6 +1555,9 @@ func _drive_item(delta: float) -> void:
 	tree.set("parameters/upper_src/pose/blend_amount", _pose_w)
 	if modifier:
 		modifier.weapon_aim = _item_w * _pose_w
+		# A held item's static upper body on running legs: steady the torso against the swing.
+		var gsp := Vector2(velocity.x, velocity.z).length()
+		modifier.torso_steady = smoothstep(0.0, 1.0, _item_w) * smoothstep(1.5, 4.0, gsp) * 0.85
 
 
 func _set_item_clips(roles: Dictionary) -> void:

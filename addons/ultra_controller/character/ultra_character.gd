@@ -9,6 +9,8 @@ extends CharacterBody3D
 ## reconciliation smoothing), and the AnimDriver is fed from the motor state.
 
 signal landed(impact_speed: float)
+## Hit the water (m/s) - presentation (camera jolt, rumble).
+signal plunged(speed: float)
 signal state_changed(old_state: int, new_state: int)
 ## Presentation events from the action layer: &"fire", &"reload", &"mag_in", &"dry_fire"...
 signal item_event(kind: StringName, data: Dictionary)
@@ -356,7 +358,9 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 		var fx := UltraEffects.instance()
 		if fx:
 			var w := motor.water
-			fx.splash(Vector3(state.pos.x, w.surface_y(platform_tick) + w.wave(state.pos), state.pos.z), clampf(-_prev_vel.y / 9.0, 0.3, 1.2))
+			var hit := maxf(-_prev_vel.y, _prev_vel.length() * 0.7)
+			fx.splash(Vector3(state.pos.x, w.surface_y(platform_tick) + w.wave(state.pos), state.pos.z), clampf(hit / 9.0, 0.3, 1.8))
+		plunged.emit(maxf(-_prev_vel.y, _prev_vel.length() * 0.7))
 	_was_wet = wet
 	if old != state.state:
 		state_changed.emit(old, state.state)

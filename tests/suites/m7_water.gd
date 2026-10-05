@@ -200,3 +200,58 @@ func test_tunnel_to_grotto() -> void:
 	info("tunnel: %s, least air %.1f s" % [" ".join(trace), low_air[0]])
 	check(c.state.state == Id.SWIM and c.state.pos.z < 74.0 and c.state.pos.x > 63.0, "swam the tunnel and surfaced in the grotto")
 	check(low_air[0] > 0.0 and low_air[0] < c.profile.breath_time - 5.0, "a real breath-hold, but survivable")
+
+
+## Off the 5 m board: hitting the water that hard knocks you limp for a moment (RAGDOLL in the
+## water), floating at the surface, then you come round swimming. A step in from the deck edge
+## just swims.
+func test_plunge_knocks_limp() -> void:
+	var c := spawn("dive_tower", FPS, false)
+	await ticks(3)
+	var w := water("PoolWater")
+	var lowest := [INF]
+	var limp_at := [-1]
+	await drive(c, 400, func(k: int, ch: UltraCharacter) -> InputFrame:
+		if ch.state.state == Id.RAGDOLL and limp_at[0] < 0:
+			limp_at[0] = k
+		if limp_at[0] >= 0 and k > limp_at[0] + 50:
+			lowest[0] = minf(lowest[0], ch.state.pos.y)
+		return frame(Vector2(0, 1) if ch.state.state in [Id.IDLE, Id.MOVE] else Vector2.ZERO, 0, 0.0),
+		func(ch: UltraCharacter) -> bool: return ch.state.state == Id.SWIM)
+	info("board: %s; lowest after settling %.2f (surface %.2f)" % [" ".join(trace), lowest[0], surface(c, w)])
+	check(seen.has(Id.RAGDOLL) and c.state.state == Id.SWIM, "5 m into the water: limp a moment, then swimming")
+	check(lowest[0] > surface(c, w) - 1.5, "the limp body floats back up rather than sinking")
+	c.queue_free()
+	chars.erase(c)
+	var d := spawn("pool_deep_side", FPS, false)
+	await ticks(3)
+	await drive(d, 300, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2(0, 1), 0, deg_to_rad(-90.0)),
+		func(ch: UltraCharacter) -> bool: return ch.state.state == Id.SWIM)
+	check(not seen.has(Id.RAGDOLL) and d.state.state == Id.SWIM, "stepping in off the deck just swims")
+
+
+## The rope swing: run off the launch deck, jump, catch the rope, swing out, let go into the
+## deep end.
+func test_rope_swing_into_pool() -> void:
+	var c := spawn("pool_swing", FPS, false)
+	await ticks(3)
+	var east := deg_to_rad(-90.0)
+	var jumped := [false]
+	var on_rope := [-1]
+	await drive(c, 600, func(k: int, ch: UltraCharacter) -> InputFrame:
+		if ch.state.state == Id.ROPE:
+			if on_rope[0] < 0:
+				on_rope[0] = k
+			# Swing a little, then let go.
+			return frame(Vector2(0, 1), InputFrame.B_JUMP if k > on_rope[0] + 70 else 0, east)
+		if on_rope[0] >= 0:
+			return frame(Vector2.ZERO, 0, east)
+		var tap := 0
+		if ch.state.pos.x > 37.9 and not jumped[0]:
+			jumped[0] = true
+			tap = InputFrame.B_JUMP
+		return frame(Vector2(0, 1), InputFrame.B_SPRINT | tap, east),
+		func(ch: UltraCharacter) -> bool: return ch.state.state in [Id.SWIM, Id.DIVE] or (ch.state.state == Id.RAGDOLL and ch.motor.water != null))
+	info("swing: %s, ended at %s" % [" ".join(trace), c.state.pos.snappedf(0.1)])
+	check(seen.has(Id.ROPE), "caught the rope from the deck")
+	check(c.motor.water != null and c.state.pos.x > 42.0, "let go over the pool and went in")

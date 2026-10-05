@@ -154,11 +154,10 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   `UltraMotor.predict_impact` sweeps a sphere along the ballistic arc against the static world
   (a jump to the next platform lands on it - vertical rays saw the pit below and ragdolled
   platform jumps); {} for water / moving platforms. 0.6 s before a hard impact the body goes
-  RAGDOLL keeping its speed (air drag 0.3 m/s2); rope catches are untouched. At touchdown 20 %
-  of the landing speed (<= 3.5 m/s) goes into the slide along the travel
-  (`ragdoll_state.TUMBLE_*`) and the physics body gets a forward roll (`UltraRagdoll._tumble`,
-  only if land_impact >= 6); its settle / tone / capsule-pull clocks start at touchdown (`_t`),
-  not when it went limp (`_t_limp`). No landing roll (the user didn't want it): LAND keeps
+  RAGDOLL keeping its speed (air drag 0.3 m/s2); rope catches are untouched. It lands with
+  just its own momentum (an extra tumble boost / roll spin at touchdown read as a second shove:
+  removed); the ragdoll's settle / tone / capsule-pull clocks start at touchdown (`_t`), not when
+  it went limp (`_t_limp`). No landing roll (the user didn't want it): LAND keeps
   85 % speed.
 - Edge balance (`UltraMotor.update_balance`, after every ground move): nothing under the
   capsule's middle within a step and a drop > `balance_drop` (0.45 m) below = perched on a
@@ -223,6 +222,29 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
     little, a big drop squats (every hop used to sink ~45 cm, at 2.4x speed).
   * TP shouldered gun blends the GUN from where the clip's hand holds it to the shouldered
     pose and keeps both hands at weight 1 on it (switching hand targets snapped the hands).
+- Running steadiness (m1_blend.test_sprint_sway): `BodyDynamicsModifier.torso_steady` (driver:
+  item layer weight x speed) takes the hips' fast swing out at the Spine under a held item's
+  static upper body (pistol sprint: head 33 cm / 42 deg roll -> ~10 cm / 4 deg); `head_level`
+  levels upper chest (half), neck and head against their own low-passed up vector.
+- `UltraArmClear` (after FootIK, before WeaponPose / HandIK): elbows, upper-arm middles,
+  forearms and hands are kept outside a torso ellipse (chest 0.215 x 0.185 m, waist 0.165 x
+  0.15, limb included; measured off the mesh) by turning the upper arm / forearm out (3 + 2
+  passes, 25 deg each). Mixamo rifle reload: right upper arm 0.73 -> 0.92 (m4 test).
+- Reloading holds a sprint to a jog (motor) instead of the sprint cancelling the reload (with
+  the sprint toggle it was cancelled a tick after it started). TP shouldered pose lets go
+  fast (6/s) for a reload. Only busy states (knock-down, climbing...) interrupt a reload.
+- Running jump: `leap` role (Mixamo "Running Jump", J_Sprint_RM, segment 0.04-0.62, apex
+  0.28) in loco node "air_run" when jumping faster than 3.2 m/s; its time is SEEKED from the
+  vertical speed (take-off -> apex -> touchdown pose held). `run_jump` (UAL) is the VAULT clip.
+- Water impact: entering deep water from JUMP / FALL faster than 8.5 m/s down or 11.5 m/s
+  overall -> RAGDOLL in the water (UltraSwim.PLUNGE_*): the capsule floats on a spring at the
+  surface with heavy drag, SWIM after STUN_TIME 1.3 s; the physics body gets buoyancy per bone
+  (`UltraRagdoll._buoy`) and fades into the swim. `UltraCharacter.plunged(speed)` -> splash,
+  camera jolt / daze, rumble. Pool rope swing: launch deck (x 33.5-39, 2.2 m) + swing rope at
+  (41.6, 9, 83), marker `pool_swing`; tour water_review.
+- Ragdoll lying: GET_UP only after the body has been still (grounded, < 0.2 m/s) for
+  STILL_TIME 1 s (`MotorState.trav_t` counts it). No landing tumble boost / spin any more.
+- Recoil: pistol gun 3.0 deg / view 3.4, rifle 1.8 / 1.35; visual kick (0, 0.5, 1.8).
 - Sprint = Mixamo "Fast Run" (S_Fast, 5.53 m/s; planted toe 0.37 m/s at 6.2). Tried: Standard
   Sprint (1.2 m/s slip), Two Cycle Sprint (2-stride clip, 0.95-1.3 m/s slip even cut to one
   stride), Fast/Intent runs. `tours/sprint_review` films the cycle side on.

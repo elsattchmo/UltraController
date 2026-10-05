@@ -128,10 +128,11 @@ func _pistol(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	d.holster_offset = hips.affine_inverse() * holster_model
 	d.anim_roles = {"idle": "pistol_idle", "aim": "pistol_aim_neutral", "aim_up": "pistol_aim_up", "aim_down": "pistol_aim_down", "fire": "pistol_shoot", "reload": "pistol_reload"}
 	d.equip_time = 0.35
+	d.recoil_gun_deg = 3.0
 	d.stats = {
 		"mag_size": 12, "fire_interval": 0.15, "damage": 34.0, "range": 120.0, "spread_deg": 0.8,
 		"ads_spread_deg": 0.15, "reload_time": 2.08, "reload_commit": 1.55, "ammo": "ammo_9mm",
-		"impulse": 6.0, "recoil_pitch_deg": 2.4, "recoil_yaw_deg": 0.6, "ads_fov": 55.0,
+		"impulse": 6.0, "recoil_pitch_deg": 3.4, "recoil_yaw_deg": 0.9, "ads_fov": 55.0,
 	}
 	print("pistol grip_offset ", d.grip_offset)
 	print("pistol support_offset ", d.support_offset)
@@ -218,12 +219,12 @@ func _rifle(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	d.free_aim_deg = 6.0
 	d.sway_amount = 1.35
 	d.ads_sway_mult = 0.3
-	d.recoil_gun_deg = 1.1
+	d.recoil_gun_deg = 1.8
 	d.sprint_lower_deg = Vector2(14.0, -24.0)
 	d.stats = {
 		"mag_size": 30, "fire_interval": 0.092, "damage": 30.0, "range": 300.0, "spread_deg": 1.4,
 		"ads_spread_deg": 0.06, "reload_time": 2.6, "reload_commit": 1.9, "ammo": "ammo_556",
-		"impulse": 7.0, "recoil_pitch_deg": 0.9, "recoil_yaw_deg": 0.35, "ads_fov": 52.0,
+		"impulse": 7.0, "recoil_pitch_deg": 1.35, "recoil_yaw_deg": 0.55, "ads_fov": 52.0,
 	}
 	print("rifle grip_offset ", d.grip_offset)
 	print("rifle support_offset ", d.support_offset)

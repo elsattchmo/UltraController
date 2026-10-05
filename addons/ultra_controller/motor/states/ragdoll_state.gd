@@ -6,8 +6,8 @@ extends MotorStateHandler
 const Id := MotorState.Id
 const LIE_HEIGHT := 0.5
 const GET_UP_TIME := 2.8
-const TUMBLE_SHARE := 0.2           ## of the landing speed that goes into the tumble
-const TUMBLE_MAX := 3.5             ## m/s
+## Lying still this long (on the ground, barely moving) before getting up.
+const STILL_TIME := 1.0
 
 
 func enter(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
@@ -17,6 +17,7 @@ func enter(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 		m.body.velocity = Vector3(s.trav_from.x, vy, s.trav_from.z)
 		s.set_flag(MotorState.F_GROUNDED, false)
 		s.set_flag(MotorState.F_SPRINTING, false)
+		s.trav_t = 0.0
 	else:
 		m.body.velocity = Vector3(0, minf(m.body.velocity.y, 0.0), 0)
 
@@ -25,8 +26,11 @@ func next(m: UltraMotor, s: MotorState, _i: InputFrame) -> int:
 	if s.hp <= 0.0:
 		return Id.DEAD
 	if s.state == Id.RAGDOLL:
-		var settled := s.is_grounded() and m.horizontal(s.vel).length() < 0.2
-		if (s.state_time > 1.4 and settled) or s.state_time > 6.0:
+		# Limp in the water, not lying on the bottom: come round and swim.
+		if m.water != null and m.water_depth > 0.15 and not s.is_grounded():
+			return Id.SWIM if s.state_time > UltraSwim.STUN_TIME else -1
+		# Get up once the body has come to rest - not while it's still sliding / tumbling.
+		if (s.state_time > 1.4 and s.trav_t >= STILL_TIME) or s.state_time > 8.0:
 			return Id.GET_UP
 		return -1
 	if s.state_time >= GET_UP_TIME:
@@ -40,6 +44,18 @@ func next(m: UltraMotor, s: MotorState, _i: InputFrame) -> int:
 
 func tick(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 	var v := m.body.velocity
+	if s.state == Id.RAGDOLL and m.water != null and m.water_depth > 0.15 and not s.is_grounded():
+		# Limp in the water: thick drag, and the body bobs back up to float at the surface.
+		m.set_height(s, move_toward(s.height, LIE_HEIGHT, 4.0 * m.dt))
+		var err := (m.water_surface - 0.35) - s.pos.y
+		v.y += (err * 14.0 - v.y * 5.0) * m.dt
+		var hv := m.horizontal(v) * exp(-1.6 * m.dt)
+		var cur := m.water.current
+		v = Vector3(hv.x + cur.x * m.dt, minf(v.y, 2.0), hv.z + cur.z * m.dt)
+		s.trav_t = 0.0
+		m.body.velocity = v
+		m.move(s, false)
+		return
 	if s.state == Id.RAGDOLL:
 		m.set_height(s, move_toward(s.height, LIE_HEIGHT, 4.0 * m.dt))
 		# A body tumbling along the ground keeps rolling while it's fast, then stops quickly.
@@ -57,9 +73,7 @@ func tick(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 	v.y = v.y - m.gravity * m.dt if not s.is_grounded() else minf(v.y, 0.0)
 	m.body.velocity = v
 	m.move(s, false)
-	# Hitting the ground limp while travelling: part of the fall turns into a tumble along the
-	# way we were going (a body landing at an angle rolls on rather than stopping dead).
-	if s.state == Id.RAGDOLL and s.is_grounded() and not s.has(MotorState.F_WAS_GROUNDED):
-		var hv := m.horizontal(m.body.velocity)
-		if hv.length() > 0.5:
-			m.body.velocity += hv.normalized() * minf(s.land_impact * TUMBLE_SHARE, TUMBLE_MAX)
+	# How long we've lain still (only then does the get-up start).
+	if s.state == Id.RAGDOLL:
+		var still := s.is_grounded() and m.horizontal(m.body.velocity).length() < 0.2 and absf(m.body.velocity.y) < 0.5
+		s.trav_t = s.trav_t + m.dt if still else 0.0

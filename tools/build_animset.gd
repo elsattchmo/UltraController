@@ -16,7 +16,7 @@ const ROLES := {
 	&"stand_turn_l": "mixamo/T_StandL90", &"stand_turn_r": "mixamo/T_StandR90", &"crouch_turn_l": "mixamo/T_CrouchB_L", &"crouch_turn_r": "mixamo/T_CrouchB_R",
 	&"aim_turn_l": "mixamo/T_RifleL90", &"aim_turn_r": "mixamo/T_RifleR90",
 	&"jump_start": "Jump_Start", &"jump_air": "Jump_air", &"jump_land": "Jump_Land", &"land_heavy": "Land_Three_Point",
-	&"run_jump": "Run_Jump",
+	&"run_jump": "Run_Jump", &"leap": "mixamo/J_Sprint_RM",
 	&"slide_start": "Slide_Start", &"slide": "Slide", &"slide_exit": "Slide_Exit",
 	&"roll": "Roll_RM", &"dodge_back": "Dodge_back_RM", &"dodge_left": "Dodge_left_RM", &"dodge_right": "Dodge_right_RM",
 	&"knockback": "Hit_Knockback_RM", &"climb_up_1m": "ClimbUp_1m_RM", &"crawl_rm": "Crawl_RM",

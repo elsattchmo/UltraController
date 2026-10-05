@@ -191,7 +191,6 @@ func _drive(delta: float) -> void:
 	_t_limp += delta
 	if _airborne and character.state.is_grounded():
 		_airborne = false
-		_tumble()
 	if not _airborne:
 		_t += delta
 	var dead := character.state.state == MotorState.Id.DEAD
@@ -279,27 +278,18 @@ func _drive(delta: float) -> void:
 			pb.angular_velocity = pb.angular_velocity.normalized() * max_joint_speed * 2.0
 
 
-## Hitting the ground limp while travelling: the body pitches over the way it was going - a
-## rigid spin about the axis across the travel (forward roll), stronger the faster it goes.
-@export var tumble_spin := 1.6          ## rad/s per m/s of ground speed
-@export var tumble_spin_max := 9.0
-
-
-func _tumble() -> void:
-	var v := character.state.vel
-	var hv := Vector3(v.x, 0, v.z)
-	if hv.length() < 1.5 or bones.is_empty() or character.state.land_impact < 6.0:
-		return                          # (a shove on flat ground isn't a fall to roll out of)
-	var w := Vector3.UP.cross(hv.normalized()) * minf(hv.length() * tumble_spin, tumble_spin_max)
-	var com := Vector3.ZERO
-	var mass := 0.0
+## In the water the limp body floats: each bone under the surface is pushed up (more than its
+## weight once it's well under) and drags in the water.
+func _buoy(delta: float) -> void:
+	if UltraWater.all.is_empty():
+		return
 	for pb in bones:
-		com += pb.global_position * pb.mass
-		mass += pb.mass
-	com /= maxf(mass, 0.001)
-	for pb in bones:
-		pb.angular_velocity += w
-		pb.linear_velocity += w.cross(pb.global_position - com)
+		var d := UltraWater.depth_at(pb.global_position, TickPlatform.current_tick)
+		if d <= 0.0:
+			continue
+		pb.linear_velocity += Vector3.UP * minf(d * 28.0, 15.0) * delta
+		pb.linear_velocity *= exp(-2.2 * delta)
+		pb.angular_velocity *= exp(-1.8 * delta)
 
 
 ## World axis * angle that turns the child onto `goal` (relative to the parent).
@@ -348,10 +338,14 @@ func _physics_process(delta: float) -> void:
 		character.ragdoll_offset = hips_offset()
 		if not is_nan(getup_yaw):
 			character.ragdoll_yaw = angle_difference(character.state.body_yaw, getup_yaw)
+	elif (st == MotorState.Id.SWIM or st == MotorState.Id.DIVE) and active and not _getting_up:
+		_getting_up = true                 # came round in the water: fade into swimming
 	elif not down and st != MotorState.Id.GET_UP and active:
 		stop()
 	if active and not _getting_up:
 		_drive(delta)
+	if active:
+		_buoy(delta)
 	if _getting_up:
 		_fade = maxf(_fade - delta / 0.6, 0.0)
 		sim.influence = _fade

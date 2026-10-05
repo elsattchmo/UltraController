@@ -462,3 +462,59 @@ func test_gun_dot_close_range() -> void:
 	info(", ".join(res))
 	hud.queue_free()
 	rig.queue_free()
+
+
+## The arms stay outside the torso (reloading the rifle brought the right forearm through the
+## chest). Torso: an ellipse round the hips->neck line, in the chest's frame.
+func test_arms_clear_the_body() -> void:
+	UltraItems.give(c, &"rifle")
+	UltraItems.give(c, &"ammo_556", 60)
+	var sl := _slot(&"rifle")
+	_bot().view_tp = true
+	var sk := c.skeleton
+	var res := []
+	for spec: Array in [["idle", 0, 0], ["reload", InputFrame.B_RELOAD, 150], ["walk", 0, 0]]:
+		var steps := [{"ticks": 80, "slot": sl, "move": Vector2(0, 1) if spec[0] == "walk" else Vector2.ZERO}]
+		if spec[1] != 0:
+			steps = [{"ticks": 60, "slot": sl}, {"ticks": 2, "slot": sl, "tap": InputFrame.B_PRIMARY}, {"ticks": 10, "slot": sl}, {"ticks": 2, "slot": sl, "tap": spec[1]}, {"ticks": 200, "slot": sl}]
+		_bot().set_steps(steps)
+		await ticks(76 if spec[1] != 0 else 60)
+		if spec[1] != 0:
+			check(c.state.action == UltraActionLayer.Action.RELOADING, "reloading")
+		var worst := [INF, ""]
+		for f in (150 if spec[1] != 0 else 40):
+			await sk.skeleton_updated
+			var q := _torso_q(sk)
+			if float(q[0]) < float(worst[0]):
+				worst = q
+		res.append("%s: closest %.2f (%s) - 1 = on the surface" % [spec[0], worst[0], worst[1]])
+		check(float(worst[0]) > 0.9, "%s: the arms stay outside the body (%.2f at %s)" % [spec[0], worst[0], worst[1]])
+	info(", ".join(res))
+
+
+## Smallest normalised ellipse distance of the elbows / forearms / hands to the torso.
+func _torso_q(sk: Skeleton3D) -> Array:
+	var g := func(n: String) -> Vector3: return sk.get_bone_global_pose(sk.find_bone(n)).origin
+	var hips: Vector3 = g.call("Hips")
+	var neck: Vector3 = g.call("Neck")
+	var right: Vector3 = (g.call("RightUpperArm") as Vector3) - (g.call("LeftUpperArm") as Vector3)
+	var axis := (neck - hips).normalized()
+	right = (right - axis * right.dot(axis)).normalized()
+	var fwd := axis.cross(right).normalized()
+	var best := [INF, ""]
+	for side in ["Left", "Right"]:
+		var sh: Vector3 = g.call(side + "UpperArm")
+		var e: Vector3 = g.call(side + "LowerArm")
+		var h: Vector3 = g.call(side + "Hand")
+		for pt: Array in [[sh.lerp(e, 0.55), side + " upper arm"], [e, side + " elbow"], [(e + h) * 0.5, side + " forearm"], [h, side + " hand"]]:
+			var p: Vector3 = pt[0]
+			var L := (neck - hips).length()
+			var t := clampf((p - hips).dot(axis), 0.15, L)
+			var d := p - (hips + axis * t)
+			var kk := smoothstep(0.3, 0.8, t / L)
+			var hw := lerpf(UltraArmClear.WAIST_HALF_WIDTH, UltraArmClear.TORSO_HALF_WIDTH, kk)
+			var hd := lerpf(UltraArmClear.WAIST_HALF_DEPTH, UltraArmClear.TORSO_HALF_DEPTH, kk)
+			var qv := pow(d.dot(right) / hw, 2.0) + pow(d.dot(fwd) / hd, 2.0)
+			if sqrt(qv) < float(best[0]):
+				best = [sqrt(qv), pt[1]]
+	return best

@@ -75,6 +75,7 @@ func _process_modification_with_delta(_delta: float) -> void:
 	hips_g.basis = r_hips * hips_g.basis
 	hips_g.origin += pelvis_offset
 	sk.set_bone_global_pose(_hips, hips_g)
+	_steady_torso(sk, hips_g, _delta)
 	# Spine chain: counter the warp, spread aim, lean and hunch. Climbing (spine_aim_scale < 1)
 	# the chest stays on the wall: the look goes mostly into the neck and head.
 	var s_sc := spine_aim_scale
@@ -111,6 +112,7 @@ func _process_modification_with_delta(_delta: float) -> void:
 		g.basis = r * g.basis
 		sk.set_bone_global_pose(b, g)
 	_stabilize_head(sk)
+	_level_head(sk, _delta)
 	_calm_head(sk, _delta)
 	_swing_arms(sk)
 
@@ -163,6 +165,58 @@ func _stabilize_head(sk: Skeleton3D) -> void:
 		var gb := sk.get_bone_global_pose(b)
 		gb.basis = Basis(Vector3.UP, dy * pair[1]) * gb.basis
 		sk.set_bone_global_pose(b, gb)
+
+
+## 0..1: under a held item's upper-body pose (a static clip on top of running legs) the spine
+## takes out the hips' fast swing, as a running torso does on its own (with a pistol out the
+## shoulders swung 18 cm and the head 33 cm side to side at a sprint). Set by the driver.
+var torso_steady := 0.0
+var _hips_lp := Quaternion.IDENTITY
+var _hips_lp_ok := false
+
+
+func _steady_torso(sk: Skeleton3D, hips_g: Transform3D, delta: float) -> void:
+	var q := hips_g.basis.get_rotation_quaternion()
+	if not _hips_lp_ok:
+		_hips_lp = q
+		_hips_lp_ok = true
+	_hips_lp = _hips_lp.slerp(q, 1.0 - exp(-2.5 * maxf(delta, 0.0)))
+	if torso_steady <= 0.001 or _chain.is_empty() or _chain[0] < 0:
+		return
+	var fast := (q * _hips_lp.inverse()).normalized()       # the hips' swing this stride
+	var g := sk.get_bone_global_pose(_chain[0])
+	g.basis = Basis(Quaternion.IDENTITY.slerp(fast.inverse(), torso_steady)) * g.basis
+	sk.set_bone_global_pose(_chain[0], g)
+
+
+## Head level: take most of the fast roll / nod wobble out of the head (a sprint rocks it
+## ~15 deg side to side); slow tilts (looking, leaning) stay.
+@export_range(0, 1, 0.01) var head_level := 0.8
+var _head_up_lp := [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+
+
+func _level_head(sk: Skeleton3D, delta: float) -> void:
+	if head_level <= 0.0 or _chain.size() < 5 or _chain[4] < 0 or _chain[3] < 0 or stabilize_w <= 0.0:
+		_head_up_lp = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+		return
+	# The upper chest (half: the shoulders rock), the neck (it carries the head side to side),
+	# then the head itself.
+	for j in 3:
+		var b := _chain[2 + j]
+		if b < 0:
+			continue
+		var k := 0.5 if j == 0 else 1.0
+		var g := sk.get_bone_global_pose(b)
+		var up := (g.basis.orthonormalized() * (sk.get_bone_global_rest(b).basis.orthonormalized().inverse() * Vector3.UP)).normalized()
+		if _head_up_lp[j] == Vector3.ZERO:
+			_head_up_lp[j] = up
+		_head_up_lp[j] = (_head_up_lp[j] as Vector3).lerp(up, 1.0 - exp(-2.0 * maxf(delta, 0.0))).normalized()
+		var want := up.slerp(_head_up_lp[j], head_level * stabilize_w * k)
+		var axis := up.cross(want)
+		if axis.length() < 1e-5:
+			continue
+		g.basis = Basis(axis.normalized(), up.angle_to(want)) * g.basis
+		sk.set_bone_global_pose(b, g)
 
 
 ## 0..1: low-pass the neck and head against the chest. Get-up clips (mocap) whip the head

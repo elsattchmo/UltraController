@@ -191,3 +191,41 @@ func test_head_steady_when_sprinting() -> void:
 	check(hi - lo < 25.0, "the head stays steady while sprinting (%.0f deg swing)" % (hi - lo))
 	c.queue_free()
 	chars.erase(c)
+
+
+## Sprinting (unarmed, pistol, rifle): how far the head and chest swing side to side and how
+## much the head rolls, in the body's own frame.
+func test_sprint_sway() -> void:
+	var res := []
+	for spec: Array in [["unarmed", &""], ["pistol", &"pistol"], ["rifle", &"rifle"]]:
+		var c := spawn("speed_start", "res://addons/ultra_controller/profiles/fps.tres", true)
+		await ticks(3)
+		var slot := 0
+		if spec[1] != &"":
+			UltraItems.give(c, spec[1])
+			slot = c.inventory.find_uid(c.inventory.get_slot(0).uid) + 1
+		await hold(c, 40, Vector2.ZERO, 0, 0.0)
+		bot(c).set_steps([{"ticks": 90, "move": Vector2(0, 1), "buttons": InputFrame.B_SPRINT, "yaw": 0.0, "slot": slot}])
+		await ticks(50)
+		var sk := c.skeleton
+		var hx := []
+		var cx := []
+		var roll := []
+		for i in 40:
+			await sk.skeleton_updated
+			var inv := c.visual_root.global_transform.affine_inverse()
+			var h := inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Head")).origin)
+			var ch := inv * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("UpperChest")).origin)
+			var hb := c.visual_root.global_basis.inverse() * (sk.global_basis * sk.get_bone_global_pose(sk.find_bone("Head")).basis)
+			hx.append(h.x)
+			cx.append(ch.x)
+			var up := hb.orthonormalized() * (sk.get_bone_global_rest(sk.find_bone("Head")).basis.inverse() * Vector3.UP)
+			roll.append(rad_to_deg(atan2(up.x, up.y)))
+		var rng := func(a: Array) -> float: return a.max() - a.min()
+		res.append("%s: head side %.3f m, chest side %.3f m, head roll %.1f deg" % [spec[0], rng.call(hx), rng.call(cx), rng.call(roll)])
+		# (Before: pistol 0.33 m / 42 deg, unarmed 0.12 m / 16 deg.)
+		check(rng.call(hx) < 0.12 and rng.call(roll) < 12.0, "%s: the head doesn't swing about at a sprint (%.2f m, %.0f deg)" % [spec[0], rng.call(hx), rng.call(roll)])
+		c.queue_free()
+		chars.erase(c)
+		await ticks(2)
+	info("\n  ".join(res))

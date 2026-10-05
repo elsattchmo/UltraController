@@ -453,7 +453,9 @@ func _shoulder_gun(fp_target: Transform3D, fp_w: float) -> void:
 	# Eased: reloading / holstering / lowering used to drop the shouldered pose (hands, stance,
 	# cheek) in a frame.
 	var dt := get_process_delta_time()
-	_tp_w = move_toward(_tp_w, anim.modifier.weapon_aim if up and anim.modifier else 0.0, dt * 2.2)
+	# (A reload lets go quickly - the clip's hands have to get to the magazine.)
+	var reloading := s.action == UltraActionLayer.Action.RELOADING
+	_tp_w = move_toward(_tp_w, anim.modifier.weapon_aim if up and anim.modifier else 0.0, dt * (6.0 if reloading else 2.2))
 	_tp_ads = move_toward(_tp_ads, ads, dt * 2.5)
 	wp.weight = smoothstep(0.0, 1.0, _tp_w)
 	wp.eye_target = Vector3.INF
@@ -553,7 +555,7 @@ func ready_support() -> bool:
 func _on_item_event(kind: StringName, _data: Dictionary) -> void:
 	if kind == &"fire":
 		_slide_kick = 0.045
-		_recoil.impulse(Vector3(0, 0.35, 1.2))
+		_recoil.impulse(Vector3(0, 0.5, 1.8))
 
 
 ## Held item in first person: same layers as the body so it's never culled.

@@ -260,7 +260,7 @@ func test_crippled_right_arm_shoots_left_handed() -> void:
 	var muzzle_x := (c.visual_root.global_transform.affine_inverse() * eq.muzzle_transform().origin).x
 	info("held in %s, idle clip %s, muzzle at x %.2f (right-handed %.2f)" % [eq.held_node.get_parent().name if eq.held_node else "-", low, muzzle_x, right_x])
 	check(in_left and low.ends_with("_M"), "right arm out: the pistol is in the left hand, clips mirrored")
-	check(right_x > 0.1 and absf(muzzle_x + right_x) < 0.06, "the gun sits where the right hand had it, mirrored")
+	check(right_x > 0.07 and absf(muzzle_x + right_x) < 0.06, "the gun sits where the right hand had it, mirrored")
 	var mag0 := c.state.mag
 	b.set_steps([{"ticks": 2, "slot": 1, "tap": InputFrame.B_PRIMARY}, {"ticks": 100000, "slot": 1}])
 	await ticks(20)

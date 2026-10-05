@@ -263,8 +263,9 @@ static func _reload(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDe
 	var slow := UltraInjury.reload_mult(s, c.damage_profile)
 	var commit := float(def.stat("reload_commit", 1.5)) * slow
 	var total := float(def.stat("reload_time", 2.0)) * slow
-	# Interrupted before the magazine went in: nothing gained.
-	if busy or (s.has(MotorState.F_SPRINTING) and s.action_t < commit):
+	# Interrupted before the magazine went in: nothing gained. (Sprinting doesn't interrupt: a
+	# reload holds you to a jog.)
+	if busy:
 		_set_action(s, Action.READY)
 		c.emit_item_event(&"reload_cancel", {}, replaying)
 		return

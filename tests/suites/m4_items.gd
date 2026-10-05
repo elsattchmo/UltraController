@@ -70,8 +70,37 @@ func test_reload_interrupted_gains_nothing() -> void:
 	UltraItems.give(c, &"pistol")
 	UltraItems.give(c, &"ammo_9mm", 30)
 	await _run([{"ticks": 40, "slot": 1}, {"ticks": 2, "slot": 1, "tap": InputFrame.B_PRIMARY}, {"ticks": 12, "slot": 1}])
-	await _run([{"ticks": 2, "slot": 1, "tap": InputFrame.B_RELOAD}, {"ticks": 30, "slot": 1}, {"ticks": 40, "slot": 1, "move": Vector2(0, 1), "buttons": InputFrame.B_SPRINT}])
-	check(c.state.mag == 11 and c.inventory.count_of(&"ammo_9mm") == 30, "sprinting cancels the reload before the mag goes in")
+	# Knocked down before the magazine goes in: nothing gained.
+	await _run([{"ticks": 2, "slot": 1, "tap": InputFrame.B_RELOAD}, {"ticks": 20, "slot": 1}])
+	c.knock_down(Vector3(0, 0, 3.0))
+	await _run([{"ticks": 60, "slot": 1}])
+	# (Going down stows the gun: its magazine count is stored on the item.)
+	var it: ItemInstance = null
+	for k in c.inventory.size():
+		var cand := c.inventory.get_slot(k)
+		if cand and cand.def_id == &"pistol":
+			it = cand
+	var mag := c.state.mag if c.state.held_uid != 0 else (int(it.data.get("mag", -1)) if it else -1)
+	check(mag == 11 and c.inventory.count_of(&"ammo_9mm") == 30, "a knock-down interrupts the reload before the mag goes in (mag %d)" % mag)
+
+
+## Sprinting while reloading: the reload carries on (at a jog) - it used to be cancelled a tick
+## after it started when the sprint toggle was on.
+func test_reload_keeps_going_when_sprinting() -> void:
+	UltraItems.give(c, &"pistol")
+	UltraItems.give(c, &"ammo_9mm", 30)
+	await _run([{"ticks": 40, "slot": 1}, {"ticks": 2, "slot": 1, "tap": InputFrame.B_PRIMARY}, {"ticks": 12, "slot": 1}])
+	(c.input_source as BotInputSource).set_steps([{"ticks": 2, "slot": 1, "tap": InputFrame.B_RELOAD, "move": Vector2(0, 1), "buttons": InputFrame.B_SPRINT}, {"ticks": 200, "slot": 1, "move": Vector2(0, 1), "buttons": InputFrame.B_SPRINT}])
+	var top := 0.0
+	var reloading_ticks := 0
+	for k in 202:
+		await ticks(1)
+		if c.state.action == UltraActionLayer.Action.RELOADING:
+			reloading_ticks += 1
+			top = maxf(top, Vector2(c.state.vel.x, c.state.vel.z).length())
+	info("reloading for %d ticks while holding sprint, top speed %.2f m/s, mag %d" % [reloading_ticks, top, c.state.mag])
+	check(c.state.mag == 12, "the reload finished while running")
+	check(top <= c.profile.jog_speed + 0.1, "held to a jog while reloading")
 
 
 func test_hitscan_drops_target() -> void:

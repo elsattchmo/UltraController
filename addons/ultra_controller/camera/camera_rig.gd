@@ -60,6 +60,7 @@ func attach(c: UltraCharacter) -> void:
 	_land.damping = cam_profile.land_spring_damping
 	c.set_view_index(view_index)
 	c.landed.connect(_on_landed)
+	c.plunged.connect(_on_plunged)
 	c.item_event.connect(_on_item_event)
 	c.hit_reacted.connect(_on_hit)
 	_ray_excl = [c.get_rid()]
@@ -82,6 +83,20 @@ func _on_landed(impact: float) -> void:
 	_land.impulse(-k * 9.0)
 	if character.input_source is LocalInputSource:
 		(character.input_source as LocalInputSource).rumble(0.2 * k * 6.0, 0.5 * k * 6.0, 0.12)
+
+
+## Hitting the water: the view jolts down with the impact; a hard one leaves you dazed a moment.
+func _on_plunged(speed: float) -> void:
+	var k := clampf((speed - 3.0) / 10.0, 0.0, 1.0)
+	if k <= 0.0:
+		return
+	_land.impulse(-k * 6.0)
+	kick(-0.05 * k, randf_range(-0.03, 0.03) * k)
+	if speed > UltraSwim.PLUNGE_FALL_SPEED:
+		_concuss_amp = clampf(k, 0.4, 0.8)
+		_concuss = 1.6 * _concuss_amp
+	if character.input_source is LocalInputSource:
+		(character.input_source as LocalInputSource).rumble(0.4 * k, 0.8 * k, 0.25)
 
 
 ## Camera kick (recoil, hits): radians of pitch/yaw that spring back.
