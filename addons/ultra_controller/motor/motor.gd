@@ -291,7 +291,9 @@ func accelerate_ground(s: MotorState, wish: Vector3, target_speed: float, fricti
 	var speed := hv.length()
 	var grip := clampf(friction, 0.04, 1.0)
 	if target_speed < 0.01 or wish.length_squared() < 0.0001:
-		return hv.move_toward(Vector3.ZERO, profile.decel * grip * dt)
+		# From a sprint, momentum carries you a step or two before you're stopped.
+		var d := lerpf(profile.decel, profile.sprint_stop_decel, smoothstep(profile.jog_speed, profile.sprint_speed * 0.9, speed))
+		return hv.move_toward(Vector3.ZERO, d * grip * dt)
 	wish = wish.normalized()
 	if speed > 0.2:
 		var dir := hv / speed
@@ -308,7 +310,7 @@ func accelerate_ground(s: MotorState, wish: Vector3, target_speed: float, fricti
 		hv = dir * speed
 		wish = dir if absf(ang) > max_turn else wish
 	var ratio := speed / maxf(target_speed, 0.01)
-	var a := profile.accel * profile.get_accel_mult(ratio) if speed < target_speed else profile.decel
+	var a := profile.accel * profile.get_accel_mult(ratio) if speed < target_speed 		else lerpf(profile.decel, profile.sprint_stop_decel, smoothstep(profile.jog_speed, profile.sprint_speed * 0.9, speed))
 	return hv.move_toward(wish * target_speed, a * grip * dt)
 
 
@@ -346,6 +348,13 @@ func _ride_platform(s: MotorState) -> void:
 	body.global_position = delta * body.global_position
 	var fwd := delta.basis * Vector3.FORWARD
 	s.body_yaw += atan2(-fwd.x, -fwd.z)
+	# Climbing onto / hanging from a platform: the move's anchors ride it too (they were
+	# world points: the platform moved off and the climb finished in the air).
+	if s.state in [MotorState.Id.MANTLE, MotorState.Id.VAULT, MotorState.Id.LEDGE_CLIMB, MotorState.Id.LEDGE_HANG]:
+		s.trav_from = delta * s.trav_from
+		s.trav_to = delta * s.trav_to
+		s.trav_point = delta * s.trav_point
+		s.trav_normal = (delta.basis * s.trav_normal).normalized()
 
 
 func _update_platform(s: MotorState) -> void:
@@ -356,6 +365,13 @@ func _update_platform(s: MotorState) -> void:
 			if c.get_normal().y > 0.7 and c.get_collider() is TickPlatform:
 				on = (c.get_collider() as TickPlatform).platform_id
 				break
+		# Walking along the floor leaves no floor contact among the slide collisions (only
+		# standing still pressed into it did): the rider stopped being carried as soon as it
+		# moved, and the platform slid away underneath. Ask what's just below instead.
+		if on == 0:
+			var kc := KinematicCollision3D.new()
+			if body.test_move(body.global_transform, Vector3.DOWN * 0.06, kc) and kc.get_normal().y > 0.7 and kc.get_collider() is TickPlatform:
+				on = (kc.get_collider() as TickPlatform).platform_id
 	if s.platform_id != 0 and on == 0 and not s.is_grounded():
 		# Leaving a platform: keep its velocity (jumping off a lift carries you up).
 		var plat := TickPlatform.find(s.platform_id)

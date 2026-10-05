@@ -39,7 +39,8 @@ func tick(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 		var lookahead := cand + right * signf(dx) * 0.25
 		var feet := lookahead + s.trav_normal * (UltraTraversal.HANG_BACK + 0.25) + Vector3.DOWN * (UltraTraversal.HANG_DROP - 0.3)
 		var l := UltraTraversal.scan(m, feet, -s.trav_normal, 2.4)
-		if l and absf(l.top.y - s.trav_point.y) < 0.25:
+		# (Not along to where the ground comes up under the feet.)
+		if l and absf(l.top.y - s.trav_point.y) < 0.25 and UltraTraversal.room_to_hang(m, Vector3(lookahead.x, l.top.y, lookahead.z), l.normal):
 			s.trav_point = Vector3(cand.x, l.top.y, cand.z)
 			s.trav_normal = l.normal
 			s.trav_s = 1.0 if (l.standable or l.crouch_only) else 0.0

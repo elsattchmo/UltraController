@@ -38,6 +38,9 @@ enum Gait { WALK, JOG }
 @export_range(1, 80, 0.5) var accel := 9.0
 @export var accel_curve: Curve
 @export_range(1, 80, 0.5) var decel := 11.0
+## Letting go at a sprint: the run carries you on a little (decel eases from this at sprint
+## speed to `decel` by jog speed).
+@export_range(1, 80, 0.5) var sprint_stop_decel := 6.5
 ## Deceleration used when input opposes velocity — the weighty plant-and-pivot.
 @export_range(1, 80, 0.5) var brake_decel := 16.0
 ## How fast the velocity heading can swing (deg/s) at walk and at sprint: momentum.

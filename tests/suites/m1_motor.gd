@@ -204,6 +204,49 @@ func test_moving_platforms() -> void:
 		await ticks(2)
 
 
+## Walking about on a platform keeps riding it (it used to register only while standing still:
+## a moving rider left no floor contact, wasn't carried, and the platform slid away under it).
+func test_walk_on_moving_platform() -> void:
+	var c := spawn("platform_rotate", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(5)
+	bot(c).set_steps([{"ticks": 1000, "move": Vector2(0, 0.3), "yaw": 0.0}])
+	var off := 0
+	for i in 150:
+		await ticks(1)
+		if c.state.platform_id == 0:
+			off += 1
+	info("walking on the rotating platform: %d of 150 ticks not riding it" % off)
+	check(off < 5, "a walking rider is carried (%d ticks off)" % off)
+	c.queue_free()
+	chars.erase(c)
+
+
+## Climbing onto a moving platform: the mantle's path rides the platform and ends on it.
+func test_climb_onto_moving_platform() -> void:
+	var c := spawn("speed_start", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	var plat: TickPlatform = null
+	for tp: TickPlatform in TickPlatform.all:
+		if tp.name == "Linear":
+			plat = tp
+	for i in 600:
+		await ticks(1)
+		if (plat.pose_at(TickPlatform.current_tick).origin - plat.pose_at(TickPlatform.current_tick - 1).origin).length() > 0.03:
+			break
+	c.teleport(Vector3(plat.global_position.x + 2.7, 0.0, plat.global_position.z), PI * 0.5)
+	bot(c).set_steps([{"ticks": 30, "move": FWD, "yaw": PI * 0.5, "buttons": InputFrame.B_JUMP}, {"ticks": 150, "yaw": PI * 0.5}])
+	var mantled := false
+	for i in 180:
+		await ticks(1)
+		mantled = mantled or c.state.state == MotorState.Id.MANTLE
+	var lp := plat.global_transform.affine_inverse() * c.state.pos
+	info("climbed onto the moving platform: local %s, riding %d" % [lp.snappedf(0.01), c.state.platform_id])
+	check(mantled and c.state.platform_id == plat.platform_id and c.state.is_grounded(), "mantled onto the platform and rides it")
+	check(absf(lp.x) < 2.0 and absf(lp.z) < 2.0, "standing on top, not left behind")
+	c.queue_free()
+	chars.erase(c)
+
+
 ## After a roll's travel is done, input takes over at once (the clip's tail no longer locks
 ## the player out), and the player moves where they steer.
 func test_roll_hands_back_control() -> void:

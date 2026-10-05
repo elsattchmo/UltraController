@@ -292,6 +292,28 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Demo playground has infinite ammo (`UltraActionLayer.infinite_ammo`; `--limited-ammo` off).
 - `teleport()` drops any traversal state (else a scripted move drags you back).
 - FP eye is swept from the capsule axis (`CameraRig._fp_guard`): the head bone dips into ledges.
+- Sprinting with a bladed (rifle) item: the item layer holds one frame of e_sprint_f
+  (`SPRINT_CARRY_T` 0.225 s: port arms, rifle level across the chest; the clip pumps it 50 deg
+  every stride) - `AnimDriver.sprint_carry`; first person follows the body then (no
+  camera-placed gun), so both views carry it the same way. torso_steady at a run: unarmed
+  0.45, one-handed item 0.72 (0.85 looked frozen), bladed 0.85.
+- TP aim is closed-loop: `EquipmentVisual._aim_fix` measures the drawn barrel against the gun
+  direction and turns the spine by the error (the pistol aim clip pointed ~20 deg left).
+  m4 test_gun_points_at_aim covers both guns, both views, hip and ADS.
+- Long running leaps: past the leap clip's touchdown pose the falling loop's arms come in at
+  up to LEAP_ARMS 0.5 (air_run/arms, filtered to the arm bones).
+- Stopping from a sprint decelerates at `sprint_stop_decel` (6.5 m/s2, easing to `decel` by
+  jog speed): ~2 m of carry.
+- During MANTLE / LEDGE_CLIMB / LEDGE_HANG / LADDER / WALL_CLIMB / ROPE the ground blend gets
+  zero speed (the scripted move's velocity flashed running legs at the hand-back). VAULT keeps
+  its run (momentum is kept).
+- Ledge hang only where a hanging body fits (`UltraTraversal.room_to_hang`: nothing under the
+  feet 2.06 m below the top); lower ledges are climbed straight up; shimmy stops where the
+  ground comes up.
+- Moving platforms: a rider is found with a short downward `test_move` (walking left no floor
+  contact in the slide collisions - only standing still registered). Ledge scans record the
+  top's TickPlatform; MANTLE / VAULT / LEDGE_CLIMB / LEDGE_HANG set platform_id and their
+  trav_from / to / point / normal ride the platform (`UltraMotor._ride_platform`).
 - Steadiness (`m4_gunplay.test_camera_and_gun_steady`, tour `jitter_review`): sample at
   `skeleton_updated` - sampling in `_process` mixes this frame's body placement with last
   frame's pose and invents jitter. Rules that came out of it: a released HandIK goal fades from

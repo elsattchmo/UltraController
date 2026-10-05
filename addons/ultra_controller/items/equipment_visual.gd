@@ -168,8 +168,23 @@ func _aim_body() -> void:
 	# The aiming clip's own barrel direction, taken back out (a bladed rifle clip points the
 	# gun off to one side of the chest).
 	var clip := held_def.aim_clip_offset * Vector2(float(_side), 1.0)
-	anim.modifier.aim_yaw += (deg_to_rad(clip.x) - sw.x) * w
-	anim.modifier.aim_pitch += (sw.y - deg_to_rad(clip.y)) * w
+	# Whatever is left - the clip's barrel under this stance, crouch, the legs' warp (the
+	# pistol pointed ~20 deg left of the aim) - is measured off the gun as last drawn and
+	# trimmed out by turning the spine a little further each frame.
+	if held_node and w > 0.3 and character.state.action == UltraActionLayer.Action.READY:
+		var barrel := -held_node.global_basis.z.normalized()
+		var want := gun_ray().dir as Vector3
+		var err := Vector2(angle_difference(atan2(-want.x, -want.z), atan2(-barrel.x, -barrel.z)),
+			asin(clampf(barrel.y, -1.0, 1.0)) - asin(clampf(want.y, -1.0, 1.0)))
+		var k := 1.0 - exp(-6.0 * get_process_delta_time())
+		_aim_fix = (_aim_fix + Vector2(err.x, -err.y) * k * w).limit_length(deg_to_rad(35.0))
+	anim.modifier.aim_yaw += (deg_to_rad(clip.x) - sw.x + _aim_fix.x) * w
+	anim.modifier.aim_pitch += (sw.y - deg_to_rad(clip.y) + _aim_fix.y) * w
+
+
+## Third person: spine turn (yaw right +, pitch up +) that brings the drawn barrel onto the
+## gun direction, learnt from the gun as drawn (see _aim_body).
+var _aim_fix := Vector2.ZERO
 
 
 func _update_stowed() -> void:
@@ -361,7 +376,7 @@ func _drive_hands(delta: float) -> void:
 	var gun := held_node.global_transform if held_node else Transform3D()
 	# First person: the gun pose comes from the camera (the real arms follow by IK), so it
 	# always points at the crosshair. Hip pose low-right, ADS puts the sights on the view ray.
-	var fp_drive := camera != null and held_node != null and ready and held_def.kind == ItemDefinition.Kind.FIREARM
+	var fp_drive := camera != null and held_node != null and ready and held_def.kind == ItemDefinition.Kind.FIREARM 		and anim.sprint_carry < 0.5          # (sprinting with a rifle the body carries it, as others see it)
 	_fp_w = move_toward(_fp_w, 1.0 if fp_drive else 0.0, delta * 4.0)
 	if camera and held_node and _fp_w > 0.001:
 		var rear := UltraPoseSampler.marker(held_node, "M_RearSight")

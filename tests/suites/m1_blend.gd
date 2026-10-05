@@ -211,6 +211,7 @@ func test_sprint_sway() -> void:
 		var hx := []
 		var cx := []
 		var roll := []
+		var yaws := []
 		for i in 40:
 			await sk.skeleton_updated
 			var inv := c.visual_root.global_transform.affine_inverse()
@@ -221,11 +222,68 @@ func test_sprint_sway() -> void:
 			cx.append(ch.x)
 			var up := hb.orthonormalized() * (sk.get_bone_global_rest(sk.find_bone("Head")).basis.inverse() * Vector3.UP)
 			roll.append(rad_to_deg(atan2(up.x, up.y)))
+			var fw := hb.orthonormalized() * (sk.get_bone_global_rest(sk.find_bone("Head")).basis.inverse() * Vector3.BACK)
+			yaws.append(rad_to_deg(atan2(fw.x, fw.z)))
 		var rng := func(a: Array) -> float: return a.max() - a.min()
-		res.append("%s: head side %.3f m, chest side %.3f m, head roll %.1f deg" % [spec[0], rng.call(hx), rng.call(cx), rng.call(roll)])
+		var mean := func(a: Array) -> float:
+			var t := 0.0
+			for v: float in a:
+				t += v
+			return t / a.size()
+		res.append("%s: head side %.3f m, chest side %.3f m, head roll %.1f deg (mean %.1f), head yaw %.1f deg (mean %.1f)" % [spec[0], rng.call(hx), rng.call(cx), rng.call(roll), mean.call(roll), rng.call(yaws), mean.call(yaws)])
 		# (Before: pistol 0.33 m / 42 deg, unarmed 0.12 m / 16 deg.)
 		check(rng.call(hx) < 0.12 and rng.call(roll) < 12.0, "%s: the head doesn't swing about at a sprint (%.2f m, %.0f deg)" % [spec[0], rng.call(hx), rng.call(roll)])
 		c.queue_free()
 		chars.erase(c)
 		await ticks(2)
 	info("\n  ".join(res))
+
+
+## Climbing up onto a ledge and vaulting: the legs don't flash a run / sprint as the move hands
+## back to the ground (the scripted move's own speed - several m/s - used to drive the gait).
+func test_no_run_legs_after_climb() -> void:
+	for spec: Array in [["ledge_100", InputFrame.B_SPRINT], ["ledge_200", 0], ["parkour_start", InputFrame.B_SPRINT]]:
+		var c := spawn(spec[0], "res://addons/ultra_controller/profiles/fps.tres", true)
+		await ticks(3)
+		var Id := MotorState.Id
+		var b := c.input_source as BotInputSource
+		var phase := [0]          # 0 approach, 1 moving over, 2 after
+		var after := [0]
+		var worst := [0.0]
+		var seen := {}
+		b.driver = func(_t: int, _src: BotInputSource) -> InputFrame:
+			var f := InputFrame.new()
+			f.yaw = 0.0
+			var climbing: bool = c.state.state in [Id.LEDGE_CLIMB, Id.VAULT, Id.MANTLE, Id.LEDGE_HANG]
+			f.move = Vector2(0, 1) if phase[0] == 0 or c.state.state == Id.LEDGE_HANG else Vector2.ZERO
+			f.buttons = int(spec[1])
+			if phase[0] == 0 and (c.state.pos.z < -27.3 if spec[0].begins_with("ledge") else c.state.pos.z < -14.4):
+				f.buttons |= InputFrame.B_JUMP
+			return f
+		for i in 400:
+			await ticks(1)
+			var st := c.state.state
+			if st in [Id.LEDGE_CLIMB, Id.VAULT, Id.MANTLE, Id.LEDGE_HANG]:
+				phase[0] = 1
+				seen[Id.keys()[st]] = true
+			elif phase[0] == 1:
+				phase[0] = 2
+			if phase[0] >= 1 and after[0] < 30:
+				if phase[0] == 2:
+					after[0] += 1
+				# Gait shown with no stick input: the moving mix times the blend speed (the blend
+				# position itself holds the last gait while the mix fades - that's fine).
+				var bp: Vector2 = c.anim.tree.get(UltraAnimDriver.LOCO + "ground/move/blend_position")
+				var mix: float = c.anim.tree.get(UltraAnimDriver.LOCO + "ground/mix/blend_amount")
+				if phase[0] == 2:
+					worst[0] = maxf(worst[0], bp.length() * mix)
+			if phase[0] == 2 and after[0] >= 30:
+				break
+		b.driver = Callable()
+		info("%s (%s): ground blend speed after the move %.2f m/s" % [spec[0], " ".join(seen.keys()), worst[0]])
+		check(phase[0] == 2, "%s: got over (%s)" % [spec[0], seen.keys()])
+		if spec[0] != "parkour_start":      # (a vault keeps the run's momentum: running legs are right)
+			check(worst[0] < 1.0, "%s: no running legs as the climb ends (%.2f m/s)" % [spec[0], worst[0]])
+		c.queue_free()
+		chars.erase(c)
+		await ticks(2)

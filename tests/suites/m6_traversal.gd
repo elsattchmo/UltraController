@@ -73,12 +73,15 @@ func test_ledge_matrix() -> void:
 			func(ch: UltraCharacter) -> bool: return ch.state.is_grounded() and ch.state.pos.y > top - 0.15 and ch.state.state in [Id.IDLE, Id.MOVE])
 		await ticks(20)
 		var on_top: bool = absf(c.state.pos.y - top) < 0.1 and c.state.pos.z < -28.0 and c.state.is_grounded()
-		var how := "mantle" if seen.has(Id.MANTLE) else ("ledge" if seen.has(Id.LEDGE_HANG) else "none")
+		var how := "mantle" if seen.has(Id.MANTLE) else ("ledge" if seen.has(Id.LEDGE_HANG) else ("climb" if seen.has(Id.LEDGE_CLIMB) else "none"))
 		results.append("%.1fm:%s%s" % [top, how, "/top" if on_top else "/(y %.2f z %.2f)" % [c.state.pos.y, c.state.pos.z]])
 		check(on_top, "%.1f m wall: ends on top" % top)
 		check(not _overlaps(c), "%.1f m wall: capsule not inside geometry" % top)
 		if h <= 100:
 			check(seen.has(Id.MANTLE), "%.1f m: mantles" % top)
+		elif top < UltraTraversal.HANG_DROP:
+			# Lower than a hanging body: hanging would put the feet in the floor - climb straight up.
+			check(not seen.has(Id.LEDGE_HANG) and seen.has(Id.LEDGE_CLIMB), "%.1f m: climbs straight up, no hang (%s)" % [top, " ".join(trace)])
 		else:
 			check(seen.has(Id.LEDGE_HANG) and seen.has(Id.LEDGE_CLIMB), "%.1f m: grabs the ledge and climbs up (%s)" % [top, " ".join(trace)])
 		c.queue_free()

@@ -26,6 +26,7 @@ class Ledge:
 	var crouch_only := false
 	var thin := false
 	var climbable := false        ## the wall is on the CLIMBABLE layer
+	var platform := 0             ## TickPlatform id the top belongs to (the move rides it)
 
 
 static func scan(m: UltraMotor, feet: Vector3, dir: Vector3, max_h := 2.4, reach := WALL_PROBE) -> Ledge:
@@ -68,6 +69,7 @@ static func scan(m: UltraMotor, feet: Vector3, dir: Vector3, max_h := 2.4, reach
 	l.height = l.top.y - feet.y
 	l.edge = Vector3(wp.x, l.top.y, wp.z)
 	l.climbable = wall.collider is CollisionObject3D and ((wall.collider as CollisionObject3D).collision_layer & UltraLayers.CLIMBABLE) != 0
+	l.platform = (top.collider as TickPlatform).platform_id if top.collider is TickPlatform else 0
 	if l.height <= m.profile.step_height + 0.02 or l.height > max_h:
 		return null
 	# 3) room to stand (or crouch) on top
@@ -129,7 +131,7 @@ static func hook(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 					if l.height <= 1.4 and (l.standable or l.crouch_only):
 						return _start_move(m, s, Move.MANTLE, l)
 					if l.height <= REACH_AIR:
-						return _hang(m, s, l)
+						return _hang_or_climb(m, s, l)
 		Id.SWIM:
 			# Out of the water: up a ladder, or over an edge that's not far above the surface.
 			var lad3 := UltraLadder.find_enterable(s.pos, dir, i.move.y)
@@ -152,7 +154,7 @@ static func hook(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 				if l2 and l2.height >= 0.9:
 					if l2.height <= 1.2 and (l2.standable or l2.crouch_only):
 						return _start_move(m, s, Move.MANTLE, l2)
-					return _hang(m, s, l2)
+					return _hang_or_climb(m, s, l2)
 	return -1
 
 
@@ -161,6 +163,7 @@ static func _face(s: MotorState, n: Vector3) -> void:
 
 
 static func _start_move(m: UltraMotor, s: MotorState, kind: int, l: Ledge) -> int:
+	s.platform_id = l.platform
 	s.trav_kind = kind
 	s.trav_from = s.pos
 	s.trav_t = 0.0
@@ -183,7 +186,29 @@ static func _start_move(m: UltraMotor, s: MotorState, kind: int, l: Ledge) -> in
 			return MotorState.Id.MANTLE
 
 
+## Hang from the ledge if there's room below it for a hanging body; a ledge too low for that
+## (the feet would be in the floor) is climbed straight up instead, if there's room on top.
+static func _hang_or_climb(m: UltraMotor, s: MotorState, l: Ledge) -> int:
+	if room_to_hang(m, l.edge, l.normal):
+		return _hang(m, s, l)
+	if l.standable or l.crouch_only:
+		if l.crouch_only:
+			s.stance = MotorState.Stance.CROUCH
+		s.platform_id = l.platform
+		return start_climb_up(m, s, l.top - l.normal * (m.profile.radius + 0.12), l.normal)
+	return -1
+
+
+## Nothing under where a body hanging from `edge` would have its feet.
+static func room_to_hang(m: UltraMotor, edge: Vector3, n: Vector3) -> bool:
+	var feet := edge + n * HANG_BACK + Vector3.DOWN * HANG_DROP
+	var from := Vector3(feet.x, edge.y - 0.5, feet.z)
+	var q := PhysicsRayQueryParameters3D.create(from, feet + Vector3.DOWN * 0.05, UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC | UltraLayers.CLIMBABLE, [m.body.get_rid()])
+	return m.body.get_world_3d().direct_space_state.intersect_ray(q).is_empty()
+
+
 static func _hang(m: UltraMotor, s: MotorState, l: Ledge) -> int:
+	s.platform_id = l.platform
 	s.trav_point = l.edge
 	s.trav_normal = l.normal
 	s.trav_s = 1.0 if (l.standable or l.crouch_only) else 0.0     # can climb up from here?

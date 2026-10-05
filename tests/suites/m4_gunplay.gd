@@ -584,3 +584,38 @@ func test_camera_and_gun_steady() -> void:
 		var lim := 40.0 if tag.ends_with("sprint") else 25.0
 		check(float(worst[tag][0]) < lim, "%s: the gun jumps against the camera (%.1f mm)" % [tag, worst[tag][0]])
 		check(float(worst[tag][1]) < lim, "%s: the support hand flicks (%.1f mm)" % [tag, worst[tag][1]])
+
+
+## Every view and both holds: the barrel points along the gun direction (the dot), and at rest
+## the gun direction is the view direction. (Third person the pistol's aim clip held the barrel
+## ~20 deg left of the aim; EquipmentVisual._aim_fix trims it out.)
+func test_gun_points_at_aim() -> void:
+	UltraItems.give(c, &"pistol")
+	UltraItems.give(c, &"rifle")
+	var eq := c.get_node("Equipment") as UltraEquipmentVisual
+	var rig := UltraCameraRig.new()
+	add_child(rig)
+	rig.attach(c)
+	rig.camera.current = true
+	var res := []
+	for gun: StringName in [&"pistol", &"rifle"]:
+		for tp in [false, true]:
+			for ads in [false, true]:
+				_bot().view_tp = tp
+				_bot().set_steps([{"ticks": 1000, "slot": _slot(gun), "yaw": 0.3, "pitch": -0.05, "buttons": InputFrame.B_SECONDARY if ads else 0}])
+				await ticks(120)
+				await c.skeleton.skeleton_updated
+				var sk := c.skeleton
+				var g := sk.global_transform * sk.get_bone_global_pose(sk.find_bone("RightHand")) * eq.held_node.transform
+				var barrel := -g.basis.z.normalized()
+				var want: Vector3 = eq.gun_ray().dir
+				var view := -rig.camera.global_basis.z
+				var yaw_err := rad_to_deg(Vector2(want.x, want.z).angle_to(Vector2(barrel.x, barrel.z)))
+				var pitch_err := rad_to_deg(asin(barrel.y) - asin(want.y))
+				var dot_err := rad_to_deg(Vector2(view.x, view.z).angle_to(Vector2(want.x, want.z)))
+				var tag := "%s %s %s" % [gun, "TP" if tp else "FP", "ADS" if ads else "hip"]
+				res.append("%s: barrel vs gun dir yaw %.1f pitch %.1f; gun dir vs view yaw %.2f" % [tag, yaw_err, pitch_err, dot_err])
+				check(absf(yaw_err) < 2.0 and absf(pitch_err) < 2.0, "%s: the barrel points along the gun direction (yaw %.1f, pitch %.1f deg)" % [tag, yaw_err, pitch_err])
+				check(absf(dot_err) < 0.5, "%s: at rest the gun direction is the view (%.2f deg)" % [tag, dot_err])
+	rig.queue_free()
+	info("\n  ".join(res))

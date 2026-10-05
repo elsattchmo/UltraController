@@ -152,6 +152,11 @@ const TEETER_SEG := Vector2(3.3, 4.4)
 const RUN_JUMP_SEG := Vector2(0.04, 0.62)
 const RUN_JUMP_APEX := 0.28
 const RUN_JUMP_SPEED := 3.2
+## (Not VAULT: it keeps the run's momentum, the running legs carry on after it.)
+const TRAVERSING := [MotorState.Id.MANTLE, MotorState.Id.LEDGE_CLIMB, MotorState.Id.LEDGE_HANG,
+	MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.ROPE]
+const LEAP_ARMS := 0.5                 ## how much of the falling loop's arms a long leap gets
+var _leap_arms := 0.0
 var _run_jump := false
 var _jump_vy0 := 0.0
 ## Throwing a carried prop: the arms-out "Push" pose held briefly - the one-shot's quick fade
@@ -408,7 +413,17 @@ func _build() -> AnimationNodeBlendTree:
 		rj.add_node("hold", AnimationNodeTimeScale.new(), Vector2(400, 0))
 		rj.connect_node("seek", 0, "clip")
 		rj.connect_node("hold", 0, "seek")
-		rj.connect_node("output", 0, "hold")
+		# The leap's touchdown pose comes before a longer fall lands: the arms then go on
+		# moving (the falling loop's arms, a little of them) instead of freezing.
+		var arms := AnimationNodeBlend2.new()
+		arms.filter_enabled = true
+		for bn in _arm_bones():
+			arms.set_filter_path(NodePath("%GeneralSkeleton:" + bn), true)
+		rj.add_node("arms", arms, Vector2(600, 0))
+		rj.add_node("arms_src", _anim(&"jump_air"), Vector2(400, 150))
+		rj.connect_node("arms", 0, "hold")
+		rj.connect_node("arms", 1, "arms_src")
+		rj.connect_node("output", 0, "arms")
 		loco.add_node("air_run", rj, Vector2(400, 100))
 	loco.add_node("fall", _anim(&"jump_air"), Vector2(400, 200))
 	# Landings: soft ones play the squat faster (less dip); the heavy one starts after its
@@ -550,7 +565,20 @@ func _build() -> AnimationNodeBlendTree:
 	item.add_node("fire", fire, Vector2(400, 50))
 	var fire_clip := AnimationNodeAnimation.new()
 	item.add_node("fire_clip", fire_clip, Vector2(200, 200))
-	item.connect_node("fire", 0, "pose")
+	# Sprinting with a rifle: one held frame of the rifle sprint clip (port arms - the rifle level
+	# across the chest). The clip itself pumps the rifle 50 deg up and down every stride.
+	var carry_clip := AnimationNodeAnimation.new()
+	if _role_anim(&"e_sprint_f"):
+		carry_clip.animation = _clip(&"e_sprint_f")
+	item.add_node("carry_clip", carry_clip, Vector2(0, 300))
+	item.add_node("carry_seek", AnimationNodeTimeSeek.new(), Vector2(150, 300))
+	item.add_node("carry_hold", AnimationNodeTimeScale.new(), Vector2(300, 300))
+	item.connect_node("carry_seek", 0, "carry_clip")
+	item.connect_node("carry_hold", 0, "carry_seek")
+	item.add_node("carry", AnimationNodeBlend2.new(), Vector2(300, 50))
+	item.connect_node("carry", 0, "pose")
+	item.connect_node("carry", 1, "carry_hold")
+	item.connect_node("fire", 0, "carry")
 	item.connect_node("fire", 1, "fire_clip")
 	var reload := AnimationNodeOneShot.new()
 	reload.fadein_time = 0.12
@@ -643,6 +671,22 @@ static func _ease_curve() -> Curve:
 	return _ease
 
 
+## Shoulders down to the fingertips, both sides.
+func _arm_bones() -> PackedStringArray:
+	var out := PackedStringArray()
+	if skeleton == null:
+		return out
+	var roots := [skeleton.find_bone("LeftShoulder"), skeleton.find_bone("RightShoulder")]
+	for b in skeleton.get_bone_count():
+		var p := b
+		while p >= 0:
+			if p in roots:
+				out.append(skeleton.get_bone_name(b))
+				break
+			p = skeleton.get_bone_parent(p)
+	return out
+
+
 func _upper_body_bones() -> PackedStringArray:
 	var out := PackedStringArray()
 	if skeleton == null:
@@ -666,7 +710,12 @@ func _process(delta: float) -> void:
 	var local_v := _to_local(velocity)              # x = right, y = forward
 	var speed := local_v.length()
 	_drive_state(speed)
-	_drive_ground(local_v, speed, delta)
+	# Climbing over / up, hanging, ladders...: the scripted move's own speed (a ledge climb
+	# peaks at several m/s) isn't running. Fed to the ground blend it showed a frame or two of
+	# sprinting legs as the move handed back to the ground.
+	if state in TRAVERSING:
+		local_v = Vector2.ZERO
+	_drive_ground(local_v, local_v.length(), delta)
 	if _push_t > 0.0:
 		_push_t -= delta
 		if _push_t <= 0.0:
@@ -896,6 +945,12 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 			else lerpf(apex, seg - 0.02, clampf(-velocity.y / v0, 0.0, 1.0))
 		tree.set(LOCO + "air_run/seek/seek_request", t)
 		tree.set(LOCO + "air_run/hold/scale", 0.0)
+		# Past most of the way down: the falling arms come in (half strength at most).
+		var down := smoothstep(apex + (seg - apex) * 0.55, seg - 0.02, t) if velocity.y < 0.0 else 0.0
+		_leap_arms = move_toward(_leap_arms, down * LEAP_ARMS, delta * 1.5)
+		tree.set(LOCO + "air_run/arms/blend_amount", smoothstep(0.0, 1.0, _leap_arms / LEAP_ARMS) * LEAP_ARMS)
+	else:
+		_leap_arms = 0.0
 	tree.set(LOCO + "land/speed/scale", lerpf(1.5, 1.0, clampf((land_impact - 3.0) / 6.0, 0.0, 1.0)))
 	tree.set(LOCO + "land/depth/blend_amount", lerpf(0.3, 1.0, smoothstep(3.0, 11.0, land_impact)))
 	# Climbing cycles run at the speed you climb (and hold still when you stop).
@@ -1281,6 +1336,13 @@ var _bl_run := PackedVector2Array()
 var _bl_sprint := PackedVector2Array()
 var _bl_hull := PackedVector2Array()
 var _stance_w := 0.0
+## 0..1: sprinting with a bladed (rifle) item: the item layer holds the rifle sprint carry
+## (first person follows the body then, so both views show the same carry).
+var sprint_carry := 0.0
+const SPRINT_CARRY_SPEED := 4.2
+const UNARMED_STEADY := 0.45           ## torso_steady at a run with nothing in hand
+const ITEM_STEADY := 0.72              ## ... with a one-handed item (0.85 looked frozen)
+const SPRINT_CARRY_T := 0.225          ## s into e_sprint_f: mid arm pump, rifle level across the chest
 const BLADED_HIPS := 0.4             ## rad: an item clip whose hips turn this far = bladed stance
 
 
@@ -1551,13 +1613,24 @@ func _drive_item(delta: float) -> void:
 	# shouldered gun pose together - a linear ramp started and stopped them with a jolt.
 	_item_w = _ease_w(&"item", want, delta)
 	_pose_w = _ease_w(&"pose", item_ready_pose, delta)
+	# Sprinting in the bladed (rifle) stance: the sprint clip carries the gun with its own arms -
+	# the item's low-ready clip on sprinting legs twisted the chest and tipped the head over,
+	# and first person (camera-placed gun) showed a different carry altogether.
+	var gsp := Vector2(velocity.x, velocity.z).length()
+	var carry := _stance_w > 0.5 and item_ready_pose < 0.5 and item_action == UltraActionLayer.Action.READY 		and gsp > SPRINT_CARRY_SPEED and state in [MotorState.Id.MOVE, MotorState.Id.IDLE]
+	sprint_carry = _ease_w(&"carry", 1.0 if carry and _role_anim(&"e_sprint_f") else 0.0, delta)
 	tree.set("parameters/upper/blend_amount", smoothstep(0.0, 1.0, _item_w))
 	tree.set("parameters/upper_src/pose/blend_amount", _pose_w)
+	tree.set("parameters/upper_src/carry/blend_amount", smoothstep(0.0, 1.0, sprint_carry))
+	tree.set("parameters/upper_src/carry_seek/seek_request", SPRINT_CARRY_T)
+	tree.set("parameters/upper_src/carry_hold/scale", 0.0)
 	if modifier:
 		modifier.weapon_aim = _item_w * _pose_w
-		# A held item's static upper body on running legs: steady the torso against the swing.
-		var gsp := Vector2(velocity.x, velocity.z).length()
-		modifier.torso_steady = smoothstep(0.0, 1.0, _item_w) * smoothstep(1.5, 4.0, gsp) * 0.85
+		# A held item's static upper body on running legs: steady the torso against the swing
+		# (a little less with a one-handed item: the pistol run looked frozen).
+		# Unarmed, part of it too: the sprint clip rocks the shoulders and head side to side.
+		var steady := lerpf(UNARMED_STEADY, 0.85 if _stance_w > 0.5 else ITEM_STEADY, smoothstep(0.0, 1.0, _item_w))
+		modifier.torso_steady = steady * smoothstep(1.5, 4.0, gsp) if state in [MotorState.Id.MOVE, MotorState.Id.IDLE, MotorState.Id.CROUCH] else 0.0
 
 
 func _set_item_clips(roles: Dictionary) -> void:
