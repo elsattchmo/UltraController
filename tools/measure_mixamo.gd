@@ -26,16 +26,23 @@ func _init() -> void:
 				want.append(s)
 	var set: AnimationSet = load(DIR + "mannequin_animset.tres")
 	for clip in want:
-		if not lib.has_animation(clip):
+		var src := lib
+		var key := clip
+		if clip.begins_with("ual:"):                         # stock clips, measured for comparison only
+			src = load(DIR + "anims/ual.res")
+			key = clip.substr(4)
+		if not src.has_animation(key):
 			push_warning("no clip " + clip)
 			continue
-		var anim := lib.get_animation(clip)
+		var anim := src.get_animation(key)
 		var m: Array = AnimMeasure.measure(anim, skel)
 		var dir := _travel_dir(anim, skel)
-		set.authored_speed["mixamo/" + clip] = snappedf(m[0], 0.001)
-		set.plant_phase["mixamo/" + clip] = snappedf(m[1], 0.001)
+		if not clip.begins_with("ual:"):
+			set.authored_speed["mixamo/" + clip] = snappedf(m[0], 0.001)
+			set.plant_phase["mixamo/" + clip] = snappedf(m[1], 0.001)
 		var face := _facing(anim, skel)
-		print("%-20s speed=%.3f m/s  plant=%.3f  len=%.3f  dir=(%.2f, %.2f)  hips %+.0f shoulders %+.0f deg" % [clip, m[0], m[1], anim.length, dir.x, dir.y, face.x, face.y])
+		var lean := _lean(anim, skel)
+		print("%-20s speed=%.3f m/s  plant=%.3f  len=%.3f  dir=(%.2f, %.2f)  hips %+.0f shoulders %+.0f deg  lean %+.0f fwd %+.0f deg" % [clip, m[0], m[1], anim.length, dir.x, dir.y, face.x, face.y, lean.x, lean.y])
 	print("saved err=", ResourceSaver.save(set, DIR + "mannequin_animset.tres"))
 	quit()
 
@@ -79,4 +86,21 @@ func _facing(anim: Animation, skel: Skeleton3D) -> Vector2:
 			var r := AnimMeasure.global_pose(skel, skel.find_bone(b)).origin
 			var f := Vector3.UP.cross(r - l)
 			out[k] += rad_to_deg(atan2(f.x, f.z)) / n
+	return out
+
+
+## Mean lean of the head over the hips (deg): x = sideways (+ = to the character's right,
+## in the hips' own frame), y = forward.
+func _lean(anim: Animation, skel: Skeleton3D) -> Vector2:
+	var out := Vector2.ZERO
+	var n := 16
+	for i in n:
+		AnimMeasure.pose(anim, skel, anim.length * i / n)
+		var l := AnimMeasure.global_pose(skel, skel.find_bone("LeftUpperLeg")).origin
+		var r := AnimMeasure.global_pose(skel, skel.find_bone("RightUpperLeg")).origin
+		var right := Vector3(r.x - l.x, 0, r.z - l.z).normalized()
+		var fwd := Vector3.UP.cross(right)
+		var d := AnimMeasure.global_pose(skel, skel.find_bone("Head")).origin - AnimMeasure.global_pose(skel, skel.find_bone("Hips")).origin
+		out.x += rad_to_deg(atan2(d.dot(right), d.y)) / n
+		out.y += rad_to_deg(atan2(d.dot(fwd), d.y)) / n
 	return out

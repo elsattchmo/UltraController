@@ -120,17 +120,20 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   the view follows the head loosely (rate-limited 90 deg/s) and hands back to your aim.
 - Body materials dither away within 0.15-0.27 m of any camera (`_near_fade_mat`); the body and
   head meshes are both capped (`UltraMeshCap`, skin-coloured).
-- Ground locomotion = 8-way (`AnimDriver._build_eight_way`, roles e_walk_*/e_run_*/e_sprint_*
-  -> Mixamo Rifle 8-Way pack R_*; one capture, all 1.0 s / 0.5 s cycles, raw clips already in
-  step: their plant_phase is 0). The pack is bladed (pelvis ~35 deg off travel), so each gait's
-  clips are turned by the gait's MEAN hip facing (per-clip turns bunch directions up) - the
-  ring stays 45 deg apart with a square-on body. Playback: the nearest clip direction with the
-  hips turned the rest (<= 22.5 deg), switching with 6 deg hysteresis + inertial blend (mixing
-  two neighbours across the sector shortened the stride: skating). Slower than the walk ring:
-  on the ring, cycle slowed. Upper body: a filtered Blend2 "relax" puts the idle on top; the
-  arms swing from the legs (`BodyDynamicsModifier.arm_swing`). Fallbacks: 4-way (u_* roles)
-  then the classic walk/strafe space. Mixamo clips can carry a stance: check hip/shoulder
-  facing with `tools/measure_mixamo.gd` (Strafe_Walk_L turns the hips 68 deg!).
+- Ground locomotion has two stances, blended by a Blend2 `stance` (+ `idle_stance` for idle):
+  * Neutral (unarmed / pistol): `_build_neutral`, roles n_walk_f (Mixamo Standard Walk
+    N_StdWalk2), n_walk_b (Walk_Backwards), n_side (UAL Strafe, other side mirrored), n_jog_f,
+    n_sprint_f. Ring F/R/B/L + a forward walk->jog->sprint line; nearest direction + hips warp.
+    Natural arm swing comes from the clips - the old "relax" Blend2 / arm_swing hack is gone.
+  * Bladed (two-handed item whose clip turns the hips > BLADED_HIPS 0.4 rad): Mixamo Rifle
+    8-Way pack R_* (roles e_walk_*/e_run_*/e_sprint_*; plant_phase 0). Walk/run clips are
+    turned so their mean hips match the rifle_aim clip's hips (legs + torso agree, so
+    item_hips_yaw twist ~0 = no sideways lean); sprints stay as authored. Idle plays the
+    item's aim clip on the legs too. Nearest clip + hips warp (<= 22.5 deg), 6 deg hysteresis
+    + inertial blend (mixing two neighbours shortened the stride: skating).
+  Mixamo clips can carry a stance: check hip/shoulder facing + lean with
+  `tools/measure_mixamo.gd` (writes the animset - back it up when only measuring). The rifle
+  8-way legs looked crouched under an unarmed body; never use them for the neutral stance.
 - `knock_down` / death set state.vel from the push (they run outside a motor step).
 - Upper-body item clips can be mirrored at runtime (`UltraAnimMirror`; the skeleton is mirror
   symmetric). `BodyDynamicsModifier.item_hips_yaw` turns the spine by the item clip's own hips
@@ -205,9 +208,20 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   along `gun_dir()`. HUD: crosshair = look, dot = projected gun ray. A READY gun fires in any
   state except the two-handed (stowed) ones. Remote players' sway isn't in snapshots yet.
 - Rifle ("Carbine", `rifle`): procedural model (`ultra_blender.py make-rifle`), slung on the
-  UpperChest, AUTO fire, support hand IK'd to the handguard, roles rifle_idle/aim/reload; its
-  bladed clip is compensated by `ItemDefinition.aim_clip_offset` (zero it if a stance turn is
-  ever added for item clips in the driver).
+  UpperChest, AUTO fire, roles rifle_idle/aim/reload (the legs stand in the aim clip's stance;
+  m4 test_rifle_stance_upright: lean < 14 deg).
+- Shouldered guns (an `M_Stock` marker + two_handed): `WeaponPoseModifier` (after FootIK,
+  before HandIK). FP: the gun is camera-placed, so the body comes to it - chest bladed
+  `blade_deg` (35) off the gun, spine + clavicle turn the shoulder pocket onto the stock, neck
+  brings the eye to the camera; the camera reads `pre_head` (the eye from before this pass),
+  else the body chasing the gun would move the camera. ADS drops the FP eye by
+  `ItemDefinition.fp_ads_eye` (cheek on the stock). TP (`from_body`): stock in the pocket,
+  barrel along the free-aim dir, hands IK'd onto it, ADS turns the neck toward the sights.
+  Reload / sprint fall back to the clips. Support hand: `support_fingers/palm` put it under the
+  fore-end at M_SupportGrip, fingers closed (`HandIK.set_curl`) - on top (the fitted
+  support_offset) it rose into the ADS sight picture. m4 test_fp_rifle_shouldered.
+- HandIK finger lists are built into locals then stored (PackedInt32Array elements are values:
+  appending through `_fingers[i]` silently did nothing, so `open` never worked before).
 - Demo playground has infinite ammo (`UltraActionLayer.infinite_ammo`; `--limited-ammo` off).
 - `teleport()` drops any traversal state (else a scripted move drags you back).
 - FP eye is swept from the capsule axis (`CameraRig._fp_guard`): the head bone dips into ledges.

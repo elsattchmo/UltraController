@@ -334,3 +334,88 @@ func test_tp_rifle_points_along_the_gun() -> void:
 	var pitch_err := rad_to_deg(asin(barrel.y) - asin(want.y))
 	info("TP rifle aiming: barrel vs gun direction yaw %.1f deg, pitch %.1f deg" % [yaw_err, pitch_err])
 	check(absf(yaw_err) < 6.0 and absf(pitch_err) < 6.0, "the rifle points along the gun direction")
+	# Shouldered: the stock at the right shoulder, the chest bladed (not side-on), both hands on
+	# the gun, the cheek down toward the sights.
+	var sk := c.skeleton
+	var g := func(n: String) -> Vector3: return sk.global_transform * sk.get_bone_global_pose(sk.find_bone(n)).origin
+	var stock := gun.global_transform * UltraPoseSampler.marker(gun, "M_Stock").origin
+	var ra: Vector3 = g.call("RightUpperArm")
+	var la: Vector3 = g.call("LeftUpperArm")
+	var chest_fwd := Vector3.UP.cross(ra - la).normalized()
+	var blade := rad_to_deg(Vector2(want.x, want.z).angle_to(Vector2(chest_fwd.x, chest_fwd.z)))
+	var head: Vector3 = g.call("Head")
+	var rear := gun.global_transform * UltraPoseSampler.marker(gun, "M_RearSight").origin
+	var errs: Array = c.anim.hand_ik.last_error
+	info("TP shouldered: stock %.3f m from the right shoulder joint, chest %.0f deg off the gun, head %.3f m above the sight line, IK err L %.3f R %.3f" % [stock.distance_to(ra), blade, head.y - rear.y, errs[0], errs[1]])
+	check(stock.distance_to(ra) < 0.13, "stock at the shoulder")
+	check(absf(blade) > 15.0 and absf(blade) < 55.0, "bladed stance, not square or side-on (%.0f deg)" % blade)
+	check(errs[0] < 0.02 and errs[1] < 0.02, "hands on the gun")
+
+
+
+## Holding the rifle (low ready and aiming), standing and walking: the body stands in the
+## rifle's own bladed stance - legs and torso agree - so it doesn't lean over to one side.
+func test_rifle_stance_upright() -> void:
+	UltraItems.give(c, &"rifle")
+	var sl := _slot(&"rifle")
+	_bot().view_tp = true
+	var sk := c.skeleton
+	var res := []
+	for spec: Array in [["low ready", 0, Vector2.ZERO], ["aiming", InputFrame.B_SECONDARY, Vector2.ZERO], ["aiming, walking", InputFrame.B_SECONDARY, Vector2(0, 1)]]:
+		_bot().set_steps([{"ticks": 1000, "slot": sl, "pitch": 0.0, "buttons": spec[1], "move": spec[2]}])
+		await ticks(90)
+		var out := [0.0, 0.0]
+		var grab := func() -> void:
+			var l := sk.global_transform * sk.get_bone_global_pose(sk.find_bone("LeftUpperLeg")).origin
+			var r := sk.global_transform * sk.get_bone_global_pose(sk.find_bone("RightUpperLeg")).origin
+			var right := Vector3(r.x - l.x, 0, r.z - l.z).normalized()
+			var hips := sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Hips")).origin
+			var head := sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Head")).origin
+			var d := head - hips
+			out[0] = maxf(out[0], absf(rad_to_deg(atan2(d.dot(right), d.y))))
+			out[1] = c.anim.modifier.item_hips_yaw
+		sk.skeleton_updated.connect(grab)
+		for i in 30:
+			await get_tree().process_frame
+		sk.skeleton_updated.disconnect(grab)
+		res.append("%s: lean %.0f deg" % [spec[0], out[0]])
+		check(out[0] < 14.0, "%s: no big sideways lean (%.0f deg)" % [spec[0], out[0]])
+	info("rifle stance: " + ", ".join(res) + "; stance weight %.2f" % c.anim._stance_w)
+
+
+## First person with the rifle (hip, aiming, looking down): the gun is placed from the camera,
+## so the body comes to it - stock in the shoulder pocket, hands on the gun, the left arm
+## reaching forward under the gun (not across the eye), the torso not folded over.
+func test_fp_rifle_shouldered() -> void:
+	UltraItems.give(c, &"rifle")
+	var rig := UltraCameraRig.new()
+	add_child(rig)
+	rig.attach(c)
+	var sl := _slot(&"rifle")
+	var sk := c.skeleton
+	var res := []
+	for spec: Array in [["hip", 0, 0.0], ["ADS", InputFrame.B_SECONDARY, 0.0], ["ADS down 40", InputFrame.B_SECONDARY, -0.7], ["hip down 60", 0, -1.05], ["ADS up 40", InputFrame.B_SECONDARY, 0.7]]:
+		_bot().set_steps([{"ticks": 1000, "slot": sl, "buttons": spec[1], "pitch": spec[2]}])
+		await ticks(100)
+		await sk.skeleton_updated
+		var wp := c.anim.weapon_pose
+		var cam := rig.camera.global_transform
+		var g := func(n: String) -> Vector3: return sk.global_transform * sk.get_bone_global_pose(sk.find_bone(n)).origin
+		var ua: Vector3 = g.call("LeftUpperArm")
+		var la: Vector3 = g.call("LeftLowerArm")
+		var lh: Vector3 = g.call("LeftHand")
+		var arm_d := minf(Geometry3D.get_closest_point_to_segment(cam.origin, ua, la).distance_to(cam.origin), Geometry3D.get_closest_point_to_segment(cam.origin, la, lh).distance_to(cam.origin))
+		# How high the left elbow comes into the view: angle above (+) / below (-) the view ray.
+		var el: Vector3 = la - cam.origin
+		var el_up := rad_to_deg(asin(clampf(el.normalized().dot(cam.basis.y), -1.0, 1.0)))
+		var hips: Vector3 = g.call("Hips")
+		var neck: Vector3 = g.call("Neck")
+		var bend := rad_to_deg((neck - hips).angle_to(Vector3.UP))
+		var errs: Array = c.anim.hand_ik.last_error
+		res.append("%s: gap %.3f m, left arm %.2f m from the eye (elbow %+.0f deg), torso bend %.0f deg, IK err L %.3f R %.3f, active %s" % [spec[0], wp.last_gap, arm_d, el_up, bend, errs[0], errs[1], wp.shouldered])
+		check(wp.shouldered and wp.last_gap < 0.06, "%s: stock in the shoulder (%.3f m)" % [spec[0], wp.last_gap])
+		check(arm_d > 0.14, "%s: left arm clear of the eye (%.2f m)" % [spec[0], arm_d])
+		check(errs[0] < 0.02 and errs[1] < 0.02, "%s: hands on the gun" % spec[0])
+		check(bend < 40.0, "%s: torso not folded over (%.0f deg)" % [spec[0], bend])
+	info("\n  ".join(res))
+	rig.queue_free()

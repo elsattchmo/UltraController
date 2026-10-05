@@ -393,23 +393,80 @@ func _drive_hands(delta: float) -> void:
 			anim.hand_ik.release(other, 8.0)
 			_owns[other] = false
 		gun = gun.interpolate_with(target_gun, w)
+		_shoulder_gun(target_gun, w)
 	else:
+		_shoulder_gun(Transform3D(), 0.0)
 		for h in [HandIKModifier.Hand.RIGHT, HandIKModifier.Hand.LEFT]:
 			if _owns[h] and (h == HandIKModifier.Hand.RIGHT) == (_side == 1):
 				anim.hand_ik.release(h, 8.0)
 				_owns[h] = false
 	# Support hand follows the gun wherever it goes (two working hands only).
 	if ready and _side == 1 and UltraInjury.two_hands(s) and held_def and held_def.two_handed and held_def.support_offset != Transform3D.IDENTITY:
-		var sup := gun * held_def.support_offset
+		var sup := _support_under(gun) if held_def.support_fingers != Vector3.ZERO else gun * held_def.support_offset
 		# A long gun held low can put the handguard grip out of the arm's reach: the hand
 		# slides back along the handguard (up to 15 cm) instead of floating off it.
 		sup = _within_reach(sup, (gun.basis * Vector3.BACK).normalized(), 0.15)
 		anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, sup, 1.0, true, 10.0)
+		if held_def.support_fingers != Vector3.ZERO:
+			anim.hand_ik.set_curl(HandIKModifier.Hand.LEFT, 1.0)
 		_owns[HandIKModifier.Hand.LEFT] = true
 	elif _side == 1 and _owns[HandIKModifier.Hand.LEFT]:
 		anim.hand_ik.release(HandIKModifier.Hand.LEFT, 8.0)
 		_owns[HandIKModifier.Hand.LEFT] = false
 	_drive_reload(delta)
+
+
+## A gun with a stock is held shouldered (WeaponPoseModifier). First person: the body comes to
+## the camera-placed gun (`fp_target`, weight `fp_w`). Third person: the gun goes to the body -
+## stock in the shoulder pocket, along the free-aim direction - and the hands go onto it.
+func _shoulder_gun(fp_target: Transform3D, fp_w: float) -> void:
+	var anim := character.anim
+	var wp := anim.weapon_pose if anim else null
+	if wp == null:
+		return
+	var s := character.state
+	var stock := UltraPoseSampler.marker(held_node, "M_Stock") if held_node and held_def else Transform3D.IDENTITY
+	if stock == Transform3D.IDENTITY or not held_def.two_handed:
+		wp.weight = 0.0
+		return
+	var sk := character.skeleton
+	var to_sk := sk.global_basis.orthonormalized().inverse() * character.visual_root.global_basis.orthonormalized()
+	wp.stock = stock.origin
+	wp.side = _side
+	wp.eye_offset_sk = to_sk * character.body_profile.eye_offset / maxf(sk.global_basis.get_scale().x, 0.001)
+	if camera != null:
+		wp.from_body = false
+		wp.weight = fp_w
+		wp.gun = fp_target
+		wp.eye_target = camera.global_position
+		return
+	# Third person: weapon up, two working hands, not reloading / sprinting (the clips do those).
+	var up := s.action == UltraActionLayer.Action.READY and _side == 1 and UltraInjury.two_hands(s)
+	wp.from_body = true
+	wp.weight = anim.modifier.weapon_aim if up and anim.modifier else 0.0
+	wp.eye_target = Vector3.INF
+	wp.gun_dir = gun_ray().dir
+	wp.ads = ads
+	# Aiming: the eye a hand's width behind the rear sight, a little above the sight line.
+	wp.eye_in_gun = UltraPoseSampler.marker(held_node, "M_RearSight").origin + Vector3(0.0, 0.03, 0.11)
+	wp.grip_inv = grip().affine_inverse()
+	var g := held_node.global_transform.orthonormalized()
+	wp.support = g.affine_inverse() * (_support_under(g) if held_def.support_fingers != Vector3.ZERO else g * held_def.support_offset)
+	wp.hand_ik = anim.hand_ik
+
+
+## The support hand under the fore-end: palm up against it, fingers wrapping round the far
+## side - it stays below the sights (on top, the hand came up into the sight picture).
+func _support_under(gun: Transform3D) -> Transform3D:
+	var gb := gun.basis.orthonormalized()
+	var f := (gb * held_def.support_fingers).normalized()
+	var p := (gb * held_def.support_palm).normalized()
+	var b := character.anim.hand_ik.hand_basis(HandIKModifier.Hand.LEFT, f, p)
+	if b == Basis():
+		return gun * held_def.support_offset
+	var contact := gun * UltraPoseSampler.marker(held_node, "M_SupportGrip").origin
+	# The hand bone sits at the wrist: back along the hand, down off the palm.
+	return Transform3D(b, contact - f * 0.065 - (p - f * p.dot(f)).normalized() * 0.03)
 
 
 var _left_reach := 0.0

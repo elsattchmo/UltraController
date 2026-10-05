@@ -133,6 +133,12 @@ func _on_skeleton_updated() -> void:
 		return
 	var sk := character.skeleton
 	var head_sk := sk.get_bone_global_pose(_head_bone)
+	# A shouldered gun pulls the body after it (WeaponPoseModifier): the eye comes from the pose
+	# before that, else the body chasing the camera-placed gun would move the camera.
+	var wp := character.anim.weapon_pose if character.anim else null
+	var shouldered := wp != null and wp.shouldered
+	if shouldered:
+		head_sk = wp.pre_head
 	var rot_sk := head_sk.basis.orthonormalized() * _head_rest_inv
 	var to_sk := sk.global_basis.orthonormalized().inverse() * character.visual_root.global_basis
 	# The eye follows the head's turn but not its nod: pitching the head would swing the eye out
@@ -152,7 +158,7 @@ func _on_skeleton_updated() -> void:
 	if _neck_bone < 0:
 		_neck_bone = sk.find_bone("Neck")
 	if _neck_bone >= 0:
-		_neck_cached = vis_inv * (sk.global_transform * sk.get_bone_global_pose(_neck_bone).origin)
+		_neck_cached = vis_inv * (sk.global_transform * (wp.pre_neck if shouldered else sk.get_bone_global_pose(_neck_bone).origin))
 	_have_eye = true
 
 
@@ -217,6 +223,11 @@ func _process(delta: float) -> void:
 	_land.step(delta)
 	shift.y += float(_land.value)
 	var fp_raw := fp_base + shift
+	# Aiming down a shouldered gun's sights: the head goes down onto the stock.
+	var ads_eq := _equipment()
+	if ads_eq and ads_eq.held_def and ads_eq.ads > 0.0 and ads_eq.held_def.fp_ads_eye != Vector3.ZERO:
+		var o := ads_eq.held_def.fp_ads_eye
+		fp_raw += Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch) * Vector3(o.x, o.y, -o.z) * smoothstep(0.0, 1.0, ads_eq.ads)
 	var fp_pos := _fp_guard(vis, fp_raw) if t < 0.99 else fp_raw
 	# Swimming at the surface: keep the eye just above the water line (never half-submerged).
 	if character.state.state == MotorState.Id.SWIM and character.motor and character.motor.water:

@@ -18,6 +18,8 @@ class Goal:
 	## line_range metres of target.origin.
 	## 0..1: fingers straightened toward the rest pose (an open hand pressed on a surface).
 	var open := 0.0
+	## 0..1: fingers closed round a bar (a fore-end, a rail) instead of the animated curl.
+	var curl := 0.0
 	var line_dir := Vector3.ZERO
 	var line_range := Vector2(-0.8, 0.8)
 
@@ -42,13 +44,17 @@ func _resolve() -> void:
 	var sk := get_skeleton()
 	if sk == null:
 		return
-	_fingers = [PackedInt32Array(), PackedInt32Array()]
-	for b in sk.get_bone_count():
-		var n := sk.get_bone_name(b)
-		for i in 2:
-			var side := "Left" if i == 0 else "Right"
+	# (Packed arrays are values: fill locals, then store them.)
+	var lists := [PackedInt32Array(), PackedInt32Array()]
+	for i in 2:
+		var side := "Left" if i == 0 else "Right"
+		var l := PackedInt32Array()
+		for b in sk.get_bone_count():
+			var n := sk.get_bone_name(b)
 			if n.begins_with(side) and (n.contains("Index") or n.contains("Middle") or n.contains("Ring") or n.contains("Little")):
-				(_fingers[i] as PackedInt32Array).append(b)
+				l.append(b)
+		lists[i] = l
+	_fingers = lists
 	_arms = []
 	for side in ["Left", "Right"]:
 		_arms.append([sk.find_bone(side + "UpperArm"), sk.find_bone(side + "LowerArm"), sk.find_bone(side + "Hand")])
@@ -61,6 +67,7 @@ func set_goal(hand: int, world_xform: Transform3D, weight := 1.0, use_rotation :
 	var g: Goal = goals[hand]
 	g.line_dir = Vector3.ZERO
 	g.open = open
+	g.curl = 0.0
 	g.target = world_xform
 	g.want_weight = clampf(weight, 0.0, 1.0)
 	g.use_rotation = use_rotation
@@ -73,6 +80,11 @@ func set_line_goal(hand: int, point: Vector3, dir: Vector3, range_m := Vector2(-
 	var g: Goal = goals[hand]
 	g.line_dir = dir.normalized()
 	g.line_range = range_m
+
+
+## Close the fingers of `hand` round a bar (after set_goal, which resets it).
+func set_curl(hand: int, amount: float) -> void:
+	(goals[hand] as Goal).curl = clampf(amount, 0.0, 1.0)
 
 
 func release(hand: int, speed := 6.0) -> void:
@@ -158,3 +170,35 @@ func _process_modification_with_delta(delta: float) -> void:
 				var rest := sk.get_bone_rest(fb).basis.get_rotation_quaternion()
 				var cur := sk.get_bone_pose_rotation(fb)
 				sk.set_bone_pose_rotation(fb, cur.slerp(rest, g.open * w * 0.85))
+		if g.curl > 0.0 and i < 2:
+			_close_fingers(sk, i, g.curl * w)
+
+
+## Fingers straightened, then bent toward the palm joint by joint (a grip round a ~4 cm bar).
+const CURL_DEG := {"Proximal": 48.0, "Intermediate": 62.0, "Distal": 38.0}
+
+
+func _close_fingers(sk: Skeleton3D, hand: int, amount: float) -> void:
+	if _palm_local[hand] == Vector3.ZERO:
+		hand_basis(hand, Vector3.FORWARD, Vector3.UP)       # learns the palm direction
+		if _palm_local[hand] == Vector3.ZERO:
+			return
+	var hb := sk.get_bone_global_pose(_arms[hand][2])
+	var palm := (hb.basis.orthonormalized() * (_palm_local[hand] as Vector3)).normalized()
+	for fb: int in _fingers[hand]:
+		var n := sk.get_bone_name(fb)
+		var deg := 0.0
+		for k: String in CURL_DEG:
+			if n.contains(k):
+				deg = CURL_DEG[k]
+		if deg == 0.0:
+			continue
+		var rest := sk.get_bone_rest(fb).basis.get_rotation_quaternion()
+		sk.set_bone_pose_rotation(fb, sk.get_bone_pose_rotation(fb).slerp(rest, amount))
+		var g := sk.get_bone_global_pose(fb)
+		var dir := g.basis.y.normalized()
+		var axis := dir.cross(palm)
+		if axis.length() < 1e-4:
+			continue
+		g.basis = Basis(axis.normalized(), deg_to_rad(deg) * amount) * g.basis
+		sk.set_bone_global_pose(fb, g)

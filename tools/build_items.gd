@@ -184,6 +184,9 @@ func _rifle(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	d.grip_offset = grip
 	d.support_offset = support
 	d.two_handed = true
+	# Support hand under the fore-end, fingers wrapped round its right side (WeaponPoseModifier).
+	d.support_fingers = Vector3(0.55, 0.0, -0.8)
+	d.support_palm = Vector3(0.2, 1.0, 0.0)
 	# Back: UpperChest frame in an idle pose. Skeleton space: +Z forward, +Y up, +X = the
 	# character's left. Muzzle up over the left shoulder, sights against the back.
 	UltraPoseSampler.pose(lib.get_animation("Idle_A"), skel, 0.5)
@@ -205,8 +208,9 @@ func _rifle(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	}
 	d.equip_time = 0.6
 	d.fire_mode = ItemDefinition.FireMode.AUTO
-	d.fp_hip_offset = Vector3(0.1, -0.15, 0.2)
+	d.fp_hip_offset = Vector3(0.11, -0.13, 0.22)
 	d.fp_ads_distance = 0.15
+	d.fp_ads_eye = Vector3(0.035, -0.07, 0.03)        # cheek down onto the stock
 	# Heavier than the pistol: more inertia, slower to settle, a wider free-aim zone.
 	d.sway_inertia = 0.5
 	d.sway_return_hz = 1.6

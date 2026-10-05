@@ -29,6 +29,11 @@ enum FireMode { SEMI, AUTO }
 ## LeftHand bone transform in the item's frame (support hand), or identity = one-handed.
 @export var support_offset := Transform3D.IDENTITY
 @export var two_handed := false
+## Support hand placed under the fore-end (at the item's M_SupportGrip marker) instead of
+## `support_offset`: the direction the hand points (wrist to knuckles) and the way the palm
+## faces, in the item's frame (x right, y up, -z forward). Zero = use support_offset.
+@export var support_fingers := Vector3.ZERO
+@export var support_palm := Vector3.ZERO
 ## Item transform in `holster_bone`'s frame when holstered (hip holster, slung on the back).
 @export var holster_offset := Transform3D.IDENTITY
 @export var holster_bone := &"Hips"
@@ -50,6 +55,9 @@ enum FireMode { SEMI, AUTO }
 @export var fp_hip_offset := Vector3(0.16, -0.17, 0.42)
 ## First person, aiming down sights: rear sight this far in front of the eye.
 @export_range(0.03, 0.8, 0.005) var fp_ads_distance := 0.37
+## First person, aiming down sights: the head drops onto the stock - the eye moves by this
+## (metres, x right, y up, z forward in the view). Zero for guns without a stock.
+@export var fp_ads_eye := Vector3.ZERO
 
 @export_group("Free aim")
 ## The gun has its own direction: aim + an offset on a damped spring (MotorState.sway).

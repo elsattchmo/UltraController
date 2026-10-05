@@ -101,18 +101,14 @@ roles = {
 &"turn_l90": "Turn_Left_90",
 &"turn_r180": "Turn_Right_180",
 &"turn_r90": "Turn_Right_90",
-&"u_run_b": "mixamo/U_Run_B",
-&"u_run_f": "mixamo/U_Run_F",
-&"u_run_l": "mixamo/U_Run_L",
-&"u_run_r": "mixamo/U_Run_R",
-&"u_sprint_f": "mixamo/U_Sprint_F",
-&"u_walk_b": "mixamo/U_Walk_B",
+&"n_walk_f": "mixamo/N_StdWalk2",
+&"n_walk_b": "Walk_Backwards",
+&"n_side": "Strafe_left",
+&"n_jog_f": "Jog",
+&"n_sprint_f": "Sprint",
 &"rifle_idle": "mixamo/Rifle_Idle",
 &"rifle_aim": "mixamo/Rifle_Idle_Aiming",
 &"rifle_reload": "mixamo/Rifle_Reload",
-&"u_walk_f": "mixamo/U_Walk_F",
-&"u_walk_l": "mixamo/U_Walk_L",
-&"u_walk_r": "mixamo/U_Walk_R",
 &"walk_b": "Walk_Backwards",
 &"walk_carry": "Walk_Carry",
 &"walk_f": "Walk",
@@ -120,6 +116,7 @@ roles = {
 &"wall_climb": "Climb_Wall"
 }
 authored_speed = {
+"mixamo/N_StdWalk2": 1.453,
 "Crawl": 0.0,
 "Crouch_Walk": 0.5852508,
 "Jog": 4.826462,
@@ -172,6 +169,7 @@ authored_speed = {
 "mixamo/U_Walk_R": 1.246
 }
 plant_phase = {
+"mixamo/N_StdWalk2": 0.325,
 "Crawl": 0.3,
 "Crouch_Walk": 0.0625,
 "Jog": 0.0375,

@@ -39,6 +39,16 @@ func _build() -> void:
 		{"t": 0.6},
 		{"t": 0.45, "buttons": F.B_PRIMARY, "shot": "14_fp_rifle_hip_auto_fire"},
 		{"t": 0.6},
+		# The first-person body from outside (it comes to the camera-placed gun).
+		{"call": func() -> void: _side_cam(1.0), "t": 0.6, "shot": "14b_fp_body_side_hip"},
+		{"t": 0.8, "buttons": F.B_SECONDARY, "shot": "14c_fp_body_side_ads"},
+		{"call": func() -> void: _cam_at(1.5, 1.9), "t": 0.6, "buttons": F.B_SECONDARY, "shot": "14d_fp_body_front_ads"},
+		{"t": 0.8, "shot": "14e_fp_body_front_hip"},
+		{"t": 0.8, "buttons": F.B_SECONDARY, "pitch": -40, "shot": "14f_fp_body_front_ads_down"},
+		{"call": func() -> void: _cam_at(-1.6, 1.6), "t": 0.6, "buttons": F.B_SECONDARY, "pitch": -2, "shot": "14g_fp_body_left_front_ads"},
+		{"call": _main_cam, "t": 0.6},
+		{"t": 0.8, "buttons": F.B_SECONDARY, "pitch": -40, "shot": "14h_fp_rifle_ads_down"},
+		{"t": 0.8, "pitch": -2},
 		{"t": 0.8, "tap": F.B_RELOAD, "shot": "15_fp_rifle_reload"},
 		{"t": 2.2, "yaw": 0},
 		{"t": 1.0, "move": Vector2(0, 1), "buttons": F.B_SPRINT, "shot": "16_fp_rifle_sprint"},
@@ -88,6 +98,18 @@ func _side_cam(side: float) -> void:
 	_cam.look_at(chest + fwd * 0.4)
 	_cam.fov = 50.0
 	_cam.current = true
+
+
+## A camera `right_m` to the player's right and `fwd_m` ahead, looking back at the chest.
+func _cam_at(right_m: float, fwd_m: float) -> void:
+	_side_cam(1.0)
+	var c: UltraCharacter = main.player
+	var yaw := c.state.body_yaw
+	var right := Vector3(cos(yaw), 0, -sin(yaw))
+	var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
+	var chest := c.global_position + Vector3.UP * 1.35
+	_cam.global_position = chest + right * right_m + fwd * fwd_m + Vector3.UP * 0.15
+	_cam.look_at(chest + fwd * 0.2)
 
 
 func _main_cam() -> void:
