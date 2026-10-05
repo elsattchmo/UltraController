@@ -7,6 +7,7 @@ extends Node
 
 const MANNEQUIN := "res://assets/characters/mannequin/"
 const RIFLE := "res://assets/items/rifle/"
+const SHOTGUN := "res://assets/items/shotgun/"
 
 
 func _ready() -> void:
@@ -17,6 +18,7 @@ func _ready() -> void:
 	_world_scenes_first()
 	_pistol(skel, lib)
 	_rifle(skel, lib)
+	_shotgun(skel, lib)
 	_ammo()
 	_misc()
 	_keys()
@@ -76,6 +78,11 @@ func _world_scenes_first() -> void:
 	rifle.name = "Visual"
 	_world_scene(RIFLE + "rifle_world.tscn", &"rifle", rifle, Vector3(0.06, 0.2, 1.1), Vector3(0, 0.0, -0.17))
 	_world_scene("res://assets/items/ammo/ammo_556_world.tscn", &"ammo_556", _box_visual(Vector3(0.18, 0.09, 0.11), Color(0.42, 0.36, 0.2)), Vector3(0.18, 0.09, 0.11))
+	if ResourceLoader.exists(SHOTGUN + "shotgun.glb"):
+		var sg := (load(SHOTGUN + "shotgun.glb") as PackedScene).instantiate() as Node3D
+		sg.name = "Visual"
+		_world_scene(SHOTGUN + "shotgun_world.tscn", &"shotgun", sg, Vector3(0.06, 0.2, 1.0), Vector3(0, 0.0, -0.15))
+	_world_scene("res://assets/items/ammo/ammo_12g_world.tscn", &"ammo_12g", _box_visual(Vector3(0.12, 0.08, 0.08), Color(0.6, 0.12, 0.08)), Vector3(0.12, 0.08, 0.08))
 	_world_scene("res://assets/items/medkit/medkit_world.tscn", &"medkit", _box_visual(Vector3(0.22, 0.09, 0.16), Color(0.9, 0.9, 0.9)), Vector3(0.22, 0.09, 0.16))
 	for k in [["red", Color(0.9, 0.15, 0.1)], ["blue", Color(0.15, 0.35, 0.95)], ["green", Color(0.15, 0.8, 0.25)]]:
 		_world_scene("res://assets/items/keys/key_%s_world.tscn" % k[0], StringName("key_" + k[0]), _box_visual(Vector3(0.09, 0.025, 0.035), k[1], true), Vector3(0.09, 0.03, 0.04))
@@ -220,7 +227,7 @@ func _rifle(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	d.sway_amount = 1.35
 	d.ads_sway_mult = 0.3
 	d.recoil_gun_deg = 1.8
-	d.sprint_lower_deg = Vector2(14.0, -24.0)
+	d.sprint_lower_deg = _carry_dir(skel, mix, grip, Vector2(14.0, -24.0))
 	d.stats = {
 		"mag_size": 30, "fire_interval": 0.092, "damage": 30.0, "range": 300.0, "spread_deg": 1.4,
 		"ads_spread_deg": 0.06, "reload_time": 2.6, "reload_commit": 1.9, "ammo": "ammo_556",
@@ -238,6 +245,101 @@ func _rifle(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	ammo.max_stack = 180
 	ammo.world_scene = load("res://assets/items/ammo/ammo_556_world.tscn")
 	ResourceSaver.save(ammo, "res://assets/items/ammo/ammo_556_item.tres")
+
+
+## 12-gauge pump-action: held like the carbine (same clips, same grip fit), the support hand on
+## the pump (M_SupportGrip rides the "Pump" node). Nine pellets a shot, a tube of six loaded
+## a shell at a time, a pump after every shot (UltraEquipmentVisual drives the pump and the
+## loading hand; the timing is the simulation's).
+func _shotgun(skel: Skeleton3D, lib: AnimationLibrary) -> void:
+	if not ResourceLoader.exists(SHOTGUN + "shotgun.glb"):
+		return
+	var mix: AnimationLibrary = load(MANNEQUIN + "anims/mixamo.res") if ResourceLoader.exists(MANNEQUIN + "anims/mixamo.res") else null
+	var aim: Animation = mix.get_animation("Rifle_Idle_Aiming") if mix and mix.has_animation("Rifle_Idle_Aiming") else lib.get_animation("Pistol_Aim_Neutral")
+	UltraPoseSampler.pose(aim, skel, 0.1)
+	var gun_node := (load(SHOTGUN + "shotgun.glb") as PackedScene).instantiate() as Node3D
+	var rh := UltraPoseSampler.global_pose(skel, skel.find_bone("RightHand"))
+	var grip := UltraGripFit.fit(skel, gun_node)
+	var gun_model := rh * grip
+	var contact := gun_model * UltraPoseSampler.marker(gun_node, "M_SupportGrip").origin
+	var bdir := -gun_model.basis.z.normalized()
+	var aim_offset := Vector2(rad_to_deg(atan2(bdir.x, bdir.z)), rad_to_deg(asin(bdir.y)))
+	var support := gun_model.affine_inverse() * _support_hand(skel, gun_model, contact)
+	gun_node.free()
+	var d := ItemDefinition.new()
+	d.id = &"shotgun"
+	d.display_name = "Shotgun"
+	d.description = "12-gauge pump-action. Six in the tube, loaded a shell at a time."
+	d.kind = ItemDefinition.Kind.FIREARM
+	d.mass = 3.6
+	d.max_stack = 1
+	d.equip_scene = load(SHOTGUN + "shotgun.glb")
+	d.world_scene = load(SHOTGUN + "shotgun_world.tscn") if ResourceLoader.exists(SHOTGUN + "shotgun_world.tscn") else null
+	d.equip_slots = ItemDefinition.EquipSlot.MAIN_HAND | ItemDefinition.EquipSlot.BACK
+	d.grip_offset = grip
+	d.support_offset = support
+	d.two_handed = true
+	d.support_fingers = Vector3(0.55, 0.0, -0.8)
+	d.support_palm = Vector3(0.2, 1.0, 0.0)
+	# Slung like the carbine (back, muzzle up over the left shoulder).
+	UltraPoseSampler.pose(lib.get_animation("Idle_A"), skel, 0.5)
+	var chest := UltraPoseSampler.global_pose(skel, skel.find_bone("UpperChest"))
+	var barrel := Vector3(0.62, 1.0, 0.0).normalized()
+	var z := -barrel
+	var y := (Vector3(0, 0, 1) - barrel * barrel.z).normalized()
+	var b := Basis(y.cross(z), y, z)
+	var centre_local := Vector3(0, 0.03, -0.15)
+	var centre := Vector3(chest.origin.x - 0.02, chest.origin.y - 0.06, chest.origin.z - 0.19)
+	d.holster_bone = &"UpperChest"
+	d.holster_offset = chest.affine_inverse() * Transform3D(b, centre - b * centre_local)
+	# The carbine's clips; the reload keeps the low-ready pose (the loading hand is IK).
+	d.anim_roles = {"idle": "rifle_idle", "aim": "rifle_aim", "fire": "rifle_aim", "reload": "rifle_idle"}
+	d.aim_clip_offset = aim_offset.snappedf(0.1)
+	d.equip_time = 0.7
+	d.fire_mode = ItemDefinition.FireMode.SEMI
+	d.fp_hip_offset = Vector3(0.11, -0.13, 0.22)
+	d.fp_ads_distance = 0.17
+	d.fp_ads_eye = Vector3(0.035, -0.06, 0.03)
+	d.sway_inertia = 0.55
+	d.sway_return_hz = 1.5
+	d.sway_damping = 0.65
+	d.free_aim_deg = 6.0
+	d.sway_amount = 1.4
+	d.ads_sway_mult = 0.35
+	# A real shove: the gun climbs a lot and comes back slowly.
+	d.recoil_gun_deg = 7.0
+	d.sprint_lower_deg = _carry_dir(skel, mix, grip, Vector2(14.0, -24.0))
+	d.stats = {
+		"mag_size": 6, "fire_interval": 0.9, "pellets": 9, "damage": 14.0, "pellet_spread_deg": 2.2,
+		"range": 70.0, "spread_deg": 0.6, "ads_spread_deg": 0.2, "ammo": "ammo_12g",
+		"impulse": 3.0, "recoil_pitch_deg": 9.0, "recoil_yaw_deg": 2.2, "ads_fov": 58.0,
+		"reload_mode": "shell", "reload_start": 0.35, "shell_time": 0.55, "reload_end": 0.3,
+		"pump_delay": 0.22, "pump_time": 0.42, "kick": 3.2,
+	}
+	ResourceSaver.save(d, SHOTGUN + "shotgun_item.tres")
+	print("saved shotgun item; grip ", grip, " aim offset ", aim_offset)
+	var ammo := ItemDefinition.new()
+	ammo.id = &"ammo_12g"
+	ammo.display_name = "12 ga shells"
+	ammo.kind = ItemDefinition.Kind.AMMO
+	ammo.mass = 0.04
+	ammo.max_stack = 60
+	ammo.world_scene = load("res://assets/items/ammo/ammo_12g_world.tscn")
+	ResourceSaver.save(ammo, "res://assets/items/ammo/ammo_12g_item.tres")
+
+
+## Sprinting, the rifle is carried at port arms (AnimDriver: one frame of the rifle sprint clip
+## on the item layer); the free aim goes where that barrel points (yaw toward the off side,
+## pitch; degrees, skeleton space: +Z forward, +X the character's left).
+func _carry_dir(skel: Skeleton3D, mix: AnimationLibrary, grip: Transform3D, fallback: Vector2) -> Vector2:
+	if mix == null or not mix.has_animation("R_Sprint_F"):
+		return fallback
+	UltraPoseSampler.pose(mix.get_animation("R_Sprint_F"), skel, UltraAnimDriver.SPRINT_CARRY_T)
+	var g := UltraPoseSampler.global_pose(skel, skel.find_bone("RightHand")) * grip
+	var dir := -g.basis.z.normalized()
+	var out := Vector2(rad_to_deg(atan2(dir.x, dir.z)), rad_to_deg(asin(dir.y))).snappedf(0.1)
+	print("sprint carry: barrel yaw %.1f deg (+ = left), pitch %.1f deg" % [out.x, out.y])
+	return out
 
 
 ## Left hand bone (skeleton space) on the handguard at `contact` (the grip point under it):

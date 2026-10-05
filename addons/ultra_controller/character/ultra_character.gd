@@ -567,6 +567,8 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 		var after := state.limb_hp[r] / 100.0 * max_hp - info.amount
 		state.limb_hp[r] = clampi(int(ceil(after / max_hp * 100.0)), 0, 100)
 		var sharp := info.kind == &"blast" or info.kind == &"blade"
+		# Buckshot (the pellets that struck this region, summed) tears off a limb it destroys.
+		sharp = sharp or info.kind == &"buckshot"
 		if dp.dismemberment and dp.gore_on() and (dp.severable >> r) & 1 and not (state.severed >> r) & 1 \
 				and (after <= -dp.sever_overkill or (sharp and after <= 0.0)):
 			cut = UltraLimbs.sever_mask(r) & ~state.severed
@@ -583,12 +585,29 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 	if dead:
 		state.hp = 0.0
 		state.trav_from = info.dir * clampf(info.amount * 0.06, 1.0, 6.0)   # the body's push
+		if info.shove != Vector3.ZERO:
+			state.trav_from = info.shove.limit_length(10.0) + Vector3.UP * minf(info.shove.length() * 0.2, 2.0)
+		# Already sent flying by this blast (another pellet group knocked us down first): the
+		# killing hit doesn't stop the fall.
+		if Vector3(state.vel.x, 0.0, state.vel.z).length() > Vector3(state.trav_from.x, 0.0, state.trav_from.z).length():
+			state.trav_from = state.vel
 		motor.change_state(state, last_input, MotorState.Id.DEAD)
 		state.vel = motor.body.velocity
 		UltraNet.world.broadcast(&"died", [net_id, info.attacker_id], true)
 		died.emit()
-	elif info.amount * mult >= dp.knockdown_damage or info.kind == &"blast" or (cut & legs) != 0:
-		knock_down(info.dir * clampf(info.amount * 0.08, 2.0, 8.0) + Vector3.UP * 1.5)
+	elif info.amount * mult >= dp.knockdown_damage or info.kind == &"blast" or (cut & legs) != 0 \
+			or info.shove.length() >= SHOVE_KNOCKDOWN:
+		var push := info.dir * clampf(info.amount * 0.08, 2.0, 8.0)
+		if info.shove.length() > push.length():
+			push = info.shove.limit_length(10.0)
+		knock_down(push + Vector3.UP * 1.5)
+	elif info.shove != Vector3.ZERO and state.state not in [MotorState.Id.RAGDOLL, MotorState.Id.GET_UP]:
+		# A lighter blast: rocked back a step.
+		state.vel += Vector3(info.shove.x, 0.0, info.shove.z) * 0.7
+
+
+## A shove (UltraCombat.DamageInfo.shove, m/s) this big knocks you off your feet.
+const SHOVE_KNOCKDOWN := 3.5
 
 
 ## Authority: fall over (ragdoll); you get up once the body settles. Predicted from here on.

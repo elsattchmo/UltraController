@@ -69,8 +69,13 @@ func _on_item(c: UltraCharacter, kind: StringName, data: Dictionary) -> void:
 	var eq := c.get_node_or_null("Equipment") as UltraEquipmentVisual
 	var muzzle := eq.muzzle_transform() if eq else c.visual_root.global_transform
 	flash(muzzle)
-	if eq:
+	if eq and not eq.pumps():          # (a pump-action throws its shell when it's racked)
 		shell(eq.eject_transform(), c.visual_root.global_basis * Vector3.RIGHT)
+	# Buckshot: a tracer and a predicted impact per pellet.
+	if data.has("dirs"):
+		for d: Vector3 in data.dirs:
+			_shot_fx(c, muzzle, data.origin, d, 70.0)
+		return
 	# Tracer + predicted impact for shots this machine simulated (data carries the ray).
 	if data.has("origin"):
 		var space := get_world_3d().direct_space_state
@@ -91,6 +96,24 @@ func _on_item(c: UltraCharacter, kind: StringName, data: Dictionary) -> void:
 				sparks(hit.position, hit.normal)
 	else:
 		tracer(muzzle.origin, muzzle.origin + (-muzzle.basis.z) * 40.0)
+
+
+func _shot_fx(c: UltraCharacter, muzzle: Transform3D, origin: Vector3, dir: Vector3, reach: float) -> void:
+	var space := get_world_3d().direct_space_state
+	var to := origin + dir * reach
+	var ex: Array[RID] = [c.get_rid()]
+	if c.hit_volume:
+		ex.append(c.hit_volume.get_rid())
+	var q := PhysicsRayQueryParameters3D.create(origin, to, UltraCombat.MASK, ex)
+	var hit := UltraCombat._cast(space, q, origin, dir)
+	tracer(muzzle.origin, hit.position if not hit.is_empty() else to)
+	if not hit.is_empty():
+		var who := UltraCharacter.of_collider(hit.collider)
+		if who:
+			if who.damage_profile.blood_on():
+				blood(hit.position, hit.normal)
+		else:
+			sparks(hit.position, hit.normal)
 
 
 func _on_impact(pos: Vector3, normal: Vector3, kind: StringName, shooter_id: int) -> void:

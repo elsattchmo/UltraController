@@ -287,3 +287,47 @@ func test_no_run_legs_after_climb() -> void:
 		c.queue_free()
 		chars.erase(c)
 		await ticks(2)
+
+
+## Hanging still on a ledge, the body is still (the braced idle's looping tail snapped it 2 cm
+## every 0.55 s).
+func test_hang_still() -> void:
+	var Id := MotorState.Id
+	var c := spawn("ledge_250", "res://addons/ultra_controller/profiles/fps.tres", true)
+	await ticks(3)
+	var b := c.input_source as BotInputSource
+	b.driver = func(_t: int, _s: BotInputSource) -> InputFrame:
+		var f := InputFrame.new()
+		f.move = Vector2(0, 1) if c.state.state != Id.LEDGE_HANG else Vector2.ZERO
+		if c.state.pos.z < -27.3 and c.state.state != Id.LEDGE_HANG:
+			f.buttons = InputFrame.B_JUMP
+		return f
+	for i in 200:
+		await ticks(1)
+		if c.state.state == Id.LEDGE_HANG and c.state.state_time > 1.0:
+			break
+	var sk := c.skeleton
+	var rec := []
+	var cb := func() -> void:
+		var vi := c.visual_root.global_transform.affine_inverse()
+		var row := [c.visual_root.global_position, c.state.pos, c.tick]
+		for n in ["Head", "LeftHand", "RightHand", "Hips", "LeftFoot"]:
+			row.append(vi * (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(n))).origin)
+		rec.append(row)
+	sk.skeleton_updated.connect(cb)
+	await ticks(240)
+	sk.skeleton_updated.disconnect(cb)
+	var lines := []
+	for i in range(1, rec.size()):
+		var s := "%d" % rec[i][2]
+		var any := false
+		for k in range(3, 8):
+			var d: Vector3 = (rec[i][k] as Vector3) - (rec[i - 1][k] as Vector3)
+			any = any or d.length() > 0.002
+			s += " | %s" % d.snappedf(0.001)
+		if any:
+			lines.append(s)
+	info("hanging still: %d of %d frames moved a bone > 2 mm" % [lines.size(), rec.size()])
+	check(lines.size() == 0, "the hanging body stays still (%s)" % "; ".join(lines.slice(0, 3)))
+	c.queue_free()
+	chars.erase(c)

@@ -130,9 +130,15 @@ static func _firearm(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemD
 		s.fire_cd = float(def.stat("fire_interval", 0.15))
 		var shot := aim_ray(c, s, i, def)
 		_recoil(c, s, def)
+		var pellets := int(def.stat("pellets", 1))
+		if pellets > 1:
+			shot["dirs"] = pellet_dirs(c, s, shot.dir, def, pellets)
 		c.emit_item_event(&"fire", shot, replaying)
 		if c.is_authority() and not replaying:
-			UltraCombat.hitscan(c, shot.origin, shot.dir, def)
+			if pellets > 1:
+				UltraCombat.hitscan_pellets(c, shot.origin, shot.dirs, def)
+			else:
+				UltraCombat.hitscan(c, shot.origin, shot.dir, def)
 
 
 ## Deterministic shot: eye from the simulated capsule, direction from where the GUN points
@@ -154,6 +160,25 @@ static func aim_ray(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDe
 	var up := right.cross(dir).normalized()
 	dir = (dir + (right * cos(a) + up * sin(a)) * tan(r)).normalized()
 	return {"origin": shot_origin(eye, i.aim_from, dir), "dir": dir, "seq": s.fire_seq}
+
+
+## Buckshot: `n` pellet directions in a cone round the shot, seeded by (player, shot, pellet)
+## like the spread - every machine sees the same pattern.
+static func pellet_dirs(c: UltraCharacter, s: MotorState, dir: Vector3, def: ItemDefinition, n: int) -> Array[Vector3]:
+	var cone := deg_to_rad(float(def.stat("pellet_spread_deg", 3.0)))
+	var right := dir.cross(Vector3.UP).normalized()
+	if right.length() < 0.5:
+		right = Vector3.RIGHT
+	var up := right.cross(dir).normalized()
+	var out: Array[Vector3] = []
+	for k in n:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash(Vector3i(c.net_id, s.fire_seq, 100 + k))
+		# Even-ish fill: pellet k takes its own slice of the angle, radius random.
+		var a := (float(k) + rng.randf()) / n * TAU
+		var r := sqrt(rng.randf_range(0.04, 1.0)) * cone
+		out.append((dir + (right * cos(a) + up * sin(a)) * tan(r)).normalized())
+	return out
 
 
 ## Shots start where the player's camera is (the eye + the frame's aim_from): crosshair, gun
@@ -261,6 +286,9 @@ static func _reload(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDe
 		_set_action(s, Action.NONE)
 		return
 	var slow := UltraInjury.reload_mult(s, c.damage_profile)
+	if String(def.stat("reload_mode", "")) == "shell":
+		_reload_shells(c, s, i, def, busy, replaying, slow)
+		return
 	var commit := float(def.stat("reload_commit", 1.5)) * slow
 	var total := float(def.stat("reload_time", 2.0)) * slow
 	# Interrupted before the magazine went in: nothing gained. (Sprinting doesn't interrupt: a
@@ -282,3 +310,37 @@ static func _reload(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDe
 		c.emit_item_event(&"mag_in", {}, replaying)
 	if s.action_t >= total:
 		_set_action(s, Action.READY)
+
+
+## A tube magazine, loaded a shell at a time: after `reload_start`, one shell every
+## `shell_time` until the tube is full or the shells run out, then `reload_end`. Pulling the
+## trigger (with a shell in) stops loading and the gun comes up; so does anything busy.
+static func _reload_shells(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDefinition, busy: bool, replaying: bool, slow: float) -> void:
+	var start := float(def.stat("reload_start", 0.35)) * slow
+	var each := float(def.stat("shell_time", 0.55)) * slow
+	var end_t := float(def.stat("reload_end", 0.3)) * slow
+	var mag_size := int(def.stat("mag_size", 0))
+	var ammo_id := StringName(def.stat("ammo", ""))
+	if busy or (s.mag > 0 and UltraMotor.pressed_edge(s, i, InputFrame.B_PRIMARY)):
+		_set_action(s, Action.READY)
+		c.emit_item_event(&"reload_cancel", {}, replaying)
+		if not busy:
+			_firearm(c, s, i, def, busy, replaying)          # that trigger pull fires
+		return
+	var t := s.action_t - start
+	var dt := c.motor.dt
+	# A shell goes in each time the cycle comes round (the hand is at the loading port then).
+	var k_now := int(floor(t / each)) if t > 0.0 else 0
+	var k_prev := int(floor((t - dt) / each)) if t - dt > 0.0 else 0
+	if k_now > k_prev and s.mag < mag_size:
+		if reserve_of(c, ammo_id) > 0:
+			s.mag += 1
+			if c.is_authority() and not replaying and not infinite_ammo:
+				c.inventory.take(ammo_id, 1)
+				c.inventory_changed_by_server()
+			c.emit_item_event(&"shell_in", {}, replaying)
+	# Full (or nothing left to load): finish the cycle's last bit and bring the gun up.
+	var done := s.mag >= mag_size or reserve_of(c, ammo_id) <= 0
+	if done and t >= float(k_now) * each + end_t:
+		_set_action(s, Action.READY)
+		s.fire_cd = maxf(s.fire_cd, 0.1)

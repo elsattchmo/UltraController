@@ -1,0 +1,63 @@
+[gd_resource type="Resource" script_class="ItemDefinition" format=3]
+
+[ext_resource type="PackedScene" path="res://assets/items/shotgun/shotgun.glb" id="1_q5tme"]
+[ext_resource type="Script" path="res://addons/ultra_controller/items/item_definition.gd" id="2_q7chq"]
+[ext_resource type="PackedScene" path="res://assets/items/shotgun/shotgun_world.tscn" id="3_6mxsi"]
+
+[resource]
+script = ExtResource("2_q7chq")
+id = &"shotgun"
+display_name = "Shotgun"
+description = "12-gauge pump-action. Six in the tube, loaded a shell at a time."
+kind = 1
+mass = 3.6
+world_scene = ExtResource("3_6mxsi")
+equip_scene = ExtResource("1_q5tme")
+equip_slots = 9
+grip_offset = Transform3D(0.00056832284, 0.9540657, 0.29959655, 0.17491671, 0.294883, -0.9393871, -0.984583, 0.052938208, -0.1667141, 0.03322041, 0.13182968, 0.014325455)
+support_offset = Transform3D(-0.42926103, 0.10355608, 0.89722407, -0.732321, -0.62133646, -0.2786525, 0.5286219, -0.7766708, 0.34255186, -0.059114456, 0.07387626, -0.24765469)
+two_handed = true
+support_fingers = Vector3(0.55, 0, -0.8)
+support_palm = Vector3(0.2, 1, 0)
+holster_offset = Transform3D(0.8262703, 0.22997542, -0.5141873, -0.5602435, 0.24097757, -0.7925004, -0.058347955, 0.94288975, 0.3279549, -0.14728346, -0.22884464, -0.13891542)
+holster_bone = &"UpperChest"
+anim_roles = {
+"aim": "rifle_aim",
+"fire": "rifle_aim",
+"idle": "rifle_idle",
+"reload": "rifle_idle"
+}
+aim_clip_offset = Vector2(15.3, 2.3)
+equip_time = 0.7
+fp_hip_offset = Vector3(0.11, -0.13, 0.22)
+fp_ads_distance = 0.17
+fp_ads_eye = Vector3(0.035, -0.06, 0.03)
+sway_inertia = 0.55
+sway_return_hz = 1.5
+sway_damping = 0.65
+free_aim_deg = 6.0
+sway_amount = 1.4
+recoil_gun_deg = 7.0
+sprint_lower_deg = Vector2(88.9, -13.5)
+stats = {
+"ads_fov": 58.0,
+"ads_spread_deg": 0.2,
+"ammo": "ammo_12g",
+"damage": 14.0,
+"fire_interval": 0.9,
+"impulse": 3.0,
+"kick": 3.2,
+"mag_size": 6,
+"pellet_spread_deg": 2.2,
+"pellets": 9,
+"pump_delay": 0.22,
+"pump_time": 0.42,
+"range": 70.0,
+"recoil_pitch_deg": 9.0,
+"recoil_yaw_deg": 2.2,
+"reload_end": 0.3,
+"reload_mode": "shell",
+"reload_start": 0.35,
+"shell_time": 0.55,
+"spread_deg": 0.6
+}

@@ -53,6 +53,9 @@ enum Gait { WALK, JOG }
 @export_range(10, 900, 5) var turn_in_place_rate := 180.0
 ## Turn in place eases in and out at this angular acceleration (deg/s^2).
 @export_range(100, 5000, 10) var turn_in_place_accel := 720.0
+## A gun up: the most the upper body may be turned ahead of the feet (deg); turning faster,
+## the feet are pulled round with it.
+@export_range(20, 90, 1) var armed_max_twist := 55.0
 ## With a gun up the feet come round sooner (the chest is already bladed off the aim).
 @export_range(10, 120, 1) var armed_turn_angle := 45.0
 

@@ -1681,7 +1681,9 @@ func _build_hang(loco: AnimationNodeStateMachine) -> void:
 	bs.sync = true
 	var idle_src := _role_anim(&"hang_idle")
 	var idle := AnimationNodeAnimation.new()
-	idle.animation = _refit(_segment(_clip(&"hang_idle"), idle_src.length - 0.05, idle_src.length, 0.5), "hang", hands, Vector3.ONE)
+	# The catch's last frame, held. (Its last 0.05 s looped with the hold snapped the body 2 cm
+	# back every 0.55 s: a jitter while hanging still.)
+	idle.animation = _refit(_segment(_clip(&"hang_idle"), idle_src.length - 0.004, idle_src.length, 0.55), "hang", hands, Vector3.ONE)
 	idle.use_custom_timeline = true
 	idle.loop_mode = Animation.LOOP_LINEAR
 	idle.timeline_length = 0.55

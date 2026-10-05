@@ -314,6 +314,28 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   contact in the slide collisions - only standing still registered). Ledge scans record the
   top's TickPlatform; MANTLE / VAULT / LEDGE_CLIMB / LEDGE_HANG set platform_id and their
   trav_from / to / point / normal ride the platform (`UltraMotor._ride_platform`).
+- Shotgun (`shotgun`, `ultra_blender.py make-shotgun`, built in tools/build_items.gd): the
+  carbine's clips (idle/aim; reload role = rifle_idle), grip fit like the carbine, support hand
+  on the "Pump" node (M_SupportGrip is its child, so the hand rides the pump). 9 pellets
+  (`UltraActionLayer.pellet_dirs`, seeded per pellet), `UltraCombat.hitscan_pellets`: pellets
+  summed per (character, region) into ONE hit of kind `buckshot` (severs any limb it destroys),
+  plus `DamageInfo.shove` per character = knockback x pellets-that-hit / pellets x range
+  falloff (full <= 3 m, ~0 by 20 m); >= `UltraCharacter.SHOVE_KNOCKDOWN` (3.5) knocks over
+  (or flings the body if it dies), less rocks them back. Tube loaded a shell at a time
+  (`reload_mode: shell`, `_reload_shells`: reload_start + one per shell_time, a trigger pull
+  stops loading and fires). Presentation: pump racked pump_delay after the shot (shell ejected
+  then), `_drive_shells` = left hand pouch <-> M_LoadPort on the sim clock (FP: the gun comes
+  up rolled SHELL_ROLL, not shouldered). Stat `kick` scales the visual recoil; TP shoulders
+  rock back with it. Tour `shotgun_review`.
+- `UltraSpring.step` substeps (w*dt <= 0.35): a hitch frame (first shotgun blast compiling
+  shaders) made the camera kick spring explode and whip the view 70 deg.
+- Sprint carry dot: the rifle's `sprint_lower_deg` is the measured port-arms barrel (88.9 deg
+  to the left, -13.5; `build_items._carry_dir`), so shots / the dot go where it points; an
+  off-screen gun dot is pinned to the view's edge (`UltraHud.EDGE_INSET`).
+- Armed turn in place: the feet hurry as the twist grows and the upper body is never more than
+  `armed_max_twist` (55 deg) ahead of them (m4 test_armed_turn_keeps_feet_up).
+- Ledge hang idle = the catch's last frame held (its looped 0.05 s tail snapped the body 2 cm
+  every 0.55 s; m1_blend test_hang_still).
 - Steadiness (`m4_gunplay.test_camera_and_gun_steady`, tour `jitter_review`): sample at
   `skeleton_updated` - sampling in `_process` mixes this frame's body placement with last
   frame's pose and invents jitter. Rules that came out of it: a released HandIK goal fades from

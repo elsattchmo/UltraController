@@ -196,15 +196,19 @@ func _on_player_added(p: NetPlayer) -> void:
 		menu = null
 
 
-## Playground loadout: a pistol (slot 1), the carbine (slot 2) and ammo for both (the server
+## Playground loadout: a pistol (slot 1), the carbine (slot 2), the shotgun (slot 3) and ammo (the server
 ## grants it; owners get it replicated).
 func _give_starting_kit(c: UltraCharacter) -> void:
 	if args.has("no-kit"):
 		return
 	UltraItems.give(c, &"pistol", 1)
 	UltraItems.give(c, &"rifle", 1)
+	if ItemDB.get_def(&"shotgun"):
+		UltraItems.give(c, &"shotgun", 1)
 	UltraItems.give(c, &"ammo_9mm", 36)
 	UltraItems.give(c, &"ammo_556", 90)
+	if ItemDB.get_def(&"ammo_12g"):
+		UltraItems.give(c, &"ammo_12g", 30)
 	UltraItems.give(c, &"medkit", 1)
 
 
@@ -217,6 +221,9 @@ func _stock_range() -> void:
 	var on_side := Basis(Vector3.UP, PI * 0.5) * Basis(Vector3.BACK, PI * 0.5)     # barrel along the bench
 	UltraNet.world.spawn("res://assets/items/rifle/rifle_world.tscn", r.global_transform * Transform3D(on_side, Vector3(1.6, 1.08, 1.0)), {"item_id": &"rifle", "count": 1})
 	UltraNet.world.spawn("res://assets/items/ammo/ammo_556_world.tscn", r.global_transform * Transform3D(Basis(), Vector3(-1.4, 1.1, 1.0)), {"item_id": &"ammo_556", "count": 60})
+	if ResourceLoader.exists("res://assets/items/shotgun/shotgun_world.tscn"):
+		UltraNet.world.spawn("res://assets/items/shotgun/shotgun_world.tscn", r.global_transform * Transform3D(on_side, Vector3(0.6, 1.08, 1.0)), {"item_id": &"shotgun", "count": 1})
+		UltraNet.world.spawn("res://assets/items/ammo/ammo_12g_world.tscn", r.global_transform * Transform3D(Basis(), Vector3(-0.6, 1.1, 1.0)), {"item_id": &"ammo_12g", "count": 24})
 
 
 func _process(delta: float) -> void:

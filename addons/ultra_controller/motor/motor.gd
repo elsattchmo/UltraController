@@ -197,13 +197,21 @@ func update_body_yaw(s: MotorState, input: InputFrame, moving: bool) -> void:
 			if absf(err) > lim:
 				s.set_flag(F_TURNING, true)
 			if s.has(F_TURNING):
-				var acc := deg_to_rad(profile.turn_in_place_accel)
-				var want := signf(err) * minf(deg_to_rad(profile.turn_in_place_rate), sqrt(2.0 * acc * absf(err)))
+				# A gun up: the feet hurry as the twist grows (turning the view quickly, the upper
+				# body swung round far ahead of legs stepping at the usual rate).
+				var hurry := 1.0 + 2.0 * smoothstep(lim, lim + deg_to_rad(30.0), absf(err)) if armed else 1.0
+				var acc := deg_to_rad(profile.turn_in_place_accel) * hurry
+				var want := signf(err) * minf(deg_to_rad(profile.turn_in_place_rate) * hurry, sqrt(2.0 * acc * absf(err)))
 				s.turn_v = move_toward(s.turn_v, want, acc * dt)
 				var step := s.turn_v * dt
 				if absf(step) > absf(err):
 					step = err
 				s.body_yaw += step
+				# ... and never further than this behind the aim.
+				var lag := angle_difference(s.body_yaw, input.yaw)
+				var max_twist := deg_to_rad(profile.armed_max_twist)
+				if armed and absf(lag) > max_twist:
+					s.body_yaw = wrapf(input.yaw - signf(lag) * max_twist, -PI, PI)
 				if absf(angle_difference(s.body_yaw, input.yaw)) < deg_to_rad(2.0):
 					s.set_flag(F_TURNING, false)
 					s.turn_v = 0.0

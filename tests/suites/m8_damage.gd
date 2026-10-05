@@ -433,3 +433,44 @@ func test_getup_camera_is_steady() -> void:
 		check(end_fwd.dot(Vector3.FORWARD) > 0.9, "back to looking where you aim when you're up")
 		await ticks(30)
 	rig.queue_free()
+
+
+## Shotgun: nine pellets, summed per region. Point blank the blast takes a limb off and knocks
+## the target flying; far off a few pellets wound and barely rock it.
+func test_shotgun_blast() -> void:
+	var def := ItemDB.get_def(&"shotgun")
+	check(def != null, "shotgun defined")
+	if def == null:
+		return
+	var res := []
+	for spec: Array in [["point blank leg", 2.5, R.THIGH_L], ["point blank arm", 2.5, R.ARM_R], ["far torso", 18.0, R.TORSO]]:
+		# (On the long straight track: nothing in between at any range.)
+		var t := dummy(Vector3(-24, 0.05, -70))
+		c.teleport(Vector3(-24, 0.05, -70 + float(spec[1])), 0.0)
+		await ticks(10)
+		var eye := c.state.pos + Vector3.UP * 1.6
+		var aim := (capsule_mid(t, spec[2]) - eye).normalized()
+		c.state.fire_seq = (c.state.fire_seq + 1) & 255
+		var dirs := UltraActionLayer.pellet_dirs(c, c.state, aim, def, int(def.stat("pellets", 9)))
+		var hp0 := t.state.hp
+		var p0 := t.state.pos
+		var hits := UltraCombat.hitscan_pellets(c, eye, dirs, def)
+		var where := {}
+		for h: Dictionary in hits:
+			var k: String = UltraLimbs.Region.keys()[int(h.get("region", -1))] if int(h.get("region", -1)) >= 0 else String((h.collider as Node).name)
+			where[k] = int(where.get(k, 0)) + 1
+		res.append(str(where))
+		await ticks(30)
+		var moved := Vector2(t.state.pos.x - p0.x, t.state.pos.z - p0.z).length()
+		var down := t.state.state in [Id.RAGDOLL, Id.DEAD]
+		var cut := (t.state.severed >> int(spec[2])) & 1 == 1
+		res.append("%s: %d pellets hit, hp %.0f -> %.0f, %s, pushed %.2f m, %s" % [spec[0], hits.size(), hp0, t.state.hp, "DOWN" if down else "standing", moved, "SEVERED" if cut else "limb on"])
+		if spec[1] < 5.0:
+			check(down, "%s: knocked over" % spec[0])
+			check(moved > 0.6, "%s: thrown back (%.2f m)" % [spec[0], moved])
+			check(cut, "%s: the limb comes off" % spec[0])
+		else:
+			check(not down and not cut and t.state.hp < hp0, "%s: wounded, still standing" % spec[0])
+		UltraNet.despawn_bot(t.net_id)
+		await ticks(5)
+	info("\n  ".join(res))

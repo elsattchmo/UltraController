@@ -14,6 +14,9 @@ class DamageInfo:
 	var collider: Object
 	var shape := 0
 	var region := -1                ## UltraLimbs.Region, -1 = work it out from the point
+	## Knock-back (m/s, world): a shotgun blast's shove on the whole body - past
+	## UltraCharacter.SHOVE_KNOCKDOWN it knocks you over, a lighter one rocks you back.
+	var shove := Vector3.ZERO
 
 
 const MASK := UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC | UltraLayers.CHARACTER | UltraLayers.HITBOX
@@ -45,6 +48,80 @@ static func hitscan(shooter: UltraCharacter, origin: Vector3, dir: Vector3, def:
 		shooter_peer = sp.peer_id
 	UltraNet.world.broadcast(&"impact", [info.point, info.normal, kind, shooter.net_id], false, shooter_peer)
 	return hit
+
+
+## Buckshot: every pellet resolved like a bullet (lag-compensated, through limbs), then the
+## pellets that struck the same region of the same character are dealt as ONE hit (their damage
+## summed, kind `buckshot`): a close, tight pattern on a limb is far past its health and takes
+## it off; a spread pattern at range just wounds. Everything else takes each pellet.
+static func hitscan_pellets(shooter: UltraCharacter, origin: Vector3, dirs: Array, def: ItemDefinition) -> Array:
+	var space := shooter.get_world_3d().direct_space_state
+	var excl: Array[RID] = [shooter.get_rid()]
+	if shooter.hit_volume:
+		excl.append(shooter.hit_volume.get_rid())
+	var rng := float(def.stat("range", 100.0))
+	var hits: Array = UltraNet.world.rewound(shooter, func() -> Array:
+		var out := []
+		for d: Vector3 in dirs:
+			var q := PhysicsRayQueryParameters3D.create(origin, origin + d * rng, MASK, excl.duplicate())
+			var h := _cast(space, q, origin, d)
+			if not h.is_empty():
+				h["dir"] = d
+				out.append(h)
+		return out)
+	var per := float(def.stat("damage", 10.0))
+	var impulse := float(def.stat("impulse", 4.0))
+	var groups := {}           # [character, region] -> DamageInfo
+	var shooter_peer := 0
+	var sp: NetPlayer = UltraNet.players.get(shooter.net_id)
+	if sp and sp.role == NetPlayer.Role.AUTHORITY_REMOTE:
+		shooter_peer = sp.peer_id
+	for h: Dictionary in hits:
+		var who := UltraCharacter.of_collider(h.collider)
+		var info := DamageInfo.new()
+		info.amount = per
+		info.dir = h.dir
+		info.point = h.position
+		info.normal = h.normal
+		info.attacker_id = shooter.net_id
+		info.collider = h.collider
+		info.shape = int(h.get("shape", 0))
+		info.region = int(h.get("region", -1))
+		UltraNet.world.broadcast(&"impact", [info.point, info.normal, &"flesh" if who else &"surface", shooter.net_id], false, shooter_peer)
+		if who:
+			var key := "%d:%d" % [who.get_instance_id(), info.region]
+			if groups.has(key):
+				var g: DamageInfo = groups[key]
+				g.amount += per
+				g.dir = (g.dir + info.dir).normalized()
+			else:
+				info.kind = &"buckshot"
+				groups[key] = info
+			continue
+		apply(info, impulse)
+	# The blast's shove on each character hit: how much of the load struck (fraction of the
+	# pellets) and how close (full within ~3 m, fading out by ~20 m) - point blank lifts them
+	# off their feet; a few stray pellets at range barely rock them. Given with the character's
+	# first group so it lands once.
+	var n := float(dirs.size())
+	var shoved := {}
+	for g: DamageInfo in groups.values():
+		var who := UltraCharacter.of_collider(g.collider)
+		if who == null or shoved.has(who.get_instance_id()):
+			continue
+		shoved[who.get_instance_id()] = true
+		var count := 0.0
+		var dir := Vector3.ZERO
+		for g2: DamageInfo in groups.values():
+			if UltraCharacter.of_collider(g2.collider) == who:
+				count += g2.amount / per
+				dir += g2.dir * g2.amount
+		var near := 1.0 - smoothstep(3.0, 20.0, origin.distance_to(g.point))
+		dir = Vector3(dir.x, 0.0, dir.z).normalized()
+		g.shove = dir * float(def.stat("knockback", 9.0)) * (count / n) * lerpf(0.15, 1.0, near)
+	for g: DamageInfo in groups.values():
+		apply(g, impulse * g.amount / per)
+	return hits
 
 
 ## The shot's ray resolved like a real shot (characters only through a limb) - for the HUD's

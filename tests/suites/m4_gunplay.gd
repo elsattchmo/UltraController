@@ -619,3 +619,69 @@ func test_gun_points_at_aim() -> void:
 				check(absf(dot_err) < 0.5, "%s: at rest the gun direction is the view (%.2f deg)" % [tag, dot_err])
 	rig.queue_free()
 	info("\n  ".join(res))
+
+
+## Turning the view quickly with a gun up: the feet keep up - the upper body never gets more
+## than `armed_max_twist` ahead of them (it used to swing round far ahead of the legs).
+func test_armed_turn_keeps_feet_up() -> void:
+	UltraItems.give(c, &"rifle")
+	var sl := _slot(&"rifle")
+	await _run([{"ticks": 60, "slot": sl, "yaw": 0.0}])
+	var worst := 0.0
+	_bot().set_steps([{"ticks": 90, "slot": sl, "yaw_rate": deg_to_rad(360.0)}, {"ticks": 60, "slot": sl}])
+	var turned := false
+	for i in 150:
+		await ticks(1)
+		worst = maxf(worst, absf(rad_to_deg(angle_difference(c.state.body_yaw, c.last_input.yaw))))
+		turned = turned or c.state.has(UltraMotor.F_TURNING)
+	info("rifle up, view turning 360 deg/s: upper body at most %.1f deg ahead of the feet" % worst)
+	check(turned, "the feet step round")
+	check(worst <= c.profile.armed_max_twist + 1.0, "the twist stays within %.0f deg (%.1f)" % [c.profile.armed_max_twist, worst])
+	check(absf(angle_difference(c.state.body_yaw, c.last_input.yaw)) < deg_to_rad(3.0), "and the feet catch up once the view stops")
+
+
+## Shotgun: loaded a shell at a time (one per `shell_time` after `reload_start`), a trigger
+## pull mid-reload stops loading and fires, the pump cycle sets the rate of fire.
+func test_shotgun_shells_and_pump() -> void:
+	var def := ItemDB.get_def(&"shotgun")
+	check(def != null, "shotgun defined")
+	if def == null:
+		return
+	UltraItems.give(c, &"shotgun")
+	UltraItems.give(c, &"ammo_12g", 30)
+	var sl := _slot(&"shotgun")
+	await _run([{"ticks": 60, "slot": sl, "yaw": 0.0}])
+	check(c.state.action == UltraActionLayer.Action.READY, "drawn")
+	c.state.mag = 0                       # (given full: empty the tube)
+	var start := float(def.stat("reload_start", 0.35))
+	var each := float(def.stat("shell_time", 0.55))
+	# Reload and watch the shells go in one by one.
+	_bot().set_steps([{"ticks": 1, "slot": sl, "tap": InputFrame.B_RELOAD}, {"ticks": 1000, "slot": sl}])
+	var seen := []
+	for i in int((start + each * 3.2) * 60.0):
+		await ticks(1)
+		if seen.is_empty() or seen[-1] != c.state.mag:
+			seen.append(c.state.mag)
+	info("tube while loading: %s" % [seen])
+	check(c.state.action == UltraActionLayer.Action.RELOADING, "still loading")
+	check(seen == [0, 1, 2, 3], "one shell at a time (%s)" % [seen])
+	# Trigger mid-reload: loading stops and the gun fires.
+	var seq := c.state.fire_seq
+	await _run([{"ticks": 2, "slot": sl, "tap": InputFrame.B_PRIMARY}])
+	check(c.state.fire_seq != seq and c.state.mag == 2 and c.state.action == UltraActionLayer.Action.READY, "a trigger pull interrupts the reload and fires (mag %d)" % c.state.mag)
+	# Rate of fire = the pump cycle.
+	await ticks(70)
+	var shots := 0
+	seq = c.state.fire_seq
+	var steps := []
+	for k in 10:
+		steps.append({"ticks": 3, "slot": sl, "buttons": InputFrame.B_PRIMARY})
+		steps.append({"ticks": 3, "slot": sl})
+	_bot().set_steps(steps)
+	for i in 60:
+		await ticks(1)
+		if c.state.fire_seq != seq:
+			shots += 1
+			seq = c.state.fire_seq
+	info("pulling the trigger 10 times in 1 s: %d shots (fire interval %.2f s)" % [shots, float(def.stat("fire_interval", 0.9))])
+	check(shots == 2, "no faster than the pump")

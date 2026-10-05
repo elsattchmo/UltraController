@@ -11,6 +11,7 @@ Commands
   mirror           Make a left/right mirrored copy of an action (--action X --out Y).
   make-pistol      Rebuild the pistol model + markers and export assets/items/pistol/pistol.glb
                    (the same build the project shipped with).
+  make-shotgun     Build the 12-gauge pump-action (the fore-end is its own "Pump" node).
   make-rifle       Build the carbine (two-handed: pistol grip, handguard, stock, iron sights,
                    magazine, markers) and export assets/items/rifle/rifle.glb.
   mixamo-test      Write intake/mixamo/<name>.fbx: the mannequin renamed to Mixamo bone names
@@ -408,6 +409,65 @@ def cmd_make_rifle(args):
     k.export(root, args.out or os.path.join(PROJECT, "assets", "items", "rifle", "rifle.glb"))
 
 
+def cmd_make_shotgun(args):
+    """A 12-gauge pump-action. Origin at the top of the pistol grip (the same grip fit as the
+    pistol and carbine holds it). The fore-end is its own node, "Pump", with M_SupportGrip on
+    it: Godot slides the pump back and forth and the support hand rides it."""
+    fresh_scene()
+    coll = bpy.data.collections.new("Shotgun")
+    bpy.context.scene.collection.children.link(coll)
+    k = _Kit(coll)
+    black = k.mat("Shotgun_Polymer", (0.04, 0.042, 0.045), 0.0, 0.7)
+    metal = k.mat("Shotgun_Metal", (0.09, 0.095, 0.1), 0.85, 0.35)
+    wood = k.mat("Shotgun_Wood", (0.36, 0.2, 0.1), 0.0, 0.6)
+    bead = k.mat("Shotgun_Bead", (1.0, 0.85, 0.3), 0.3, 0.3)
+    root = bpy.data.objects.new("Shotgun", None)
+    coll.objects.link(root)
+    bore = 0.05
+    # Receiver (a long box, rounded off), loading port underneath, ejection port on the right.
+    k.box("Receiver", (0.036, 0.215, 0.064), (0, -0.075, bore - 0.004), material=metal, parent=root, bevel=0.004)
+    k.box("LoadPort", (0.022, 0.07, 0.004), (0, -0.10, bore - 0.037), material=black, parent=root, bevel=0.0)
+    k.box("EjectPort", (0.004, 0.06, 0.022), (-0.0185, -0.07, bore + 0.006), material=black, parent=root, bevel=0.0)
+    k.box("SightRib", (0.012, 0.20, 0.006), (0, -0.075, bore + 0.031), material=metal, parent=root, bevel=0.0)
+    k.box("RearNotchL", (0.004, 0.008, 0.008), (0.006, 0.02, bore + 0.036), material=metal, parent=root, bevel=0.0)
+    k.box("RearNotchR", (0.004, 0.008, 0.008), (-0.006, 0.02, bore + 0.036), material=metal, parent=root, bevel=0.0)
+    # Grip (same rake and place as the pistol's), trigger, guard.
+    k.box("GripBody", (0.030, 0.045, 0.105), (0, 0.012, -0.034), rot=(-16, 0, 0), material=black, parent=root, taper=(0.9, 0.9))
+    k.box("Trigger", (0.006, 0.006, 0.022), (0, -0.040, -0.006), rot=(-15, 0, 0), material=metal, parent=root)
+    k.box("GuardBottom", (0.012, 0.075, 0.006), (0, -0.052, -0.026), material=black, parent=root)
+    k.box("GuardFront", (0.012, 0.006, 0.03), (0, -0.088, -0.012), material=black, parent=root)
+    # Barrel and magazine tube under it.
+    k.cyl("Barrel", 0.0115, 0.47, (0, -0.415, bore + 0.006), (90, 0, 0), metal, root, segments=14)
+    k.cyl("Bore", 0.0095, 0.012, (0, -0.646, bore + 0.006), (90, 0, 0), black, root, segments=14)
+    k.cyl("MagTube", 0.0105, 0.40, (0, -0.38, bore - 0.020), (90, 0, 0), metal, root, segments=12)
+    k.cyl("TubeCap", 0.0125, 0.024, (0, -0.585, bore - 0.020), (90, 0, 0), metal, root, segments=12)
+    k.box("BarrelClamp", (0.016, 0.02, 0.04), (0, -0.565, bore - 0.006), material=metal, parent=root)
+    k.box("Bead", (0.005, 0.005, 0.005), (0, -0.63, bore + 0.020), material=bead, parent=root, bevel=0.0)
+    # The pump: wooden fore-end with grooves round the tube; slides back on the action bars.
+    pump = bpy.data.objects.new("Pump", None)
+    coll.objects.link(pump)
+    pump.parent = root
+    pump.location = (0, -0.30, bore - 0.020)
+    k.box("Forend", (0.046, 0.17, 0.042), (0, 0, -0.004), material=wood, parent=pump, bevel=0.006)
+    for i in range(6):
+        k.box("Groove%d" % i, (0.048, 0.006, 0.040), (0, -0.06 + i * 0.024, -0.004), material=black, parent=pump, bevel=0.0)
+    k.box("ActionBarL", (0.003, 0.12, 0.006), (0.019, 0.13, 0.004), material=metal, parent=pump, bevel=0.0)
+    k.box("ActionBarR", (0.003, 0.12, 0.006), (-0.019, 0.13, 0.004), material=metal, parent=pump, bevel=0.0)
+    k.empty("M_SupportGrip", (0, 0.0, -0.026), pump)
+    # Stock: wood, dropping slightly toward the butt, with a rubber pad.
+    k.box("Stock", (0.042, 0.30, 0.066), (0, 0.19, bore - 0.034), rot=(-4, 0, 0), material=wood, parent=root, bevel=0.006, taper=(0.9, 1.0))
+    k.box("StockComb", (0.036, 0.22, 0.02), (0, 0.17, bore - 0.0), rot=(-2, 0, 0), material=wood, parent=root, bevel=0.005)
+    k.box("ButtPad", (0.046, 0.02, 0.12), (0, 0.345, bore - 0.048), rot=(-4, 0, 0), material=black, parent=root, bevel=0.004)
+    sight = bore + 0.040
+    for name, loc in (("M_Grip", (0, 0, 0)), ("M_Muzzle", (0, -0.652, bore + 0.006)),
+                      ("M_RearSight", (0, 0.02, sight)), ("M_FrontSight", (0, -0.63, sight)),
+                      ("M_EjectPort", (-0.022, -0.07, bore + 0.006)), ("M_LoadPort", (0, -0.10, bore - 0.040)),
+                      ("M_MagWell", (0, -0.10, bore - 0.040)), ("M_Stock", (0, 0.352, bore - 0.045)),
+                      ("M_Holster", (0, -0.17, bore))):
+        k.empty(name, loc, root)
+    k.export(root, args.out or os.path.join(PROJECT, "assets", "items", "shotgun", "shotgun.glb"))
+
+
 def main():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     p = argparse.ArgumentParser(prog="ultra_blender")
@@ -425,12 +485,14 @@ def main():
     mp.add_argument("--out")
     mr = sub.add_parser("make-rifle")
     mr.add_argument("--out")
+    ms = sub.add_parser("make-shotgun")
+    ms.add_argument("--out")
     mt = sub.add_parser("mixamo-test")
     mt.add_argument("--action")
     mt.add_argument("--name")
     a = p.parse_args(argv)
     {"make-edit": cmd_make_edit, "export-actions": cmd_export_actions, "mirror": cmd_mirror,
-     "make-pistol": cmd_make_pistol, "make-rifle": cmd_make_rifle, "mixamo-test": cmd_mixamo_test}[a.cmd](a)
+     "make-pistol": cmd_make_pistol, "make-rifle": cmd_make_rifle, "make-shotgun": cmd_make_shotgun, "mixamo-test": cmd_mixamo_test}[a.cmd](a)
 
 
 if __name__ == "__main__":

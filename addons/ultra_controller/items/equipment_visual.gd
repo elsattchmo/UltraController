@@ -106,6 +106,7 @@ func _process(delta: float) -> void:
 			if not slide.has_meta("rest"):
 				slide.set_meta("rest", slide.position)
 			slide.position = (slide.get_meta("rest") as Vector3) + Vector3(0, 0, -minf(_slide_kick, 0.03))
+		_drive_pump(delta)
 		var mag := held_node.find_child("Magazine", true, false) as Node3D
 		if mag:
 			var hide := s.action == UltraActionLayer.Action.RELOADING and s.action_t > 0.35 and s.action_t < float(held_def.stat("reload_commit", 1.5)) - 0.2
@@ -180,6 +181,8 @@ func _aim_body() -> void:
 		_aim_fix = (_aim_fix + Vector2(err.x, -err.y) * k * w).limit_length(deg_to_rad(35.0))
 	anim.modifier.aim_yaw += (deg_to_rad(clip.x) - sw.x + _aim_fix.x) * w
 	anim.modifier.aim_pitch += (sw.y - deg_to_rad(clip.y) + _aim_fix.y) * w
+	# The shot's kick rocks the shoulders back (a shotgun's a lot).
+	anim.modifier.aim_pitch += (_recoil.value as Vector3).z * 1.2 * w
 
 
 ## Third person: spine turn (yaw right +, pitch up +) that brings the drawn barrel onto the
@@ -376,7 +379,12 @@ func _drive_hands(delta: float) -> void:
 	var gun := held_node.global_transform if held_node else Transform3D()
 	# First person: the gun pose comes from the camera (the real arms follow by IK), so it
 	# always points at the crosshair. Hip pose low-right, ADS puts the sights on the view ray.
+	# Loading a tube a shell at a time, first person: the gun comes up in front of you, rolled
+	# so the loading port faces you.
+	var shell_fp := camera != null and held_node != null and held_def != null and held_def.kind == ItemDefinition.Kind.FIREARM 		and String(held_def.stat("reload_mode", "")) == "shell" and s.action == UltraActionLayer.Action.RELOADING
+	_shell_fp_w = move_toward(_shell_fp_w, 1.0 if shell_fp else 0.0, delta * 4.0)
 	var fp_drive := camera != null and held_node != null and ready and held_def.kind == ItemDefinition.Kind.FIREARM 		and anim.sprint_carry < 0.5          # (sprinting with a rifle the body carries it, as others see it)
+	fp_drive = fp_drive or shell_fp
 	_fp_w = move_toward(_fp_w, 1.0 if fp_drive else 0.0, delta * 4.0)
 	if camera and held_node and _fp_w > 0.001:
 		var rear := UltraPoseSampler.marker(held_node, "M_RearSight")
@@ -393,8 +401,15 @@ func _drive_hands(delta: float) -> void:
 		var ads_gun := Transform3D(aim_basis, cam.origin + fwd * held_def.fp_ads_distance - aim_basis * rear.origin)
 		var e := smoothstep(0.0, 1.0, ads)
 		var target_gun := hip_gun.interpolate_with(ads_gun, e)
+		if _shell_fp_w > 0.0:
+			var tilt := Basis(right, deg_to_rad(14.0)) * aim_basis
+			var lb := Basis((tilt * Vector3.FORWARD).normalized(), deg_to_rad(SHELL_ROLL) * _side) * tilt
+			var load_gun := Transform3D(lb, cam.origin + fwd * 0.40 + right * 0.05 * _side - cup * 0.16)
+			target_gun = target_gun.interpolate_with(load_gun, smoothstep(0.0, 1.0, _shell_fp_w))
 		target_gun = _gun_motion(target_gun, cam, delta, e)
 		target_gun.origin += target_gun.basis * (_recoil.value as Vector3) * lerpf(1.0, 0.5, e)
+		# Racking the pump jolts the gun back and down a touch.
+		target_gun.origin += target_gun.basis * Vector3(0.0, -0.012, 0.022) * pump_amount()
 		# Free aim: turn the gun onto the simulated gun direction - about the rear sight at the
 		# hip, about the eye when aiming (so the sights stay in line with the eye and the dot).
 		var rot := sway_rotation()
@@ -410,7 +425,7 @@ func _drive_hands(delta: float) -> void:
 			anim.hand_ik.release(other, 8.0)
 			_owns[other] = false
 		gun = gun.interpolate_with(target_gun, w)
-		_shoulder_gun(target_gun, w)
+		_shoulder_gun(target_gun, w * (1.0 - smoothstep(0.0, 1.0, _shell_fp_w)))      # (not shouldered while loading)
 	else:
 		_shoulder_gun(Transform3D(), 0.0)
 		for h in [HandIKModifier.Hand.RIGHT, HandIKModifier.Hand.LEFT]:
@@ -433,6 +448,7 @@ func _drive_hands(delta: float) -> void:
 		anim.hand_ik.release(HandIKModifier.Hand.LEFT, 8.0)
 		_owns[HandIKModifier.Hand.LEFT] = false
 	_drive_reload(delta)
+	_drive_shells()
 
 
 ## A gun with a stock is held shouldered (WeaponPoseModifier). First person: the body comes to
@@ -542,7 +558,7 @@ var _left_slide := -1.0
 func _drive_reload(delta: float) -> void:
 	var anim := character.anim
 	var s := character.state
-	var reloading := held_node != null and held_def != null and held_def.kind == ItemDefinition.Kind.FIREARM 		and s.action == UltraActionLayer.Action.RELOADING and camera != null
+	var reloading := held_node != null and held_def != null and held_def.kind == ItemDefinition.Kind.FIREARM 		and s.action == UltraActionLayer.Action.RELOADING and camera != null 		and String(held_def.stat("reload_mode", "")) != "shell"      # (a tube is loaded by _drive_shells)
 	var was := _reload_w > 0.001
 	_reload_w = move_toward(_reload_w, 1.0 if reloading else 0.0, delta * 5.0)
 	if _reload_w <= 0.001:
@@ -578,7 +594,133 @@ func ready_support() -> bool:
 func _on_item_event(kind: StringName, _data: Dictionary) -> void:
 	if kind == &"fire":
 		_slide_kick = 0.045
-		_recoil.impulse(Vector3(0, 0.5, 1.8))
+		var def := character.held_def()
+		_recoil.impulse(Vector3(0, 0.5, 1.8) * (float(def.stat("kick", 1.0)) if def else 1.0))
+		if pumps():
+			_pump_t = 0.0
+			_pump_ejected = false
+
+
+# ---------------------------------------------------------------- pump-action
+
+const PUMP_TRAVEL := 0.085             ## m the fore-end racks back
+var _pump_t := -1.0                    ## s since the shot (-1: not racking)
+var _pump_ejected := false
+var _shell_mesh: MeshInstance3D
+
+
+## A pump-action: the fore-end is racked after every shot.
+func pumps() -> bool:
+	return held_def != null and float(held_def.stat("pump_time", 0.0)) > 0.0
+
+
+## 0..1: how far back the pump is right now (snapped back, a beat, driven home).
+func pump_amount() -> float:
+	if _pump_t < 0.0 or not pumps():
+		return 0.0
+	var u := (_pump_t - float(held_def.stat("pump_delay", 0.2))) / float(held_def.stat("pump_time", 0.4))
+	if u <= 0.0 or u >= 1.0:
+		return 0.0
+	if u < 0.35:
+		return 1.0 - pow(1.0 - u / 0.35, 3.0)             # fast and hard to the back
+	if u < 0.5:
+		return 1.0
+	return 1.0 - smoothstep(0.0, 1.0, (u - 0.5) / 0.5)
+
+
+func _drive_pump(delta: float) -> void:
+	if not pumps():
+		_pump_t = -1.0
+		return
+	if _pump_t >= 0.0:
+		_pump_t += delta
+		var u := (_pump_t - float(held_def.stat("pump_delay", 0.2))) / float(held_def.stat("pump_time", 0.4))
+		# The spent shell flies out as the pump hits the back; the rack thumps the gun.
+		if not _pump_ejected and u >= 0.3:
+			_pump_ejected = true
+			var fx := UltraEffects.instance()
+			if fx:
+				fx.shell(eject_transform(), character.visual_root.global_basis * Vector3.RIGHT)
+			_recoil.impulse(Vector3(0.0, -0.25, 0.6))
+		if u >= 1.0:
+			_pump_t = -1.0
+	var pump := held_node.find_child("Pump", true, false) as Node3D
+	if pump:
+		if not pump.has_meta("rest"):
+			pump.set_meta("rest", pump.position)
+		pump.position = (pump.get_meta("rest") as Vector3) + Vector3(0, 0, -PUMP_TRAVEL * pump_amount())
+
+
+## Loading a tube magazine a shell at a time (on the simulation's clock: UltraActionLayer
+## _reload_shells): the support hand goes down to the belt for a shell, up to the loading port
+## under the gun, thumbs it in, and back - riding the gun as the gun hand holds it.
+const POUCH := Vector3(-0.1, 1.0, -0.17)           ## visual-root space: front of the belt, left
+const SHELL_ROLL := 70.0                           ## deg the gun is rolled loading in first person
+var _shell_fp_w := 0.0
+
+
+func _drive_shells() -> void:
+	var s := character.state
+	var anim := character.anim
+	var on := held_node != null and held_def != null and String(held_def.stat("reload_mode", "")) == "shell" \
+		and s.action == UltraActionLayer.Action.RELOADING and _side == 1 and UltraInjury.two_hands(s) and anim != null and anim.hand_ik != null
+	if _shell_mesh:
+		_shell_mesh.visible = false
+	if not on:
+		return
+	var slow := UltraInjury.reload_mult(s, character.damage_profile)
+	var start := float(held_def.stat("reload_start", 0.35)) * slow
+	var each := float(held_def.stat("shell_time", 0.55)) * slow
+	var end_t := float(held_def.stat("reload_end", 0.3)) * slow
+	var gun := held_node.global_transform.orthonormalized()
+	var sup := _support_under(gun) if held_def.support_fingers != Vector3.ZERO else gun * held_def.support_offset
+	var contact := gun * UltraPoseSampler.marker(held_node, "M_SupportGrip").origin
+	var port := sup
+	port.origin += gun * UltraPoseSampler.marker(held_node, "M_LoadPort").origin - contact
+	var pouch := Transform3D(sup.basis, character.visual_root.global_transform * POUCH)
+	var fwd := -gun.basis.z.normalized()
+	var t := s.action_t - start
+	var target := sup
+	var carry := false
+	if t < 0.0:
+		target = sup.interpolate_with(pouch, smoothstep(0.0, 1.0, s.action_t / maxf(start, 0.01)))
+	elif s.mag >= int(held_def.stat("mag_size", 0)):
+		# Full: from the last shell back onto the pump.
+		var since := fposmod(t, each)
+		target = port.interpolate_with(sup, smoothstep(0.0, 1.0, since / maxf(end_t, 0.01)))
+	else:
+		var u := fposmod(t, each) / each
+		if u < 0.4:
+			target = pouch.interpolate_with(port, smoothstep(0.0, 1.0, u / 0.4))
+			carry = true
+		elif u < 0.75:
+			target = port
+			target.origin += fwd * 0.035 * smoothstep(0.4, 0.7, u)     # thumbing it into the tube
+			carry = u < 0.68
+		else:
+			target = port.interpolate_with(pouch, smoothstep(0.0, 1.0, (u - 0.75) / 0.25))
+	anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, target, 1.0, true, 12.0)
+	anim.hand_ik.follow_hand(HandIKModifier.Hand.LEFT, HandIKModifier.Hand.RIGHT, gun * grip().affine_inverse())
+	anim.hand_ik.set_curl(HandIKModifier.Hand.LEFT, 0.7)
+	_owns[HandIKModifier.Hand.LEFT] = true
+	if carry:
+		if _shell_mesh == null:
+			_shell_mesh = MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.top_radius = 0.0105
+			cm.bottom_radius = 0.0105
+			cm.height = 0.068
+			cm.radial_segments = 10
+			var m := StandardMaterial3D.new()
+			m.albedo_color = Color(0.7, 0.1, 0.07)
+			m.roughness = 0.5
+			cm.material = m
+			_shell_mesh.mesh = cm
+			left_hand_attach.add_child(_shell_mesh)
+			# Across the fingers, held in the curl.
+			_shell_mesh.transform = Transform3D(Basis(Vector3.FORWARD, PI * 0.5), Vector3(0.0, 0.085, 0.025))
+			_set_layers(_shell_mesh)
+		_shell_mesh.visible = true
 
 
 ## Held item in first person: same layers as the body so it's never culled.

@@ -199,6 +199,9 @@ func _equipment() -> UltraEquipmentVisual:
 
 ## Where the gun points, on this pane: the shot ray (simulated eye, gun direction) to the first
 ## thing it hits (or its range), projected through this player's camera.
+const EDGE_INSET := 18.0               ## px: an off-screen gun dot is kept this far inside the edge
+
+
 func _update_gun_dot(delta: float) -> void:
 	var s := character.state
 	var def := character.held_def()
@@ -227,9 +230,23 @@ func _update_gun_dot(delta: float) -> void:
 		var hit := UltraCombat.trace(space, q, origin, dir)
 		if not hit.is_empty():
 			point = hit.position
-	if cam.is_position_behind(point):
-		return
-	dot_pos = cam.unproject_position(point)
+	# Pointing off screen (a rifle carried across the chest at a sprint points ~90 deg to the
+	# side): the dot sits on the edge of the view on that side.
+	var rect := get_viewport().get_visible_rect()
+	var inset := rect.grow(-EDGE_INSET)
+	var off := cam.is_position_behind(point)
+	if not off:
+		dot_pos = cam.unproject_position(point)
+		off = not inset.has_point(dot_pos)
+	if off:
+		var v := cam.global_transform.affine_inverse() * point
+		var d2 := Vector2(v.x, -v.y)
+		if d2.length() < 0.001:
+			return
+		var c2 := rect.get_center()
+		var half := inset.size * 0.5
+		var k := minf(half.x / maxf(absf(d2.x), 0.0001), half.y / maxf(absf(d2.y), 0.0001))
+		dot_pos = c2 + d2 * k
 	dot_visible = true
 	var want := 0.35 if s.action != UltraActionLayer.Action.READY else 1.0
 	_dot_a = move_toward(_dot_a, want, delta * 6.0)
