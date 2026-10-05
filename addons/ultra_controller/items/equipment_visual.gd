@@ -107,6 +107,7 @@ func _process(delta: float) -> void:
 				slide.set_meta("rest", slide.position)
 			slide.position = (slide.get_meta("rest") as Vector3) + Vector3(0, 0, -minf(_slide_kick, 0.03))
 		_drive_pump(delta)
+		_drive_barrel_smoke(delta)
 		var mag := held_node.find_child("Magazine", true, false) as Node3D
 		if mag:
 			var hide := s.action == UltraActionLayer.Action.RELOADING and s.action_t > 0.35 and s.action_t < float(held_def.stat("reload_commit", 1.5)) - 0.2
@@ -599,6 +600,37 @@ func _on_item_event(kind: StringName, _data: Dictionary) -> void:
 		if pumps():
 			_pump_t = 0.0
 			_pump_ejected = false
+		_heat = minf(_heat + (float(def.stat("smoke", 0.6)) if def else 0.6) * 0.45, 2.0)
+
+
+# ---------------------------------------------------------------- barrel smoke
+
+var _heat := 0.0                      ## shots' worth of heat in the barrel (decays)
+var _wisps: GPUParticles3D
+
+
+## A hot barrel smokes: thin wisps curl up off the muzzle for a while after firing, more after
+## a burst or a shotgun blast.
+func _drive_barrel_smoke(delta: float) -> void:
+	_heat = maxf(_heat - delta * 0.3, 0.0)
+	if _wisps == null or not is_instance_valid(_wisps) or _wisps.get_parent() != held_node:
+		var fx := UltraEffects.instance()
+		if fx == null:
+			return
+		_wisps = fx.smoke_particles(24, 2.0, 0.2, 0.06, 2.5)
+		var pm := _wisps.process_material as ParticleProcessMaterial
+		pm.direction = Vector3.UP
+		pm.spread = 12.0
+		pm.initial_velocity_min = 0.05
+		pm.initial_velocity_max = 0.2
+		pm.gravity = Vector3(0, 0.25, 0)
+		pm.damping_min = 0.3
+		pm.damping_max = 0.6
+		_wisps.emitting = false
+		held_node.add_child(_wisps)
+		_wisps.transform = UltraPoseSampler.marker(held_node, "M_Muzzle")
+	_wisps.emitting = _heat > 0.2
+	_wisps.speed_scale = 0.8 + minf(_heat, 1.5) * 0.3
 
 
 # ---------------------------------------------------------------- pump-action
@@ -640,7 +672,7 @@ func _drive_pump(delta: float) -> void:
 			_pump_ejected = true
 			var fx := UltraEffects.instance()
 			if fx:
-				fx.shell(eject_transform(), character.visual_root.global_basis * Vector3.RIGHT)
+				fx.shell(eject_transform(), eject_side(), String(held_def.stat("shell", "9mm")))
 			_recoil.impulse(Vector3(0.0, -0.25, 0.6))
 		if u >= 1.0:
 			_pump_t = -1.0
@@ -733,6 +765,15 @@ func muzzle_transform() -> Transform3D:
 	if held_node == null:
 		return character.visual_root.global_transform
 	return held_node.global_transform * UltraPoseSampler.marker(held_node, "M_Muzzle")
+
+
+## World direction out of the ejection port: whichever side of the gun the port marker is on
+## (spent cases went out of the far side, through the gun).
+func eject_side() -> Vector3:
+	if held_node == null:
+		return character.visual_root.global_basis.x
+	var m := UltraPoseSampler.marker(held_node, "M_EjectPort").origin
+	return (held_node.global_basis * Vector3(signf(m.x) if absf(m.x) > 0.001 else 1.0, 0.0, 0.0)).normalized()
 
 
 func eject_transform() -> Transform3D:

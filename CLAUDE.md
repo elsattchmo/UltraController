@@ -327,6 +327,24 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   then), `_drive_shells` = left hand pouch <-> M_LoadPort on the sim clock (FP: the gun comes
   up rolled SHELL_ROLL, not shouldered). Stat `kick` scales the visual recoil; TP shoulders
   rock back with it. Tour `shotgun_review`.
+- Bleeding out: a severed region bleeds `DamageProfile.bleed_rate[r]` hp/s (top of each cut
+  chain; `UltraInjury.bleed_rate`, a pure function of `severed`), applied by the authority every
+  BLEED_TICKS (6) - hp is quantized to 0.1 each tick, a per-tick drain rounded away. hp 0 ->
+  apply_damage kind `bleed` (no blood / limb damage) -> DEAD. HUD health bar pulses.
+- Blood (`UltraBlood`, a child of UltraEffects, presentation only): droplets (MultiMesh,
+  ballistic + drag, raycast each frame) splat where they land - world Decals that merge and
+  grow into pools (<= 1.6 m), or Decals on the nearest bone of a character they hit (rides the
+  bone: blood stays on the body). `wound()` = entry spray + exit spatter + body splats;
+  UltraBodyFX pumps stumps with the heart (weaker as hp drops), drips, pools under anyone lying
+  in it and under a body shot dead.
+- Gun smoke: muzzle puff per shot (`UltraEffects.smoke`, stat `smoke` 0.5 pistol .. 1.8
+  shotgun) and barrel wisps while hot (`EquipmentVisual._heat`). GPUParticles3D: CPUParticles3D
+  with a colour ramp drew its newest particle as an opaque black quad.
+- Spent cases: `UltraEffects.SHELLS` by stat `shell` (9mm / 556 / 12g red hull, brass head),
+  thrown toward `EquipmentVisual.eject_side()` = the side the M_EjectPort marker is on (they went
+  out of the far side through the gun before). m4 test_shells_eject_from_the_port.
+- Shotgun cycle: recoil_gun 11 deg, view 14, kick 5; the pump waits 0.42 s for the gun to come
+  back down (fire_interval 1.15).
 - `UltraSpring.step` substeps (w*dt <= 0.35): a hitch frame (first shotgun blast compiling
   shaders) made the camera kick spring explode and whip the view 70 deg.
 - Sprint carry dot: the rifle's `sprint_lower_deg` is the measured port-arms barrel (88.9 deg

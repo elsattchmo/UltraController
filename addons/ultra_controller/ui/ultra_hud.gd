@@ -25,6 +25,7 @@ var _armed_a := 0.0
 var _prompt: Label
 var _ammo: Label
 var _health: ProgressBar
+var _bleed_ph := 0.0
 var _breath: ProgressBar
 var _msg: Label
 var _hotbar: HBoxContainer
@@ -298,6 +299,13 @@ func _process(delta: float) -> void:
 	_msg_t = maxf(_msg_t - delta, 0.0)
 	_msg.visible = _msg_t > 0.0
 	_health.value = s.hp
+	# Bleeding out: the bar pulses (faster the faster it drains).
+	var bleed := UltraInjury.bleed_rate(s, character.damage_profile) if s.state != MotorState.Id.DEAD else 0.0
+	if bleed > 0.0:
+		_bleed_ph = fmod(_bleed_ph + delta * (1.2 + bleed * 0.25) * TAU, TAU)
+		_health.modulate = Color(1, 1, 1).lerp(Color(1.6, 0.5, 0.5), 0.5 + 0.5 * sin(_bleed_ph))
+	else:
+		_health.modulate = Color.WHITE
 	_breath.max_value = character.profile.breath_time
 	_breath.value = s.breath
 	_breath.visible = s.breath < character.profile.breath_time - 0.01

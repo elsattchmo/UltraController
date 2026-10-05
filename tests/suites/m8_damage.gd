@@ -474,3 +474,30 @@ func test_shotgun_blast() -> void:
 		UltraNet.despawn_bot(t.net_id)
 		await ticks(5)
 	info("\n  ".join(res))
+
+
+## Losing a limb, you bleed out: health drains at the stump's rate (an arm ~4 hp/s) until
+## you die. A whole body doesn't bleed.
+func test_bleed_out() -> void:
+	var t := dummy(Vector3(-24, 0.05, -70))
+	await ticks(10)
+	var hp0 := t.state.hp
+	await ticks(60)
+	check(is_equal_approx(t.state.hp, hp0), "whole: no bleeding (%.1f -> %.1f)" % [hp0, t.state.hp])
+	hurt(t, R.FOREARM_L, 60.0, &"blade")
+	await ticks(2)
+	check((t.state.severed >> R.FOREARM_L) & 1 == 1, "forearm off")
+	var rate := UltraInjury.bleed_rate(t.state, t.damage_profile)
+	var hp1 := t.state.hp
+	await ticks(120)
+	var lost := hp1 - t.state.hp
+	info("forearm off: bleeding %.1f hp/s; lost %.1f hp in 2 s (hp %.1f)" % [rate, lost, t.state.hp])
+	check(rate > 0.0 and absf(lost - rate * 2.0) < 1.0, "drains at the stump's rate (%.1f of %.1f)" % [lost, rate * 2.0])
+	# Bleeds until dead.
+	var n := 0
+	while t.state.state != Id.DEAD and n < 60 * 60:
+		await ticks(30)
+		n += 30
+	info("bled out after another %.1f s" % (n / 60.0))
+	check(t.state.state == Id.DEAD and t.state.hp <= 0.0, "bleeds to death")
+	check(n / 60.0 > 10.0, "not at once (%.1f s)" % (n / 60.0))

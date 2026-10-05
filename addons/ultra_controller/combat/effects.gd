@@ -15,6 +15,8 @@ var _shell_mesh: CylinderMesh
 var _shell_mat: StandardMaterial3D
 ## Characters controlled on this machine: their impacts were already predicted.
 var local_ids: Array[int] = []
+## Droplets, splats on bodies and the ground, pools (UltraBlood).
+var blood_fx: UltraBlood
 
 static var _current: UltraEffects
 
@@ -40,6 +42,9 @@ func _ready() -> void:
 	_shell_mat.roughness = 0.3
 	UltraNet.world.on_event(&"impact", _on_impact)
 	UltraNet.world.on_event(&"hit", _on_hit)
+	blood_fx = UltraBlood.new()
+	blood_fx.name = "Blood"
+	add_child(blood_fx)
 
 
 func _exit_tree() -> void:
@@ -69,8 +74,10 @@ func _on_item(c: UltraCharacter, kind: StringName, data: Dictionary) -> void:
 	var eq := c.get_node_or_null("Equipment") as UltraEquipmentVisual
 	var muzzle := eq.muzzle_transform() if eq else c.visual_root.global_transform
 	flash(muzzle)
+	var def := c.held_def()
+	smoke(muzzle, float(def.stat("smoke", 0.6)) if def else 0.6)
 	if eq and not eq.pumps():          # (a pump-action throws its shell when it's racked)
-		shell(eq.eject_transform(), c.visual_root.global_basis * Vector3.RIGHT)
+		shell(eq.eject_transform(), eq.eject_side(), String(def.stat("shell", "9mm")) if def else "9mm")
 	# Buckshot: a tracer and a predicted impact per pellet.
 	if data.has("dirs"):
 		for d: Vector3 in data.dirs:
@@ -91,7 +98,7 @@ func _on_item(c: UltraCharacter, kind: StringName, data: Dictionary) -> void:
 			var who := UltraCharacter.of_collider(hit.collider)
 			if who:
 				if who.damage_profile.blood_on():
-					blood(hit.position, hit.normal)
+					blood(hit.position, hit.normal, who, data.dir, 30.0)
 			else:
 				sparks(hit.position, hit.normal)
 	else:
@@ -111,7 +118,7 @@ func _shot_fx(c: UltraCharacter, muzzle: Transform3D, origin: Vector3, dir: Vect
 		var who := UltraCharacter.of_collider(hit.collider)
 		if who:
 			if who.damage_profile.blood_on():
-				blood(hit.position, hit.normal)
+				blood(hit.position, hit.normal, who, dir, 14.0)
 		else:
 			sparks(hit.position, hit.normal)
 
@@ -129,10 +136,10 @@ func _on_hit(target_id: int, pos: Vector3, dir: Vector3, amount: float, attacker
 	var c := UltraNet.world.character(target_id)
 	if c:
 		c.react_to_hit(region, dir, amount)
-	if attacker_id in local_ids or kind == &"impact" or kind == &"drown":
+	if attacker_id in local_ids or kind == &"impact" or kind == &"drown" or kind == &"bleed":
 		return
 	if c == null or c.damage_profile.blood_on():
-		blood(pos, -dir)
+		blood(pos, -dir, c, dir, amount)
 
 
 func flash(at: Transform3D) -> void:
@@ -158,30 +165,169 @@ func flash(at: Transform3D) -> void:
 	t.tween_callback(quad.queue_free)
 
 
-func shell(at: Transform3D, right: Vector3) -> void:
+## Spent cases by kind: [length, radius, hull colour, head length] (m). "12g" = a red plastic
+## shotgun hull with a brass head; the others are brass.
+const SHELLS := {
+	"9mm": [0.019, 0.0045, Color(0.85, 0.65, 0.25), 0.0],
+	"556": [0.045, 0.0048, Color(0.85, 0.65, 0.25), 0.0],
+	"12g": [0.068, 0.0105, Color(0.62, 0.07, 0.05), 0.016],
+}
+var _shell_parts := {}
+
+
+## A spent case thrown out of the ejection port `at` (its basis is the gun's: -Z the barrel)
+## toward `out` (the side the port is on): out, up, a little back, tumbling.
+func shell(at: Transform3D, out: Vector3, kind := "9mm") -> void:
+	if not SHELLS.has(kind):
+		kind = "9mm"
+	var spec: Array = SHELLS[kind]
 	var rb: RigidBody3D
 	if _shells.size() >= MAX_SHELLS:
 		rb = _shells.pop_front()
-	else:
-		rb = RigidBody3D.new()
-		rb.collision_layer = 0
-		rb.collision_mask = UltraLayers.WORLD_STATIC
-		rb.mass = 0.01
-		var mi := MeshInstance3D.new()
-		mi.mesh = _shell_mesh
-		mi.material_override = _shell_mat
-		rb.add_child(mi)
-		var cs := CollisionShape3D.new()
-		var cyl := CylinderShape3D.new()
-		cyl.radius = 0.0045
-		cyl.height = 0.019
-		cs.shape = cyl
-		rb.add_child(cs)
-		add_child(rb)
+		rb.queue_free()
+	rb = RigidBody3D.new()
+	rb.collision_layer = 0
+	rb.collision_mask = UltraLayers.WORLD_STATIC
+	rb.mass = 0.012 if kind != "12g" else 0.03
+	var len: float = spec[0]
+	var rad: float = spec[1]
+	if not _shell_parts.has(kind):
+		var hull := CylinderMesh.new()
+		hull.top_radius = rad
+		hull.bottom_radius = rad
+		hull.height = len
+		hull.radial_segments = 10
+		var hm := StandardMaterial3D.new()
+		hm.albedo_color = spec[2]
+		hm.metallic = 0.9 if spec[3] == 0.0 else 0.0
+		hm.roughness = 0.3 if spec[3] == 0.0 else 0.55
+		var parts := [hull, hm]
+		if spec[3] > 0.0:
+			var head := CylinderMesh.new()
+			head.top_radius = rad * 1.04
+			head.bottom_radius = rad * 1.08
+			head.height = spec[3]
+			head.radial_segments = 10
+			parts.append(head)
+		_shell_parts[kind] = parts
+	var parts: Array = _shell_parts[kind]
+	var mi := MeshInstance3D.new()
+	mi.mesh = parts[0]
+	mi.material_override = parts[1]
+	rb.add_child(mi)
+	if parts.size() > 2:
+		var hd := MeshInstance3D.new()
+		hd.mesh = parts[2]
+		hd.material_override = _shell_mat
+		hd.position = Vector3(0, len * 0.5 - float(spec[3]) * 0.5 + 0.001, 0)      # (+Y: the back)
+		rb.add_child(hd)
+	var cs := CollisionShape3D.new()
+	var cyl := CylinderShape3D.new()
+	cyl.radius = rad
+	cyl.height = len
+	cs.shape = cyl
+	rb.add_child(cs)
+	add_child(rb)
 	_shells.append(rb)
-	rb.global_transform = Transform3D(Basis(Vector3.BACK, PI * 0.5) * at.basis, at.origin)
-	rb.linear_velocity = right * randf_range(1.6, 2.4) + Vector3.UP * randf_range(1.5, 2.2)
-	rb.angular_velocity = Vector3(randf_range(-20, 20), randf_range(-20, 20), randf_range(-20, 20))
+	var gb := at.basis.orthonormalized()
+	var gun_right := out.normalized() if out.length() > 0.01 else gb.x
+	var gun_up := gb.y
+	var gun_back := gb.z
+	# Lying in the port along the bore (the case's axis = the cylinder's Y), head to the back.
+	var axis_x := gun_back.cross(gun_right.cross(gun_back)).normalized()      # (perpendicular to the bore)
+	rb.global_transform = Transform3D(Basis(axis_x, gun_back, axis_x.cross(gun_back)), at.origin + gun_right * rad)
+	var big := kind == "12g"
+	rb.linear_velocity = gun_right * randf_range(2.0, 2.8) * (1.15 if big else 1.0) + gun_up * randf_range(1.6, 2.4) + gun_back * randf_range(0.2, 0.6)
+	rb.angular_velocity = gun_up * randf_range(-14, -8) + gun_right * randf_range(-6, 6)
+	get_tree().create_timer(12.0).timeout.connect(func() -> void:
+		if is_instance_valid(rb):
+			_shells.erase(rb)
+			rb.queue_free())
+
+
+# ---------------------------------------------------------------- smoke
+
+var _smoke_mat: StandardMaterial3D
+
+
+## Billboard smoke material (soft round sprite, coloured and faded by the particles).
+## (GPU particles: CPUParticles3D drew its newest particle as an opaque black quad with a
+## colour ramp - a black disc at every muzzle.)
+func _smoke_material() -> StandardMaterial3D:
+	if _smoke_mat == null:
+		var g := Gradient.new()
+		g.offsets = PackedFloat32Array([0.0, 1.0])
+		g.colors = PackedColorArray([Color(1, 1, 1, 1), Color(1, 1, 1, 0)])
+		var gt := GradientTexture2D.new()
+		gt.gradient = g
+		gt.fill = GradientTexture2D.FILL_RADIAL
+		gt.fill_from = Vector2(0.5, 0.5)
+		gt.fill_to = Vector2(0.5, 0.0)
+		gt.width = 64
+		gt.height = 64
+		_smoke_mat = StandardMaterial3D.new()
+		_smoke_mat.albedo_texture = gt
+		_smoke_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_smoke_mat.vertex_color_use_as_albedo = true
+		_smoke_mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		_smoke_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_smoke_mat.proximity_fade_enabled = true
+		_smoke_mat.proximity_fade_distance = 0.4
+	return _smoke_mat
+
+
+## Smoke particles: rising, slowing, spreading, fading. `peak_alpha` at the start of life.
+func smoke_particles(amount: int, life: float, peak_alpha: float, size: float, grow: float) -> GPUParticles3D:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.07, 1.0])
+	g.colors = PackedColorArray([Color(0.8, 0.8, 0.78, 0.0), Color(0.8, 0.8, 0.78, peak_alpha), Color(0.74, 0.74, 0.74, 0.0)])
+	var gt := GradientTexture1D.new()
+	gt.gradient = g
+	var sc := Curve.new()
+	sc.add_point(Vector2(0, 1.0 / grow))
+	sc.add_point(Vector2(1, 1.0))
+	var sct := CurveTexture.new()
+	sct.curve = sc
+	var pm := ParticleProcessMaterial.new()
+	pm.color_ramp = gt
+	pm.scale_curve = sct
+	pm.scale_min = 0.7
+	pm.scale_max = 1.2
+	pm.gravity = Vector3(0, 0.35, 0)
+	pm.angle_min = -180.0
+	pm.angle_max = 180.0
+	var p := GPUParticles3D.new()
+	p.amount = maxi(amount, 1)
+	p.lifetime = life
+	p.local_coords = false
+	p.process_material = pm
+	var qm := QuadMesh.new()
+	qm.size = Vector2(size * grow, size * grow)
+	qm.material = _smoke_material()
+	p.draw_pass_1 = qm
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.visibility_aabb = AABB(Vector3(-3, -3, -3), Vector3(6, 6, 6))
+	return p
+
+
+## A puff of gun smoke at the muzzle `at`, blown out along the barrel then rising and
+## spreading; `strength` 0.5 (pistol) .. 2 (shotgun).
+func smoke(at: Transform3D, strength := 1.0) -> void:
+	var life := 1.6 + 0.6 * strength
+	var p := smoke_particles(int(clampf(10 * strength, 4, 30)), life, 0.26, 0.18 * (0.7 + 0.3 * strength), 3.0)
+	p.one_shot = true
+	p.explosiveness = 0.85
+	var pm := p.process_material as ParticleProcessMaterial
+	pm.direction = Vector3(0, 0, -1)
+	pm.spread = 18.0
+	pm.initial_velocity_min = 0.8 * strength
+	pm.initial_velocity_max = 3.0 * strength
+	pm.damping_min = 3.0
+	pm.damping_max = 5.0
+	add_child(p)
+	p.global_transform = Transform3D(at.basis.orthonormalized(), at.origin)
+	p.emitting = true
+	get_tree().create_timer(life + 0.3).timeout.connect(p.queue_free)
 
 
 func tracer(from: Vector3, to: Vector3) -> void:
@@ -284,8 +430,16 @@ func splash(at: Vector3, strength := 1.0) -> void:
 	tw.tween_callback(ring.queue_free)
 
 
-func blood(at: Vector3, normal: Vector3) -> void:
-	_burst(at, normal, _blood_mat, 14, 1.8, 0.45)
+## Blood where a shot struck (`dir`: the shot, if known - spatter flies out behind; `who`: the
+## body, which gets splashed round the wound).
+func blood(at: Vector3, normal: Vector3, who: UltraCharacter = null, dir := Vector3.ZERO, amount := 20.0) -> void:
+	if blood_fx == null:
+		_burst(at, normal, _blood_mat, 14, 1.8, 0.45)
+		return
+	if dir != Vector3.ZERO:
+		blood_fx.wound(who, at, dir.normalized(), amount)
+	else:
+		blood_fx.spray(at, normal, 12, 2.0, 45.0, 0.006, who)
 
 
 func _burst(at: Vector3, normal: Vector3, mat: Material, n: int, speed: float, life: float) -> void:

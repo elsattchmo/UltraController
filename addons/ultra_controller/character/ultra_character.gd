@@ -368,6 +368,19 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	_was_wet = wet
 	if old != state.state:
 		state_changed.emit(old, state.state)
+	# Bleeding out (a limb off): health drains until it's gone. Authority only. In 0.1 s
+	# steps: health is quantized to 0.1 every tick, which would round a per-tick drain away.
+	if is_authority() and state.state != MotorState.Id.DEAD and tick % BLEED_TICKS == 0:
+		var bleed := UltraInjury.bleed_rate(state, damage_profile)
+		if bleed > 0.0:
+			state.hp = maxf(state.hp - bleed * delta * BLEED_TICKS, 0.0)
+			if state.hp <= 0.0:
+				var bd := UltraCombat.DamageInfo.new()
+				bd.amount = 0.0
+				bd.kind = &"bleed"
+				bd.point = state.pos + Vector3.UP
+				bd.dir = Vector3.DOWN
+				apply_damage(bd)
 	# Out of air: drowning hurts once a second (authority decides damage).
 	if is_authority() and state.breath <= 0.0 and tick % 60 == 0:
 		var d := UltraCombat.DamageInfo.new()
@@ -556,13 +569,13 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 	var dp := damage_profile
 	var R := UltraLimbs.Region
 	var r := info.region if info.region >= 0 else UltraHitboxes.nearest(self, info.point)
-	if info.kind == &"drown":
+	if info.kind == &"drown" or info.kind == &"bleed":
 		r = R.TORSO
 	info.region = r
 	var mult := dp.region_mult[r] if dp.limb_damage else 1.0
 	state.hp = maxf(state.hp - info.amount * mult, 0.0)
 	var cut := 0
-	if dp.limb_damage and info.kind != &"drown":
+	if dp.limb_damage and info.kind != &"drown" and info.kind != &"bleed":
 		var max_hp := dp.region_hp[r]
 		var after := state.limb_hp[r] / 100.0 * max_hp - info.amount
 		state.limb_hp[r] = clampi(int(ceil(after / max_hp * 100.0)), 0, 100)
@@ -606,6 +619,8 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 		state.vel += Vector3(info.shove.x, 0.0, info.shove.z) * 0.7
 
 
+## Bleeding is applied every this many ticks.
+const BLEED_TICKS := 6
 ## A shove (UltraCombat.DamageInfo.shove, m/s) this big knocks you off your feet.
 const SHOVE_KNOCKDOWN := 3.5
 

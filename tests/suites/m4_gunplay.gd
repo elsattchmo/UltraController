@@ -684,4 +684,40 @@ func test_shotgun_shells_and_pump() -> void:
 			shots += 1
 			seq = c.state.fire_seq
 	info("pulling the trigger 10 times in 1 s: %d shots (fire interval %.2f s)" % [shots, float(def.stat("fire_interval", 0.9))])
-	check(shots == 2, "no faster than the pump")
+	check(shots == int(ceil(1.0 / float(def.stat("fire_interval", 0.9)))), "no faster than the pump (%d)" % shots)
+
+
+## Spent cases fly out of the side the ejection port is on, and up (they went out of the far
+## side, through the gun) - the shotgun's when its pump is racked.
+func test_shells_eject_from_the_port() -> void:
+	var fx := UltraEffects.new()
+	add_child(fx)
+	fx.watch(c)
+	var eq := c.get_node("Equipment") as UltraEquipmentVisual
+	var res := []
+	for gun: StringName in [&"pistol", &"rifle", &"shotgun"]:
+		UltraItems.give(c, gun)
+		_bot().view_tp = true
+		await _run([{"ticks": 110, "slot": _slot(gun), "yaw": 0.0}])      # (holster the last, draw this)
+		var n0 := fx._shells.size()
+		_bot().set_steps([{"ticks": 2, "slot": _slot(gun), "tap": InputFrame.B_PRIMARY}, {"ticks": 200, "slot": _slot(gun)}])
+		var got: RigidBody3D = null
+		var port := Vector3.ZERO
+		var out := Vector3.ZERO
+		for i in 90:
+			await get_tree().process_frame
+			if got == null and fx._shells.size() > n0:
+				got = fx._shells[-1]
+				port = eq.eject_transform().origin
+				out = eq.eject_side()
+				for k in 8:
+					await get_tree().process_frame
+				break
+		check(got != null, "%s: a case comes out" % gun)
+		if got == null:
+			continue
+		var rel := got.global_position - port
+		res.append("%s: 8 frames on, %.2f m out of the port side, %.2f m up" % [gun, rel.dot(out), rel.y])
+		check(rel.dot(out) > 0.15 and rel.y > 0.0, "%s: out of the port side and up" % gun)
+	info("\n  ".join(res))
+	fx.queue_free()

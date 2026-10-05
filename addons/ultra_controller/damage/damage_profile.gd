@@ -22,6 +22,11 @@ enum Gore { OFF, NO_BLOOD, FULL }
 @export_flags("Head", "Torso", "Upper arm L", "Forearm L", "Upper arm R", "Forearm R", "Thigh L", "Shin L", "Thigh R", "Shin R")
 var severable := 0b1111111101
 
+## Bleeding out: health lost per second (hp/s) while a region is cut off (counted at the top of
+## a cut chain - an arm off at the shoulder bleeds as the upper arm). An arm off: dead in
+## ~25 s; a leg off at the hip: ~18 s.
+@export var bleed_rate := PackedFloat32Array([0.0, 0.0, 4.0, 3.0, 4.0, 3.0, 5.5, 3.5, 5.5, 3.5])
+
 @export_group("Injuries")
 ## Ground speed with a hurt / crippled leg (worst leg).
 @export_range(0.1, 1, 0.01) var injured_leg_speed := 0.65

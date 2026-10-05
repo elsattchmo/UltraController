@@ -37,27 +37,29 @@ sway_return_hz = 1.5
 sway_damping = 0.65
 free_aim_deg = 6.0
 sway_amount = 1.4
-recoil_gun_deg = 7.0
+recoil_gun_deg = 11.0
 sprint_lower_deg = Vector2(88.9, -13.5)
 stats = {
 "ads_fov": 58.0,
 "ads_spread_deg": 0.2,
 "ammo": "ammo_12g",
 "damage": 14.0,
-"fire_interval": 0.9,
+"fire_interval": 1.15,
 "impulse": 3.0,
-"kick": 3.2,
+"kick": 5.0,
 "mag_size": 6,
 "pellet_spread_deg": 2.2,
 "pellets": 9,
-"pump_delay": 0.22,
-"pump_time": 0.42,
+"pump_delay": 0.42,
+"pump_time": 0.46,
 "range": 70.0,
-"recoil_pitch_deg": 9.0,
-"recoil_yaw_deg": 2.2,
+"recoil_pitch_deg": 14.0,
+"recoil_yaw_deg": 3.0,
 "reload_end": 0.3,
 "reload_mode": "shell",
 "reload_start": 0.35,
+"shell": "12g",
+"smoke": 1.8,
 "shell_time": 0.55,
 "spread_deg": 0.6
 }

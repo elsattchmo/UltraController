@@ -93,3 +93,21 @@ static func strength_mult(s: MotorState) -> float:
 		elif a >= S.CRIPPLED:
 			m *= 0.5
 	return m
+
+
+## Health lost to bleeding, hp/s: the open stumps (the top of each cut chain). Only the
+## authority applies it; it's a pure function of the state, so anyone can show it.
+static func bleed_rate(s: MotorState, dp: DamageProfile) -> float:
+	if s.severed == 0 or dp == null or not dp.limb_damage:
+		return 0.0
+	var total := 0.0
+	for r in UltraLimbs.COUNT:
+		if not (s.severed >> r) & 1:
+			continue
+		var top := true
+		for up: int in UltraLimbs.BELOW:
+			if r in UltraLimbs.BELOW[up] and (s.severed >> up) & 1:
+				top = false
+		if top and r < dp.bleed_rate.size():
+			total += dp.bleed_rate[r]
+	return total

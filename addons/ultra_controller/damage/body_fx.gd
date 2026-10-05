@@ -45,7 +45,7 @@ func _exit_tree() -> void:
 	UltraNet.world.off_event(&"sever", _on_sever)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if character == null:
 		return
 	var s := character.state
@@ -59,6 +59,62 @@ func _process(_delta: float) -> void:
 		injury.dangle_r = 0.0
 	var vb := character.visual_root.global_basis
 	injury.accel = (vb.inverse() * character.get_accel()) * Vector3(-1, 1, -1)   # world -> skeleton space
+	_drive_blood(delta)
+
+
+# ---------------------------------------------------------------- bleeding
+
+var _beat := 0.0
+var _drip_t := 0.0
+var _pool_t := 0.0
+var _dead_t := 0.0
+
+
+## Open stumps pump blood with the heart (weaker as the blood runs out; a dribble once dead);
+## anyone lying in it grows a pool, and a body that's been shot dead bleeds out under itself.
+func _drive_blood(delta: float) -> void:
+	var fx := UltraEffects.instance()
+	if fx == null or fx.blood_fx == null or not character.damage_profile.blood_on():
+		return
+	var s := character.state
+	var Id := MotorState.Id
+	var dead := s.state == Id.DEAD
+	_dead_t = _dead_t + delta if dead else 0.0
+	var lying := s.state in [Id.RAGDOLL, Id.DEAD, Id.GET_UP]
+	var life := clampf(s.hp / 100.0, 0.0, 1.0)
+	var flow := 0.0 if dead and _dead_t > 12.0 else (0.25 if dead else 0.4 + 0.6 * life)
+	_beat -= delta
+	_drip_t -= delta
+	_pool_t -= delta
+	var beat := false
+	if _beat <= 0.0:
+		_beat = 0.75 if not dead else 1.4
+		beat = true
+	for r: int in _caps:
+		var att := _caps[r] as Node3D
+		if not is_instance_valid(att) or att.get_child_count() == 0:
+			continue
+		var cap := att.get_child(0) as Node3D
+		var at := cap.global_position
+		var out := cap.global_basis.y.normalized()
+		if flow <= 0.0:
+			continue
+		if beat:
+			fx.blood_fx.spray(at, out + Vector3.UP * 0.15, int(4 + 8 * flow), 1.2 + 2.2 * flow, 22.0, 0.007, character)
+		if _drip_t <= 0.0:
+			fx.blood_fx.spray(at, Vector3.DOWN, 1, 0.3, 30.0, 0.006, character)
+		if lying and _pool_t <= 0.0:
+			fx.blood_fx.pool(at, 0.12 + 0.1 * flow)
+	if _drip_t <= 0.0:
+		_drip_t = 0.09
+	# Shot dead: a pool spreads from under the chest for a while.
+	if dead and _dead_t < 10.0 and _pool_t <= 0.0 and character.skeleton:
+		var sk := character.skeleton
+		var ch := sk.find_bone("Chest")
+		if ch >= 0:
+			fx.blood_fx.pool(sk.global_transform * sk.get_bone_global_pose(ch).origin, 0.16)
+	if _pool_t <= 0.0:
+		_pool_t = 0.45
 
 
 ## Hit reaction: the matching clip on the upper body, and a kick on the bone that was hit.
@@ -108,8 +164,6 @@ func _make_cap(r: int) -> Node3D:
 	var dir := at.normalized() if at.length() > 0.001 else Vector3.UP
 	mi.transform = Transform3D(Basis(Quaternion(Vector3.UP, dir)), at)
 	att.add_child(mi)
-	if character.damage_profile.blood_on():
-		_bleed(mi)
 	return att
 
 
@@ -148,8 +202,14 @@ func _on_sever(net_id: int, cut: int, dir: Vector3, point: Vector3) -> void:
 	_apply_mask(character.state.severed | cut)
 	var fx := UltraEffects.instance()
 	if fx and character.damage_profile.blood_on():
-		fx.blood(point, -dir)
-		fx.blood(point, Vector3.UP)
+		if fx.blood_fx:
+			# The limb tears off: a gush along the hit, a fountain up, the body splashed.
+			fx.blood_fx.spray(point, dir + Vector3.UP * 0.2, 45, 4.5, 30.0, 0.008, character)
+			fx.blood_fx.spray(point, Vector3.UP, 25, 2.8, 35.0, 0.007, character)
+			for i in 6:
+				fx.blood_fx.splat_body(character, point + Vector3(randf_range(-0.15, 0.15), randf_range(-0.25, 0.1), randf_range(-0.15, 0.15)), randf_range(0.08, 0.16))
+		else:
+			fx.blood(point, -dir)
 	spawn_gib(cut, dir)
 
 
