@@ -20,6 +20,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   1. delete `.godot/imported/mannequin.glb-*` then `--import` (a changed import *script* does not trigger reimport)
   2. `--script res://tools/build_animset.gd` (measures clips, writes mannequin_animset.tres)
   3. `--script res://tools/build_resources.gd` (input map seed, layer names, profiles, body profile)
+     (only via `--script`: run through tool_runner it wiped mannequin_body_profile.tres' hitboxes
+     and extra_libraries - check `git diff` on the body profile after any builder)
   4. `--script res://demo/maps/playground/build_playground.gd`
 
 ## Architecture (don't break these)
