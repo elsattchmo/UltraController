@@ -189,15 +189,38 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   the reload plays as authored in third person; in first person both hands' clip motion is
   shifted out in front of the eye by IK (`_drive_reload`). Don't IK the gun to a fixed pose.
 - Head stabiliser (`BodyDynamicsModifier.head_stabilize`): removes most of the clip's own fast
-  head yaw swing (jog/sprint whip the head ~30-50 deg); hip side-sway damped at speed.
+  head yaw swing (sprint: 48 deg -> 13); hip side-sway damped at speed. It turns AGAINST the
+  deviation (it used to turn with it and doubled the whip; m1_blend.test_head_steady_when_sprinting).
 - Water waves: `UltraWater.wave(p)` (shared clock `wave_time`, global shader uniform
   `ultra_wave_time`) move the surface mesh and float props (`set_meta("buoyancy", k)` tunes how
   deep a prop sits). Swimmers don't collide with loose props (prediction-safe).
 - Body mesh holes (the neck opening left by the FP head split) are capped at runtime
   (`UltraMeshCap`). The FP eye is kept >= 13 cm above / 9 cm ahead of the Neck bone, so
   crouch and sprint look-downs never put the camera inside the shoulders.
-- `InertialBlendModifier` (first modifier) inertializes every loco state change on top of the
-  eased crossfades; call `anim.inertial.trigger()` when switching poses abruptly.
+- Animation flow (m1_blend.test_transitions_flow: head/chest/hips acceleration through a course
+  of starts, stops, flips, crouch, turns and rifle changes; was 250-760 m/s^2, now <= ~80):
+  * `InertialBlendModifier` runs twice: `inertial` (first modifier, clip pose) and `settle`
+    (after Look, before ragdoll/dismember: catches the procedural layers). It DETECTS jumps
+    itself (incoming hips/spine/neck/head acceleration spike, or moving faster than 3 m/s /
+    900 deg/s) - trigger() from _process lands a frame before the tree changes the pose, so
+    explicit triggers alone missed every snap. Restart = continue from the extrapolated output
+    at its current velocity, offset decays on a critically damped spring (half-life 0.11 s).
+    Thighs are not detectors (a sprint swings them > 900 deg/s). No detection for the first
+    10 frames (rest pose -> first clip) nor while a turn clip plays (`detect`); `settle.amount`
+    fades to 0 while climbing / hanging / ragdolled (it lifted hands off rungs).
+  * Weights that used to follow speed / flags instantly are springs (`_ease_w`, half-life
+    0.09 s): idle<->move mixes (ground/crouch/swim), item and raise/lower weights. Gait
+    position on the blend spaces uses an eased speed (`_ease_speed`); the bladed run->sprint
+    blend (hips square up ~40 deg) is eased too. One-shots use the ease curve.
+  * TP shouldered gun blends the GUN from where the clip's hand holds it to the shouldered
+    pose and keeps both hands at weight 1 on it (switching hand targets snapped the hands).
+- Turn in place: the motor turns the body eased (`turn_in_place_rate` 180 deg/s, `_accel` 720,
+  `MotorState.turn_v`, codec'd); the anim plays a Mixamo turn clip (roles stand/crouch/aim
+  _turn_l/_r: T_StandL90/R90, T_CrouchB_L/R, T_RifleL90/R90) with the Hips' yaw stripped
+  (`_turn_clip`, also its net drift) and its TIME driven from how far the body has turned
+  (TimeSeek; `_turn_tabs` = turned-so-far per 1/60 s) - planted feet stay put at any speed.
+  A raised firearm (`UltraMotor.gun_up`) faces the aim in any view and turns from 45 deg.
+  T_CrouchL90/R90 (magic pack) throw an arm out: unused.
 - FP gun: `_gun_motion` (step bob, look lag, sprint lowering) on the camera-anchored pose.
 - Holding: two-handed props ride against the chest within reach; palms go flat on the side
   faces (`_hands_on_prop`, `UltraGrab.support/surface_point`, HandIK `open`). Fresh grabs get
@@ -256,7 +279,7 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   imported copy. Quaternius UAL 1+2 mannequin, 66 bones, 178 clips (+RESET), 12 `_RM` clips.
 - Clips found beyond the obvious: OverhandThrow, Throw_Object, LayToIdle (get-up), Push,
   Kick_Breach, Consume, Chest_Open, Idle_Hurt, Tired_Hunched, Zombie_Walk.
-- Turn_* clips do not rotate (feet step in place); the motor turns the body procedurally.
+- UAL Turn_* clips do not rotate (feet step in place) - superseded by the Mixamo turn clips.
 - Measured authored speeds (m/s): walk 0.80, back 0.97, jog 4.83, sprint 7.12, crouch 0.59.
   Walk_Backwards' planted feet drift sideways in the source clip (foot lock in M3 fixes it).
 

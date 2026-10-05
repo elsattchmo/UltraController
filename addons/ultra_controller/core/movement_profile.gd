@@ -47,7 +47,11 @@ enum Gait { WALK, JOG }
 @export_range(30, 2000, 5) var body_turn_rate := 540.0
 ## Idle FACE_AIM: the spine absorbs aim up to this angle before the feet turn.
 @export_range(10, 120, 1) var turn_in_place_angle := 70.0
-@export_range(10, 900, 5) var turn_in_place_rate := 280.0
+@export_range(10, 900, 5) var turn_in_place_rate := 180.0
+## Turn in place eases in and out at this angular acceleration (deg/s^2).
+@export_range(100, 5000, 10) var turn_in_place_accel := 720.0
+## With a gun up the feet come round sooner (the chest is already bladed off the aim).
+@export_range(10, 120, 1) var armed_turn_angle := 45.0
 
 @export_group("Air")
 @export_range(0, 40, 0.5) var air_accel := 3.5

@@ -26,6 +26,7 @@ var foot_ik: FootIKModifier
 var hand_ik: HandIKModifier
 var weapon_pose: WeaponPoseModifier
 var look: LookModifier
+var settle: InertialBlendModifier
 var skeleton: Skeleton3D
 
 ## Presentation inputs, written by the character every frame.
@@ -85,7 +86,6 @@ var _crawl_speed := 0.76
 var _lean := Vector2.ZERO
 var _lean_vel := Vector2.ZERO
 var _warp := 0.0
-var _turn_blend := 0.0
 var _backwards := false
 var _side_step := false             ## walking: side-step cycle (vs forward walk) in use
 var _side_g := 0.0
@@ -131,6 +131,11 @@ func setup(p_player: AnimationPlayer, p_skeleton: Skeleton3D) -> void:
 	look = LookModifier.new()
 	look.name = "Look"
 	skeleton.add_child(look)
+	# Last pass of the stack (before the ragdoll / dismemberment, added later): the procedural
+	# layers (aim, stance, gun pose, IK) can jump too - this one catches those.
+	settle = InertialBlendModifier.new()
+	settle.name = "Settle"
+	skeleton.add_child(settle)
 
 
 func _clip(role: StringName) -> StringName:
@@ -339,24 +344,16 @@ func _build() -> AnimationNodeBlendTree:
 		ground.add_node("limp", AnimationNodeBlend2.new(), Vector2(450, 0))
 		ground.connect_node("limp", 0, move_out)
 		ground.connect_node("limp", 1, "limp_rate")
-	var turn := AnimationNodeBlend3.new()
 	ground.add_node("idle", _anim(&"idle"), Vector2(0, 200))
-	ground.add_node("turn_l", _anim(&"turn_l90"), Vector2(0, 300))
-	ground.add_node("turn_r", _anim(&"turn_r90"), Vector2(0, 400))
-	ground.add_node("turn_rate", AnimationNodeTimeScale.new(), Vector2(400, 300))
-	ground.add_node("turn", turn, Vector2(200, 300))
-	ground.connect_node("turn", 0, "turn_l")
-	ground.connect_node("turn", 1, "idle")
-	ground.connect_node("turn", 2, "turn_r")
-	ground.connect_node("turn_rate", 0, "turn")
 	ground.add_node("mix", AnimationNodeBlend2.new(), Vector2(600, 100))
-	var idle_out := "turn_rate"
+	_turn_nodes.clear()
+	var idle_out := _add_turn(ground, LOCO + "ground/", "stand", "idle", Vector2(0, 300))
 	if _eight_way and _neutral:
 		# Standing in the bladed stance: the held item's aiming clip, whole body (set per item).
 		ground.add_node("idle_b_src", _anim(&"idle"), Vector2(200, 450))
 		ground.add_node("idle_stance", AnimationNodeBlend2.new(), Vector2(450, 350))
-		ground.connect_node("idle_stance", 0, "turn_rate")
-		ground.connect_node("idle_stance", 1, "idle_b_src")
+		ground.connect_node("idle_stance", 0, idle_out)
+		ground.connect_node("idle_stance", 1, _add_turn(ground, LOCO + "ground/", "aim", "idle_b_src", Vector2(0, 600)))
 		idle_out = "idle_stance"
 	ground.connect_node("mix", 0, idle_out)
 	ground.connect_node("mix", 1, "limp" if _has_limp else move_out)
@@ -374,7 +371,7 @@ func _build() -> AnimationNodeBlendTree:
 			bt.add_node("idle_rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
 			bt.connect_node("idle_rate", 0, "idle")
 		bt.add_node("mix", AnimationNodeBlend2.new(), Vector2(400, 100))
-		bt.connect_node("mix", 0, "idle_rate" if spec[0] == "crawl" else "idle")
+		bt.connect_node("mix", 0, "idle_rate" if spec[0] == "crawl" else _add_turn(bt, LOCO + "crouch/", "crouch", "idle", Vector2(0, 400)))
 		bt.connect_node("mix", 1, "rate")
 		bt.connect_node("output", 0, "mix")
 		loco.add_node(spec[0], bt, Vector2(200, 0))
@@ -531,6 +528,9 @@ func _build() -> AnimationNodeBlendTree:
 	var reload := AnimationNodeOneShot.new()
 	reload.fadein_time = 0.12
 	reload.fadeout_time = 0.2
+	for os: AnimationNodeOneShot in [fire, reload]:
+		os.fadein_curve = _ease_curve()
+		os.fadeout_curve = _ease_curve()
 	item.add_node("reload", reload, Vector2(600, 50))
 	var reload_clip := AnimationNodeAnimation.new()
 	item.add_node("reload_clip", reload_clip, Vector2(400, 200))
@@ -544,6 +544,8 @@ func _build() -> AnimationNodeBlendTree:
 	var hit := AnimationNodeOneShot.new()
 	hit.fadein_time = 0.06
 	hit.fadeout_time = 0.25
+	hit.fadein_curve = _ease_curve()
+	hit.fadeout_curve = _ease_curve()
 	hit.filter_enabled = true
 	for b in _upper_body_bones():
 		hit.set_filter_path(NodePath("%GeneralSkeleton:" + b), true)
@@ -736,12 +738,16 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	var side_r := 0.0
 	var side_k := 0.0
 	if _neutral:
-		var np := _neutral_point(theta, speed, moving)
+		# Gait (walk / jog / sprint, and the bladed run vs sprint stance) follows an eased speed:
+		# the motor brakes from a sprint in a few tenths of a second, which swept the body
+		# through three clips (and the bladed set's hips through 40 deg) in a handful of frames.
+		var gs := _ease_speed(speed, delta) if moving else speed
+		var np := _neutral_point(theta, gs, moving)
 		var wn: float = np[0]
 		clamped = np[1]
 		rate = np[2]
 		if _eight_way:
-			var bpt := _ring_point(theta, speed, moving)
+			var bpt := _ring_point(theta, gs, moving)
 			wn = lerp_angle(wn, bpt[0], _stance_w)
 			tree.set(LOCO + "ground/move_b/blend_position", bpt[1])
 			tree.set(LOCO + "ground/rate_b/scale", bpt[2])
@@ -820,15 +826,10 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 		tree.set(LOCO + "ground/limp_l/blend_position", lp)
 		tree.set(LOCO + "ground/limp_r/blend_position", lp)
 		tree.set(LOCO + "ground/limp_rate/scale", lrate)
-	var idle_w := 1.0 - smoothstep(0.05, 0.45, speed)
-	tree.set(LOCO + "ground/mix/blend_amount", 1.0 - idle_w)
-	# Turn in place: shuffle feet while the motor swings the body round.
-	var want_turn := 0.0
-	if turning and not moving:
-		want_turn = -1.0 if angle_difference(body_yaw, aim_yaw) > 0.0 else 1.0
-	_turn_blend = move_toward(_turn_blend, want_turn, delta * 6.0)
-	tree.set(LOCO + "ground/turn/blend_amount", _turn_blend)
-	tree.set(LOCO + "ground/turn_rate/scale", 1.8)
+	# Idle <-> moving: eased in time, not taken straight from the speed (the motor gets up to
+	# walking speed in a couple of ticks: the legs then cut from one pose to the other).
+	tree.set(LOCO + "ground/mix/blend_amount", _ease_w(&"ground", smoothstep(0.05, 0.45, speed), delta))
+	_drive_turn(moving, delta)
 	tree.set(LOCO + "land/speed/scale", lerpf(2.4, 1.0, clampf((land_impact - 3.0) / 6.0, 0.0, 1.0)))
 	# Climbing cycles run at the speed you climb (and hold still when you stop).
 	var cr := climb_speed / 0.6
@@ -840,13 +841,13 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	tree.set(LOCO + "hang/rate/scale", 1.0 if absf(_hang_dir) < 0.05 else maxf(absf(climb_speed) / _shimmy_speed, 0.4))
 	tree.set(LOCO + "rope/rate/scale", climb_speed / 0.6)
 	# Swimming: stroke fades in with speed; dive strokes match 3D speed (slow glide when still).
-	tree.set(LOCO + "swim/mix/blend_amount", smoothstep(0.15, 0.8, speed))
+	tree.set(LOCO + "swim/mix/blend_amount", _ease_w(&"swim", smoothstep(0.15, 0.8, speed), delta))
 	tree.set(LOCO + "swim/rate/scale", clampf(speed / 1.5, 0.5, 1.8))
 	tree.set(LOCO + "dive/rate/scale", clampf(velocity.length() / 1.8, 0.3, 1.6))
 	# Crouch / crawl cycles: forward clip, warped toward travel direction, rate-matched.
 	var crouch_rate := clampf(speed / _crouch_speed, 0.3, 2.2) * (-1.0 if backwards else 1.0)
 	tree.set(LOCO + "crouch/rate/scale", crouch_rate)
-	tree.set(LOCO + "crouch/mix/blend_amount", smoothstep(0.05, 0.3, speed))
+	tree.set(LOCO + "crouch/mix/blend_amount", _ease_w(&"crouch", smoothstep(0.05, 0.3, speed), delta))
 	var crawl_rate := clampf(speed / _crawl_speed, 0.0, 2.0) * (-1.0 if backwards else 1.0)
 	tree.set(LOCO + "crawl/rate/scale", crawl_rate)
 	tree.set(LOCO + "crawl/idle_rate/scale", 0.0)
@@ -854,6 +855,180 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	if state in [MotorState.Id.CROUCH, MotorState.Id.CRAWL] and moving:
 		var rel2 := angle_difference(PI if backwards else 0.0, theta)
 		_warp = lerp_angle(_warp, clampf(rel2, -1.2, 1.2), 1.0 - exp(-10.0 * delta))
+
+
+## The gait speed on a spring (half-life GAIT_HALFLIFE); it starts from the real speed.
+const GAIT_HALFLIFE := 0.1
+var _gait := Vector2(-1.0, 0.0)
+
+
+func _ease_speed(speed: float, delta: float) -> float:
+	if _gait.x < 0.0 or absf(_gait.x - speed) > 4.0 and speed < 0.2:
+		_gait = Vector2(speed, 0.0)
+	var y := 4.0 * 0.69314718 / GAIT_HALFLIFE / 2.0
+	var j0 := _gait.x - speed
+	var j1 := _gait.y + j0 * y
+	var e := exp(-y * maxf(delta, 0.0))
+	_gait = Vector2(maxf(e * (j0 + j1 * delta) + speed, 0.0), e * (_gait.y - j1 * y * delta))
+	return _gait.x
+
+
+## Blend weights that follow a target on a critically damped spring (half-life MIX_HALFLIFE):
+## they start and settle gently however fast the target moves.
+const MIX_HALFLIFE := 0.09
+var _mix := {}
+
+
+func _ease_w(key: StringName, target: float, delta: float) -> float:
+	var st: Vector2 = _mix.get(key, Vector2(target, 0.0))          # x = value, y = rate
+	var y := 4.0 * 0.69314718 / MIX_HALFLIFE / 2.0
+	var j0 := st.x - target
+	var j1 := st.y + j0 * y
+	var e := exp(-y * maxf(delta, 0.0))
+	st = Vector2(e * (j0 + j1 * delta) + target, e * (st.y - j1 * y * delta))
+	st.x = clampf(st.x, 0.0, 1.0)
+	_mix[key] = st
+	return st.x
+
+
+# ---------------------------------------------------------------- turning in place
+
+## Turn-in-place clips per stance: [left, right]. The motor turns the body (eased); the clip,
+## its hips' own yaw taken out, is played from how far the body has turned - the feet step
+## round in time with the turn whatever its speed or size.
+const TURN_ROLES := {
+	"stand": [&"stand_turn_l", &"stand_turn_r"],
+	"aim": [&"aim_turn_l", &"aim_turn_r"],
+	"crouch": [&"crouch_turn_l", &"crouch_turn_r"],
+}
+var _turn_nodes := []               ## [param prefix, left clip, right clip]
+var _turn_tabs := {}                ## clip -> PackedFloat32Array, turned so far (|yaw|) at 60 Hz
+var _turn_dir := 0                  ## -1 left, +1 right, 0 none
+var _turn_from := 0.0
+var _turn_p := 0.0                  ## 0..1 of this turn done
+var _turn_w := 0.0
+
+
+## Insert a turn blend (left clip, `idle_node`, right clip) into `bt`; returns the node to use
+## in place of `idle_node` (unchanged when the clips are missing).
+func _add_turn(bt: AnimationNodeBlendTree, prefix: String, key: String, idle_node: String, at: Vector2) -> String:
+	var roles: Array = TURN_ROLES[key]
+	if _role_anim(roles[0]) == null or _role_anim(roles[1]) == null:
+		return idle_node
+	var clips := []
+	for i in 2:
+		var a := AnimationNodeAnimation.new()
+		a.animation = _turn_clip(roles[i])
+		clips.append(a.animation)
+		bt.add_node("%s_t%d" % [key, i], a, at + Vector2(0, i * 100))
+		bt.add_node("%s_seek%d" % [key, i], AnimationNodeTimeSeek.new(), at + Vector2(200, i * 100))
+		bt.connect_node("%s_seek%d" % [key, i], 0, "%s_t%d" % [key, i])
+	bt.add_node(key + "_turn", AnimationNodeBlend3.new(), at + Vector2(400, 50))
+	bt.connect_node(key + "_turn", 0, key + "_seek0")
+	bt.connect_node(key + "_turn", 1, idle_node)
+	bt.connect_node(key + "_turn", 2, key + "_seek1")
+	_turn_nodes.append([prefix + key, clips[0], clips[1]])
+	return key + "_turn"
+
+
+## The role's clip with the Hips' yaw taken out (in place, facing ahead throughout), and its
+## progress table (how far it has turned at each 1/60 s, never decreasing).
+func _turn_clip(role: StringName) -> StringName:
+	var clip := _clip(role)
+	var src := _lib_anim(clip)
+	var s := String(clip)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var clip_name := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	if src == null or l == null:
+		return clip
+	var rt := src.find_track(NodePath("%GeneralSkeleton:Hips"), Animation.TYPE_ROTATION_3D)
+	if rt < 0:
+		return clip
+	var y0 := _yaw_of(src.rotation_track_interpolate(rt, 0.0))
+	var yaw_at := func(t: float) -> float: return angle_difference(y0, _yaw_of(src.rotation_track_interpolate(rt, t)))
+	var tab := PackedFloat32Array()
+	var best := 0.0
+	for i in int(ceil(src.length * 60.0)) + 1:
+		best = maxf(best, absf(yaw_at.call(minf(i / 60.0, src.length))))
+		tab.append(best)
+	var out := StringName((lib + "/" if lib != "" else "") + clip_name + "_inplace")
+	_turn_tabs[out] = tab
+	if not l.has_animation(clip_name + "_inplace"):
+		var a := src.duplicate(true) as Animation
+		var art := a.find_track(NodePath("%GeneralSkeleton:Hips"), Animation.TYPE_ROTATION_3D)
+		for k in a.track_get_key_count(art):
+			var y: float = yaw_at.call(a.track_get_key_time(art, k))
+			a.track_set_key_value(art, k, Quaternion(Vector3.UP, -y) * (a.track_get_key_value(art, k) as Quaternion))
+		var pt := a.find_track(NodePath("%GeneralSkeleton:Hips"), Animation.TYPE_POSITION_3D)
+		if pt >= 0 and a.track_get_key_count(pt) > 0:
+			var p0: Vector3 = a.track_get_key_value(pt, 0)
+			var n := a.track_get_key_count(pt)
+			for k in n:
+				var y: float = yaw_at.call(a.track_get_key_time(pt, k))
+				var p: Vector3 = a.track_get_key_value(pt, k)
+				a.track_set_key_value(pt, k, p0 + Basis(Vector3.UP, -y) * (p - p0))
+			# Turning on the spot: take out any net sideways drift (it would snap back as the clip
+			# blends out to the idle), spread over the clip.
+			var d: Vector3 = a.track_get_key_value(pt, n - 1) - p0
+			d.y = 0.0
+			for k in n:
+				var f := a.track_get_key_time(pt, k) / maxf(a.length, 0.001)
+				a.track_set_key_value(pt, k, (a.track_get_key_value(pt, k) as Vector3) - d * f)
+		a.loop_mode = Animation.LOOP_NONE
+		l.add_animation(clip_name + "_inplace", a)
+	return out
+
+
+static func _yaw_of(q: Quaternion) -> float:
+	var z := Basis(q).z
+	return atan2(z.x, z.z)
+
+
+## Clip time at which the turn clip has done `p` of its turn.
+func _turn_time(clip: StringName, p: float) -> float:
+	var tab: PackedFloat32Array = _turn_tabs.get(clip, PackedFloat32Array())
+	if tab.size() < 2:
+		return 0.0
+	var want := clampf(p, 0.0, 1.0) * tab[tab.size() - 1]
+	for i in range(1, tab.size()):
+		if tab[i] >= want:
+			var span := tab[i] - tab[i - 1]
+			var f := (want - tab[i - 1]) / span if span > 1e-5 else 1.0
+			return (i - 1 + f) / 60.0
+	return (tab.size() - 1) / 60.0
+
+
+func _drive_turn(moving: bool, delta: float) -> void:
+	var on := turning and not moving and state in [MotorState.Id.IDLE, MotorState.Id.CROUCH, MotorState.Id.TURN_IN_PLACE]
+	if on:
+		var dir := -1 if angle_difference(body_yaw, aim_yaw) > 0.0 else 1      # -1 = turning left
+		if dir != _turn_dir:
+			if _turn_dir != 0 and inertial:
+				inertial.trigger()
+			_turn_dir = dir
+			_turn_from = body_yaw
+			_turn_p = 0.0
+		var done := absf(angle_difference(_turn_from, body_yaw))
+		var rest := absf(angle_difference(body_yaw, aim_yaw))
+		_turn_p = maxf(_turn_p, done / maxf(done + rest, 0.01))
+	elif _turn_dir != 0:
+		_turn_p = move_toward(_turn_p, 1.0, delta * 2.0)
+	# In quickly (the feet must start stepping as the body starts turning), out over ~0.3 s.
+	_turn_w = move_toward(_turn_w, 1.0 if on else 0.0, delta * (8.0 if on else 3.5))
+	if _turn_w <= 0.0:
+		_turn_dir = 0
+	var amt := float(_turn_dir) * smoothstep(0.0, 1.0, _turn_w)
+	# The turn clip's own quick steps are real motion (played from the body's turn): don't
+	# smooth them as if they were jumps.
+	for m: InertialBlendModifier in [inertial, settle]:
+		if m:
+			m.detect = _turn_w < 0.05
+	for n: Array in _turn_nodes:
+		tree.set(n[0] + "_turn/blend_amount", amt)
+		if _turn_dir != 0:
+			var i := 0 if _turn_dir < 0 else 1
+			tree.set("%s_seek%d/seek_request" % [n[0], i], _turn_time(n[1 + i], _turn_p))
 
 
 # ---------------------------------------------------------------- neutral locomotion
@@ -962,14 +1137,16 @@ func _ring_point(theta: float, speed: float, moving: bool) -> Array:
 	var dir := Vector2(sin(snapped), cos(snapped))
 	var r_walk := _ring_radius(_bl_walk, dir)
 	var r_run := _ring_radius(_bl_run, dir)
-	if not _bl_sprint.is_empty() and speed > r_run * 1.05 and absf(theta) < deg_to_rad(75.0):
-		var best := _bl_sprint[0]
-		for sp_pt in _bl_sprint:
-			if absf(angle_difference(atan2(sp_pt.x, sp_pt.y), theta)) < absf(angle_difference(atan2(best.x, best.y), theta)):
-				best = sp_pt
+	var best := _bl_sprint[0] if not _bl_sprint.is_empty() else Vector2.ZERO
+	for sp_pt in _bl_sprint:
+		if absf(angle_difference(atan2(sp_pt.x, sp_pt.y), theta)) < absf(angle_difference(atan2(best.x, best.y), theta)):
+			best = sp_pt
+	# Run -> sprint squares the hips up (~40 deg): eased, so it takes a few tenths of a second.
+	var sprinting := not _bl_sprint.is_empty() and speed > r_run * 1.05 and absf(theta) < deg_to_rad(75.0)
+	var kk := _ease_w(&"b_sprint", smoothstep(r_run * 1.05, best.length() * 0.95, speed) if sprinting else 0.0, get_process_delta_time())
+	if kk > 0.001:
 		var w8 := clampf(angle_difference(atan2(best.x, best.y), theta), -deg_to_rad(30.0), deg_to_rad(30.0))
-		var kk := smoothstep(r_run * 1.05, best.length() * 0.95, speed)
-		var c8 := (dir * r_run).lerp(best, kk)
+		var c8 := (dir * maxf(r_run, minf(speed, r_run))).lerp(best, kk)
 		return [lerp_angle(warp, w8, kk), c8, clampf(speed / maxf(c8.length(), 0.01), 0.8, 1.4)]
 	if speed < r_walk:
 		return [warp, dir * r_walk, maxf(speed / r_walk, 0.45)]
@@ -1231,6 +1408,10 @@ func _drive_body(delta: float) -> void:
 	var climbing := state in [MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.LEDGE_HANG,
 		MotorState.Id.LEDGE_CLIMB, MotorState.Id.MANTLE, MotorState.Id.ROPE]
 	_climb_look = move_toward(_climb_look, 1.0 if climbing else 0.0, delta * 4.0)
+	# The settle pass (after the IK) would lift hands and feet off rungs / holds while it smooths.
+	if settle:
+		var exact := climbing or state in [MotorState.Id.LEDGE_HANG, MotorState.Id.VAULT, MotorState.Id.RAGDOLL, MotorState.Id.DEAD, MotorState.Id.GET_UP]
+		settle.amount = move_toward(settle.amount, 0.0 if exact else 1.0, delta * 5.0)
 	modifier.spine_aim_scale = lerpf(1.0, 0.15, smoothstep(0.0, 1.0, _climb_look))
 	var pitch_lim := lerpf(1.35, 0.95, _climb_look)
 	modifier.aim_pitch = clampf(aim_pitch, -pitch_lim, pitch_lim) * _aim_w
@@ -1283,8 +1464,10 @@ func _drive_item(delta: float) -> void:
 				want = 1.0
 	if state in [MotorState.Id.ROOT_MOTION, MotorState.Id.SLIDE, MotorState.Id.CRAWL]:
 		want = 0.0
-	_item_w = move_toward(_item_w, want, delta * 5.0)
-	_pose_w = move_toward(_pose_w, item_ready_pose, delta * 6.0)
+	# Eased (springs, ~0.3 s): raising / lowering the weapon moves the arms, the stance and the
+	# shouldered gun pose together - a linear ramp started and stopped them with a jolt.
+	_item_w = _ease_w(&"item", want, delta)
+	_pose_w = _ease_w(&"pose", item_ready_pose, delta)
 	tree.set("parameters/upper/blend_amount", smoothstep(0.0, 1.0, _item_w))
 	tree.set("parameters/upper_src/pose/blend_amount", _pose_w)
 	if modifier:

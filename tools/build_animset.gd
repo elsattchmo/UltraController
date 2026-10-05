@@ -13,6 +13,8 @@ const ROLES := {
 	&"jog_f": "Jog", &"sprint_f": "Sprint", &"walk_carry": "Walk_Carry", &"walk_stealth": "Walk_Stealth",
 	&"crouch_idle": "Crouch_Idle", &"crouch_f": "Crouch_Walk", &"crawl": "Crawl",
 	&"turn_l90": "Turn_Left_90", &"turn_r90": "Turn_Right_90", &"turn_l180": "Turn_Left_180", &"turn_r180": "Turn_Right_180",
+	&"stand_turn_l": "mixamo/T_StandL90", &"stand_turn_r": "mixamo/T_StandR90", &"crouch_turn_l": "mixamo/T_CrouchB_L", &"crouch_turn_r": "mixamo/T_CrouchB_R",
+	&"aim_turn_l": "mixamo/T_RifleL90", &"aim_turn_r": "mixamo/T_RifleR90",
 	&"jump_start": "Jump_Start", &"jump_air": "Jump_air", &"jump_land": "Jump_Land", &"land_heavy": "Land_Three_Point",
 	&"run_jump": "Run_Jump",
 	&"slide_start": "Slide_Start", &"slide": "Slide", &"slide_exit": "Slide_Exit",

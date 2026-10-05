@@ -27,6 +27,7 @@ var grip_inv := Transform3D()
 var support := Transform3D()
 var hand_ik: HandIKModifier
 var _hands_set := false
+var _rhand := -1
 ## Shoulder pocket from the UpperArm joint (metres; x toward the centre, y up, z forward).
 @export var pocket := Vector3(0.06, -0.03, 0.06)
 @export var max_spine_deg := 32.0
@@ -88,8 +89,9 @@ func _process_modification_with_delta(_delta: float) -> void:
 	pre_neck = sk.get_bone_global_pose(_neck).origin
 	shouldered = weight > 0.001
 	if not (shouldered and from_body) and _hands_set and hand_ik:
-		hand_ik.release(HandIKModifier.Hand.RIGHT, 8.0)
-		hand_ik.release(HandIKModifier.Hand.LEFT, 8.0)
+		# By now the gun is back where the clip holds it (weight ~0): let the right hand go at
+		# once; the support hand stays with UltraEquipmentVisual (on the handguard while ready).
+		hand_ik.release(HandIKModifier.Hand.RIGHT, 30.0)
 		_hands_set = false
 	if not shouldered:
 		last_gap = 0.0
@@ -151,17 +153,21 @@ func _gun_to_body(sk: Skeleton3D, sc: float, w: float) -> void:
 	up = up.normalized() if up.length() > 0.05 else Vector3.BACK
 	var b := Basis.looking_at(d, up)
 	var p := xf * _pocket(sk, sc)
-	gun = Transform3D(b, p - b * stock)
+	# Blend the gun itself from where the clip's hand holds it to the shouldered pose, and keep
+	# both hands fully on that: raising / lowering (sprint, reload) never switches hand targets.
+	if _rhand < 0:
+		_rhand = sk.find_bone("RightHand" if side == 1 else "LeftHand")
+	var clip_gun := (xf * sk.get_bone_global_pose(_rhand)) * grip_inv.affine_inverse()
+	gun = clip_gun.orthonormalized().interpolate_with(Transform3D(b, p - b * stock), w)
 	last_gap = 0.0
 	if ads > 0.0:
 		var inv := xf.affine_inverse()
 		var h := sk.get_bone_global_pose(_head)
 		var eye := h.origin + (h.basis.orthonormalized() * _head_rest_inv) * eye_offset_sk
 		_turn_toward(sk, _neck, eye, inv * (gun * eye_in_gun), deg_to_rad(max_neck_deg), w * smoothstep(0.0, 1.0, ads))
-	if hand_ik:
-		var hw := w if side == 1 else 0.0
-		hand_ik.set_goal(HandIKModifier.Hand.RIGHT, gun * grip_inv, hw, true, 30.0)
-		hand_ik.set_goal(HandIKModifier.Hand.LEFT, gun * support, hw, true, 30.0)
+	if hand_ik and side == 1:
+		hand_ik.set_goal(HandIKModifier.Hand.RIGHT, gun * grip_inv, 1.0, true, 30.0)
+		hand_ik.set_goal(HandIKModifier.Hand.LEFT, gun * support, 1.0, true, 30.0)
 		hand_ik.set_curl(HandIKModifier.Hand.LEFT, 1.0)
 		_hands_set = true
 

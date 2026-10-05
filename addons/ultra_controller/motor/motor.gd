@@ -176,7 +176,10 @@ func horizontal(v: Vector3) -> Vector3:
 ## Body yaw rules shared by ground states. Returns the yaw error that remains (for turn anims).
 func update_body_yaw(s: MotorState, input: InputFrame, moving: bool) -> void:
 	var mode := MovementProfile.Rotation.FACE_AIM
-	if input.has(InputFrame.B_VIEW_TP):
+	# A gun up faces where it points, in any view (else in third person the gun swung round
+	# behind the body).
+	var armed := gun_up(s)
+	if input.has(InputFrame.B_VIEW_TP) and not armed:
 		mode = profile.tp_rotation
 		if mode == MovementProfile.Rotation.FACE_MOVE_UNTIL_AIM:
 			mode = MovementProfile.Rotation.FACE_AIM if input.has(InputFrame.B_SECONDARY) else MovementProfile.Rotation.FACE_MOVE
@@ -186,23 +189,43 @@ func update_body_yaw(s: MotorState, input: InputFrame, moving: bool) -> void:
 			# Moving: feet follow the aim, slightly smoothed so the hips swing rather than snap.
 			s.body_yaw = rotate_toward_angle(s.body_yaw, input.yaw, deg_to_rad(900.0) * dt)
 			s.set_flag(F_TURNING, false)
+			s.turn_v = 0.0
 		else:
-			# Idle: the spine absorbs aim; past the threshold the feet shuffle round.
-			var lim := deg_to_rad(profile.turn_in_place_angle)
+			# Idle: the spine absorbs aim; past the threshold the feet step round (a turn clip
+			# plays from how far we've turned). Eased: speeds up, then slows to stop on the aim.
+			var lim := deg_to_rad(minf(profile.turn_in_place_angle, profile.armed_turn_angle) if armed else profile.turn_in_place_angle)
 			if absf(err) > lim:
 				s.set_flag(F_TURNING, true)
 			if s.has(F_TURNING):
-				s.body_yaw = rotate_toward_angle(s.body_yaw, input.yaw, deg_to_rad(profile.turn_in_place_rate) * dt)
-				if absf(angle_difference(s.body_yaw, input.yaw)) < deg_to_rad(4.0):
+				var acc := deg_to_rad(profile.turn_in_place_accel)
+				var want := signf(err) * minf(deg_to_rad(profile.turn_in_place_rate), sqrt(2.0 * acc * absf(err)))
+				s.turn_v = move_toward(s.turn_v, want, acc * dt)
+				var step := s.turn_v * dt
+				if absf(step) > absf(err):
+					step = err
+				s.body_yaw += step
+				if absf(angle_difference(s.body_yaw, input.yaw)) < deg_to_rad(2.0):
 					s.set_flag(F_TURNING, false)
+					s.turn_v = 0.0
+			else:
+				s.turn_v = 0.0
 	else:
 		s.set_flag(F_TURNING, false)
+		s.turn_v = 0.0
 		var hv := horizontal(s.vel)
 		if hv.length() > 0.3:
 			var target := atan2(-hv.x, -hv.z)
 			var speed_k := clampf(hv.length() / maxf(profile.sprint_speed, 0.1), 0.0, 1.0)
 			var rate := deg_to_rad(profile.body_turn_rate) * lerpf(1.0, 0.55, speed_k)
 			s.body_yaw = rotate_toward_angle(s.body_yaw, target, rate * dt)
+
+
+## A firearm in hand, up and ready (it faces the aim, and turns in place sooner).
+static func gun_up(s: MotorState) -> bool:
+	if s.held_uid == 0 or s.action != UltraActionLayer.Action.READY:
+		return false
+	var d := ItemDB.by_index(s.equipped)
+	return d != null and d.kind == ItemDefinition.Kind.FIREARM
 
 
 static func rotate_toward_angle(from: float, to: float, max_delta: float) -> float:

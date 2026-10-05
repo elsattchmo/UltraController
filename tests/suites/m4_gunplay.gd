@@ -419,3 +419,19 @@ func test_fp_rifle_shouldered() -> void:
 		check(bend < 40.0, "%s: torso not folded over (%.0f deg)" % [spec[0], bend])
 	info("\n  ".join(res))
 	rig.queue_free()
+
+
+## Third person with a gun up the body faces where it points: swinging the view round turns
+## the feet (turn in place) instead of twisting the gun round behind the back.
+func test_tp_gun_up_faces_the_aim() -> void:
+	UltraItems.give(c, &"rifle")
+	var sl := _slot(&"rifle")
+	_bot().view_tp = true
+	_bot().set_steps([{"ticks": 90, "slot": sl, "yaw": 0.0, "pitch": 0.0}])
+	await ticks(90)
+	_bot().live_yaw = deg_to_rad(150.0)
+	_bot().set_steps([{"ticks": 150, "slot": sl, "yaw": deg_to_rad(150.0), "pitch": 0.0}])
+	await ticks(150)
+	var off := rad_to_deg(absf(angle_difference(c.state.body_yaw, deg_to_rad(150.0))))
+	info("TP rifle up, view swung 150 deg: body %.1f deg off the aim, action %d" % [off, c.state.action])
+	check(off < 10.0, "the body came round with the gun (%.1f deg off)" % off)

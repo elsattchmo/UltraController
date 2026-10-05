@@ -80,3 +80,51 @@ func test_foot_slide_gaits() -> void:
 		if String(cs[0]).begins_with("strafe"):
 			# Side-steps stay on the side-step clip (no walk / backpedal mixed in): no slips.
 			check(r[1] < 0.2 and r[2] > 1.0, "%s: no slipping steps (p75 %.2f m/s)" % [cs[0], r[1]])
+
+
+## Turning on the spot (standing, crouched): the aim swings 100 deg, the feet step round with a
+## real turn clip (played from how far the body has turned) instead of skating, the body eases
+## round and settles on the aim.
+func test_turn_in_place() -> void:
+	for spec: Array in [["stand", 0], ["crouch", InputFrame.B_CROUCH], ["stand, back", 0]]:
+		var c := spawn("speed_start", "res://addons/ultra_controller/profiles/fps.tres", true)
+		await ticks(3)
+		await hold(c, 90, Vector2.ZERO, spec[1], 0.0)
+		var target := deg_to_rad(-100.0 if spec[0] == "stand, back" else 100.0)
+		var sk := c.skeleton
+		var toes := [sk.find_bone("LeftToes"), sk.find_bone("RightToes")]
+		bot(c).live_yaw = target
+		bot(c).set_steps([{"ticks": 150, "buttons": spec[1], "yaw": target}])
+		var track := []
+		var peak_w := 0.0
+		var done_at := -1
+		for i in 150:
+			await sk.skeleton_updated
+			var ps := []
+			for f in 2:
+				ps.append(sk.global_transform * sk.get_bone_global_pose(toes[f]).origin)
+			track.append(ps)
+			peak_w = maxf(peak_w, c.anim._turn_w)
+			if done_at < 0 and absf(angle_difference(c.state.body_yaw, target)) < deg_to_rad(3.0):
+				done_at = i
+		var miny := [INF, INF]
+		for ps: Array in track:
+			for f in 2:
+				miny[f] = minf(miny[f], (ps[f] as Vector3).y)
+		var slips: Array[float] = []
+		for i in range(1, track.size()):
+			for f in 2:
+				var p: Vector3 = track[i][f]
+				if p.y <= miny[f] + 0.02:
+					var q: Vector3 = track[i - 1][f]
+					slips.append(Vector2(p.x - q.x, p.z - q.z).length() * 60.0)
+		slips.sort()
+		var med := slips[slips.size() / 2] if not slips.is_empty() else 0.0
+		var p90 := slips[slips.size() * 9 / 10] if not slips.is_empty() else 0.0
+		info("%s: state %s, turned in %.2f s, turn clip weight peak %.2f, planted toe median %.2f m/s p90 %.2f (smoothing restarts %d / %d)" % [spec[0], MotorState.Id.keys()[c.state.state], done_at / 60.0, peak_w, med, p90, c.anim.inertial.jumps, c.anim.settle.jumps])
+		check(done_at > 0 and done_at < 90, "%s: turned onto the aim within 1.5 s" % spec[0])
+		check(peak_w > 0.9, "%s: the turn clip played" % spec[0])
+		check(med < 0.15 and p90 < 0.6, "%s: planted feet don't skate round (median %.2f, p90 %.2f)" % [spec[0], med, p90])
+		c.queue_free()
+		chars.erase(c)
+		await ticks(2)

@@ -153,8 +153,9 @@ func _measure_head(sk: Skeleton3D, delta: float) -> void:
 func _stabilize_head(sk: Skeleton3D) -> void:
 	if head_stabilize == 0.0 or _chain.size() < 5 or stabilize_w <= 0.0:
 		return
-	# (Skeleton space is the model's mirrored frame: undo the swing by turning the same way.)
-	var dy := _head_dev * head_stabilize * stabilize_w
+	# Turn back against the deviation (turning the same way doubled the sprint's head whip:
+	# m1_blend.test_head_steady_when_sprinting).
+	var dy := -_head_dev * head_stabilize * stabilize_w
 	for pair: Array in [[_chain[3], 0.4], [_chain[4], 0.6]]:
 		var b: int = pair[0]
 		if b < 0:

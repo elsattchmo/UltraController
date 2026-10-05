@@ -1,20 +1,55 @@
 @tool
 class_name InertialBlendModifier
 extends SkeletonModifier3D
-## Smooths animation state changes (inertialization): when the driver switches state it calls
-## trigger(); the difference between the pose that was on screen and the new animation's pose
-## is captured per bone and faded out over `duration` with an ease-out curve, on top of the
-## state machine's own crossfade. First modifier in the stack, so it works on the clip pose.
+## Inertialization: wherever the animation jumps (a state switch, a blend space snapping to
+## another clip, a weight that changes in a frame), the pose on screen carries on where it was
+## heading and settles onto the new animation on a critically damped spring.
+##   * Detects jumps itself - a spike in the incoming pose's acceleration at the hips / spine /
+##     thighs - so it never depends on when the driver asks (calls made in _process often land
+##     a frame before the AnimationTree actually changes the pose). trigger() forces one.
+##   * At a jump the output continues from the pose extrapolated along its last motion, so it
+##     stays continuous in position and speed; the offset to the new pose then decays with zero
+##     initial rate (no lurch as the fade starts, unlike an ease-out curve).
+## First modifier in the stack, so it works on the clip pose.
 
-@export_range(0.05, 1.0, 0.01) var duration := 0.26
+## Spring half-life (s): how long half the offset takes to fade.
+@export_range(0.02, 0.5, 0.005) var halflife := 0.11
+## A frame whose hips move this much more than they were moving (m) counts as a jump.
+@export_range(0.002, 0.1, 0.001) var jump_pos := 0.012
+## ... or whose core bones turn this much more than they were turning (degrees).
+@export_range(0.5, 30.0, 0.5) var jump_rot_deg := 4.0
+## ... or that moves faster than this on its own: hips m/s, core bones deg/s (relative to the
+## body - a weight swept across in a couple of frames is a jump spread over them).
+@export_range(0.2, 10.0, 0.1) var jump_speed := 3.0
+@export_range(60.0, 2000.0, 10.0) var jump_turn_speed := 900.0
 
-var _prev_rot: Array[Quaternion] = []
-var _prev_hips := Vector3.ZERO
-var _off_rot: Array[Quaternion] = []
-var _off_hips := Vector3.ZERO
-var _t := 1.0
 var _pending := false
 var _hips := -1
+var _core := PackedInt32Array()
+var _in1: Array[Quaternion] = []
+var _in2: Array[Quaternion] = []
+var _out1: Array[Quaternion] = []
+var _out2: Array[Quaternion] = []
+var _hin1 := Vector3.ZERO
+var _hin2 := Vector3.ZERO
+var _hout1 := Vector3.ZERO
+var _hout2 := Vector3.ZERO
+var _frames := 0
+const WARMUP := 10
+var _dt1 := 1.0 / 60.0
+var _off: Array[Vector3] = []           ## per-bone offset rotation (axis * angle) on the clip pose
+var _offv: Array[Vector3] = []
+var _hoff := Vector3.ZERO
+var _hoffv := Vector3.ZERO
+var _active := false
+## Jumps smoothed so far (tests, tuning).
+var jumps := 0
+## 0..1 how much of the smoothing is shown (the driver fades it out where IK must be exact:
+## hands and feet on rungs, ledges, ropes).
+var amount := 1.0
+## Off while a clip whose fast motion is real plays (a turn clip driven by the body's turn).
+var detect := true
+var reason := ""
 
 
 func trigger() -> void:
@@ -26,26 +61,124 @@ func _process_modification_with_delta(delta: float) -> void:
 	if sk == null:
 		return
 	var n := sk.get_bone_count()
-	if _hips < 0:
-		_hips = sk.find_bone("Hips")
-	if _pending and _prev_rot.size() == n:
-		_off_rot.resize(n)
-		for b in n:
-			_off_rot[b] = (_prev_rot[b] * sk.get_bone_pose_rotation(b).inverse()).normalized()
-		_off_hips = _prev_hips - sk.get_bone_pose_position(_hips) if _hips >= 0 else Vector3.ZERO
-		_t = 0.0
-	_pending = false
-	if _t < 1.0 and _off_rot.size() == n:
-		_t = minf(_t + delta / duration, 1.0)
-		var w := pow(1.0 - _t, 3.0)                 # ease out: most of it fades early
-		for b in n:
-			var q := Quaternion.IDENTITY.slerp(_off_rot[b], w)
-			sk.set_bone_pose_rotation(b, (q * sk.get_bone_pose_rotation(b)).normalized())
-		if _hips >= 0:
-			sk.set_bone_pose_position(_hips, sk.get_bone_pose_position(_hips) + _off_hips * w)
-	if _prev_rot.size() != n:
-		_prev_rot.resize(n)
+	if _hips < 0 or _in1.size() != n:
+		_setup(sk, n)
+	var q_in: Array[Quaternion] = []
+	q_in.resize(n)
 	for b in n:
-		_prev_rot[b] = sk.get_bone_pose_rotation(b)
+		q_in[b] = sk.get_bone_pose_rotation(b)
+	var h_in := sk.get_bone_pose_position(_hips) if _hips >= 0 else Vector3.ZERO
+	var dt := maxf(delta, 0.0)
+	# (Not while warming up: the first frames go from the rest pose to the first clip.)
+	if _frames >= WARMUP and (_pending or (detect and _jumped(q_in, h_in))):
+		# This frame shows exactly where the old motion was heading; the spring takes it from here.
+		_restart(q_in, h_in)
+	elif _active:
+		var y := 4.0 * 0.69314718 / maxf(halflife, 1e-4) / 2.0        # critically damped
+		var e := exp(-y * dt)
+		var big := 0.0
+		for b in n:
+			var x := _off[b]
+			if x == Vector3.ZERO and _offv[b] == Vector3.ZERO:
+				continue
+			var j1 := _offv[b] + x * y
+			_off[b] = e * (x + j1 * dt)
+			_offv[b] = e * (_offv[b] - j1 * y * dt)
+			big = maxf(big, _off[b].length() + _offv[b].length() * 0.05)
+		var j1h := _hoffv + _hoff * y
+		_hoff = e * (_hoff + j1h * dt)
+		_hoffv = e * (_hoffv - j1h * y * dt)
+		big = maxf(big, (_hoff.length() + _hoffv.length() * 0.05) * 10.0)
+		_active = big > 1e-4
+		if not _active:
+			_off.fill(Vector3.ZERO)
+			_offv.fill(Vector3.ZERO)
+			_hoff = Vector3.ZERO
+			_hoffv = Vector3.ZERO
+	_pending = false
+	if _active and amount > 0.001:
+		for b in n:
+			if _off[b] != Vector3.ZERO:
+				sk.set_bone_pose_rotation(b, (_from_vec(_off[b] * amount) * q_in[b]).normalized())
+		if _hips >= 0:
+			sk.set_bone_pose_position(_hips, h_in + _hoff * amount)
+	# History (incoming and output).
+	for b in n:
+		_in2[b] = _in1[b]
+		_in1[b] = q_in[b]
+		_out2[b] = _out1[b]
+		_out1[b] = sk.get_bone_pose_rotation(b)
+	_hin2 = _hin1
+	_hin1 = h_in
+	_hout2 = _hout1
+	_hout1 = sk.get_bone_pose_position(_hips) if _hips >= 0 else Vector3.ZERO
+	_dt1 = dt
+	_frames += 1
+
+
+func _setup(sk: Skeleton3D, n: int) -> void:
+	_hips = sk.find_bone("Hips")
+	_core = PackedInt32Array()
+	for nm in ["Hips", "Spine", "Chest", "UpperChest", "Neck", "Head"]:
+		var b := sk.find_bone(nm)
+		if b >= 0:
+			_core.append(b)
+	for arr: Array in [_in1, _in2, _out1, _out2]:
+		arr.resize(n)
+		arr.fill(Quaternion.IDENTITY)
+	_off.resize(n)
+	_off.fill(Vector3.ZERO)
+	_offv.resize(n)
+	_offv.fill(Vector3.ZERO)
+	_frames = 0
+	_active = false
+
+
+## Did the incoming pose jump this frame? Its acceleration spiked, or it moved faster than a
+## body part moves on its own (a blend weight swept across in a couple of frames).
+func _jumped(q_in: Array[Quaternion], h_in: Vector3) -> bool:
+	var v := h_in - _hin1
+	if (v - (_hin1 - _hin2)).length() > jump_pos or v.length() > jump_speed * maxf(_dt1, 1.0 / 240.0):
+		reason = "hips acc %.3f vel %.3f" % [(v - (_hin1 - _hin2)).length(), v.length()]
+		return true
+	var lim := deg_to_rad(jump_rot_deg)
+	var vlim := deg_to_rad(jump_turn_speed) * maxf(_dt1, 1.0 / 240.0)
+	for b: int in _core:
+		var d1 := (q_in[b] * _in1[b].inverse()).normalized()
+		var d0 := (_in1[b] * _in2[b].inverse()).normalized()
+		if (d1 * d0.inverse()).normalized().get_angle() > lim or d1.get_angle() > vlim:
+			reason = "bone %d acc %.1f vel %.1f" % [b, rad_to_deg((d1 * d0.inverse()).normalized().get_angle()), rad_to_deg(d1.get_angle())]
+			return true
+	return false
+
+
+## Re-inertialize: the output carries on from where it was heading - its last pose moved on by
+## its last motion - at the speed it had; the offset from the new pose to that then decays.
+func _restart(q_in: Array[Quaternion], h_in: Vector3) -> void:
+	var idt := 1.0 / maxf(_dt1, 1e-4)
+	for b in q_in.size():
+		var step := (_out1[b] * _out2[b].inverse()).normalized()
+		var pred := (step * _out1[b]).normalized()
+		_off[b] = _to_vec((pred * q_in[b].inverse()).normalized())
+		_offv[b] = _to_vec(step) * idt
 	if _hips >= 0:
-		_prev_hips = sk.get_bone_pose_position(_hips)
+		_hoff = (_hout1 + (_hout1 - _hout2)) - h_in
+		_hoffv = (_hout1 - _hout2) * idt
+	_active = true
+	jumps += 1
+
+
+static func _to_vec(q: Quaternion) -> Vector3:
+	if q.w < 0.0:
+		q = -q
+	var ang := q.get_angle()
+	if ang < 1e-6:
+		return Vector3.ZERO
+	return q.get_axis().normalized() * ang
+
+
+static func _from_vec(v: Vector3) -> Quaternion:
+	var ang := v.length()
+	if ang < 1e-6:
+		return Quaternion.IDENTITY
+	return Quaternion(v / ang, ang)
