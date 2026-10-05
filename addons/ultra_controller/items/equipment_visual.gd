@@ -22,9 +22,6 @@ var _held_uid := -1
 var _stowed := {}
 var _stow_attach := {}
 ## Free-aim offset of the last two ticks (MotorState.sway), for smooth presentation.
-var _sway_prev := Vector2.ZERO
-var _sway_cur := Vector2.ZERO
-var _sway_tick := -1
 var _slide_kick := 0.0
 var _mag_hidden := false
 var _recoil := UltraSpring.new(Vector3.ZERO, 6.0, 0.55)
@@ -123,11 +120,9 @@ func _process(delta: float) -> void:
 func sway_now() -> Vector2:
 	if character == null:
 		return Vector2.ZERO
-	if character.tick != _sway_tick:
-		_sway_prev = _sway_cur if _sway_tick >= 0 and character.tick == _sway_tick + 1 else character.state.sway
-		_sway_cur = character.state.sway
-		_sway_tick = character.tick
-	return _sway_prev.lerp(_sway_cur, clampf(Engine.get_physics_interpolation_fraction(), 0.0, 1.0))
+	# (The character keeps the value from before its last tick, so a frame that ran two ticks
+	# still interpolates - remembering per frame snapped the gun whenever that happened.)
+	return character.prev_sway.lerp(character.state.sway, clampf(Engine.get_physics_interpolation_fraction(), 0.0, 1.0))
 
 
 ## The shot ray as it will go (presentation): from the simulated eye along the gun's direction
@@ -414,6 +409,8 @@ func _drive_hands(delta: float) -> void:
 		# slides back along the handguard (up to 15 cm) instead of floating off it.
 		sup = _within_reach(sup, (gun.basis * Vector3.BACK).normalized(), 0.15)
 		anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, sup, 1.0, true, 10.0)
+		# On the gun as the gun hand ends up this frame (`gun` is last frame's in third person).
+		anim.hand_ik.follow_hand(HandIKModifier.Hand.LEFT, HandIKModifier.Hand.RIGHT, gun * grip().affine_inverse())
 		if held_def.support_fingers != Vector3.ZERO:
 			anim.hand_ik.set_curl(HandIKModifier.Hand.LEFT, 1.0)
 		_owns[HandIKModifier.Hand.LEFT] = true
@@ -489,6 +486,8 @@ var _tp_ads := 0.0
 
 
 ## Slide a left-hand target along `dir` (at most `max_slide` m) until the left arm can reach it.
+## The slide is solved exactly and eased: stepping it 2.5 cm at a time made the hand flick
+## back and forth along the handguard as the walk bobbed the shoulder across a step.
 func _within_reach(t: Transform3D, dir: Vector3, max_slide: float) -> Transform3D:
 	var sk := character.skeleton
 	var ua := sk.find_bone("LeftUpperArm")
@@ -503,13 +502,22 @@ func _within_reach(t: Transform3D, dir: Vector3, max_slide: float) -> Transform3
 	# when the arm comes up short, worth a few cm.)
 	var shoulder := sk.global_transform * sk.get_bone_global_pose(ua).origin
 	var r := _left_reach + 0.03
+	var o := t.origin - shoulder
+	var want := 0.0
+	if o.length() > r:
+		# Smallest x >= 0 with |o + dir x| = r (or the closest approach if it never gets there).
+		var od := o.dot(dir)
+		var disc := od * od - o.length_squared() + r * r
+		want = -od - sqrt(disc) if disc >= 0.0 else -od
+		want = clampf(want, 0.0, max_slide)
+	var dt := get_process_delta_time()
+	_left_slide = want if _left_slide < 0.0 else lerpf(_left_slide, want, 1.0 - exp(-12.0 * dt))
 	var out := t
-	var steps := 6
-	for k in steps:
-		if shoulder.distance_to(out.origin) <= r:
-			break
-		out.origin += dir * (max_slide / steps)
+	out.origin += dir * _left_slide
 	return out
+
+
+var _left_slide := -1.0
 
 
 ## Reload. Third person: the clip as authored (with the fitted grip it reads right: gun up by

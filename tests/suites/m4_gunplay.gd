@@ -518,3 +518,69 @@ func _torso_q(sk: Skeleton3D) -> Array:
 			if sqrt(qv) < float(best[0]):
 				best = [sqrt(qv), pt[1]]
 	return best
+
+
+## Camera / gun stability, first person, each gun: sampled when the skeleton has its final pose
+## (what gets rendered). The gun must stay put against the camera, and the support hand mustn't
+## flick about on the body. Regressions: the hand stepped 2.5 cm along the handguard as the walk
+## bobbed the shoulder; the body's glue to the mouse yaw switched on and off (2 deg) turning
+## while aiming and firing.
+func test_camera_and_gun_steady() -> void:
+	UltraItems.give(c, &"pistol")
+	UltraItems.give(c, &"rifle")
+	UltraItems.give(c, &"ammo_9mm", 60)
+	UltraItems.give(c, &"ammo_556", 90)
+	var rig := UltraCameraRig.new()
+	add_child(rig)
+	rig.attach(c)
+	rig.camera.current = true
+	var eq := c.get_node("Equipment") as UltraEquipmentVisual
+	var sk := c.skeleton
+	var rh := sk.find_bone("RightHand")
+	var lh := sk.find_bone("LeftHand")
+	var rec := []
+	var grab := func() -> void:
+		var cam := rig.camera.global_transform
+		var g := sk.global_transform * sk.get_bone_global_pose(rh) * (eq.held_node.transform if eq.held_node else Transform3D())
+		var vi := c.visual_root.global_transform.affine_inverse()
+		rec.append([cam.affine_inverse() * g.origin, vi * (sk.global_transform * sk.get_bone_global_pose(lh)).origin])
+	sk.skeleton_updated.connect(grab)
+	var res := []
+	var worst := {}
+	var F := InputFrame
+	for gun: StringName in [&"pistol", &"rifle"]:
+		var sl := _slot(gun)
+		for spec: Array in [["walk", Vector2(0, 1), 0, 0.0], ["sprint", Vector2(0, 1), F.B_SPRINT, 0.0], ["aim", Vector2.ZERO, F.B_SECONDARY, 0.0], ["aim turn", Vector2.ZERO, F.B_SECONDARY, 60.0], ["fire", Vector2.ZERO, F.B_SECONDARY | F.B_PRIMARY, 0.0]]:
+			var step := {"ticks": 1000, "slot": sl, "move": spec[1], "buttons": spec[2], "pitch": -0.1}
+			if spec[3] != 0.0:
+				step["yaw_rate"] = deg_to_rad(spec[3])
+			else:
+				step["yaw"] = 0.0
+			_bot().set_steps([step])
+			await ticks(100 if spec[0] == "walk" else 40)     # (a new gun comes up first)
+			rec.clear()
+			await ticks(90)
+			var gj := 0.0
+			var lj := 0.0
+			for i in range(1, rec.size() - 1):
+				for k in 2:
+					var a: Vector3 = rec[i - 1][k]
+					var b: Vector3 = rec[i][k]
+					var d: Vector3 = rec[i + 1][k]
+					var j := (d - 2.0 * b + a).length() * 1000.0
+					if k == 0:
+						gj = maxf(gj, j)
+					else:
+						lj = maxf(lj, j)
+			var tag := "%s %s" % [gun, spec[0]]
+			res.append("%s: gun vs camera %.1f mm, support hand %.1f mm" % [tag, gj, lj])
+			worst[tag] = [gj, lj]
+	sk.skeleton_updated.disconnect(grab)
+	rig.queue_free()
+	info("
+  ".join(res))
+	for tag: String in worst:
+		# (Sprinting carries the gun low and swinging: the arms move with the run.)
+		var lim := 40.0 if tag.ends_with("sprint") else 25.0
+		check(float(worst[tag][0]) < lim, "%s: the gun jumps against the camera (%.1f mm)" % [tag, worst[tag][0]])
+		check(float(worst[tag][1]) < lim, "%s: the support hand flicks (%.1f mm)" % [tag, worst[tag][1]])

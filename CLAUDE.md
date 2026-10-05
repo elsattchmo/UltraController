@@ -292,6 +292,14 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Demo playground has infinite ammo (`UltraActionLayer.infinite_ammo`; `--limited-ammo` off).
 - `teleport()` drops any traversal state (else a scripted move drags you back).
 - FP eye is swept from the capsule axis (`CameraRig._fp_guard`): the head bone dips into ledges.
+- Steadiness (`m4_gunplay.test_camera_and_gun_steady`, tour `jitter_review`): sample at
+  `skeleton_updated` - sampling in `_process` mixes this frame's body placement with last
+  frame's pose and invents jitter. Rules that came out of it: a released HandIK goal fades from
+  its skeleton-space target (a stale world target dragged the hand back at a sprint); the
+  support hand follows the gun hand's final pose (`HandIKModifier.follow_hand`, solved after
+  it); its handguard slide (`_within_reach`) is solved exactly and eased, never stepped; the FP
+  body's glue to the mouse yaw is eased (`_glue_w`), never switched; interpolated sim values
+  keep their pre-tick value on the character (`prev_sway`) so 2-tick frames don't snap.
 
 ## Godot 4.7 facts (probed)
 - All IK nodes exist: TwoBoneIK3D, FABRIK3D, CCDIK3D, JacobianIK3D, SplineIK3D, ChainIK3D,

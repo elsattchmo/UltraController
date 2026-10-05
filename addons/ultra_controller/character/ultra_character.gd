@@ -72,6 +72,9 @@ var visual_offset := Vector3.ZERO
 var visual_feet := Vector3.ZERO
 const ROPE_CHEST_GAP := 0.16
 var _prev_pos := Vector3.ZERO
+var _glue_w := 0.0
+## Free-aim sway before the last tick (presentation interpolates it like the position).
+var prev_sway := Vector2.ZERO
 var _prev_yaw := 0.0
 var _prev_vel := Vector3.ZERO
 var _accel := Vector3.ZERO
@@ -327,6 +330,7 @@ func _physics_process(delta: float) -> void:
 func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	_prev_pos = state.pos
 	_prev_yaw = state.body_yaw
+	prev_sway = state.sway
 	var old := state.state
 	motor.apply_pushes = net_role != ROLE_PREDICTED and not replaying   # only the authority shoves props
 	motor.platform_tick = platform_tick
@@ -488,11 +492,15 @@ func _sync_visual(alpha: float) -> void:
 	var p := _prev_pos.lerp(state.pos, alpha) + visual_offset + ragdoll_offset
 	var yaw := lerp_angle(_prev_yaw, state.body_yaw, alpha)
 	# Locally controlled in first person and facing the aim: glue the body to the live mouse
-	# yaw so the arms never lag the camera by a tick.
-	if view_index >= 0 and input_source and not last_input.has(InputFrame.B_VIEW_TP) \
+	# yaw so the arms never lag the camera by a tick. Eased in and out: switching it outright
+	# flicked the body (and the arms on the gun) ~2 deg whenever the gap hovered at the
+	# threshold - turning while aiming.
+	var glue := view_index >= 0 and input_source != null and not last_input.has(InputFrame.B_VIEW_TP) \
 			and not state.has(UltraMotor.F_TURNING) and state.state != MotorState.Id.ROOT_MOTION \
-			and absf(angle_difference(state.body_yaw, last_input.yaw)) < 0.05:
-		yaw = input_source.live_yaw
+			and absf(angle_difference(state.body_yaw, last_input.yaw)) < 0.05
+	_glue_w = move_toward(_glue_w, 1.0 if glue else 0.0, get_process_delta_time() * 8.0)
+	if _glue_w > 0.0 and input_source:
+		yaw = lerp_angle(yaw, input_source.live_yaw, smoothstep(0.0, 1.0, _glue_w))
 	visual_feet = p
 	_hit_frame = Transform3D(Basis(Vector3.UP, yaw), _prev_pos.lerp(state.pos, alpha))
 	yaw += ragdoll_yaw

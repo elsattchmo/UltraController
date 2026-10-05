@@ -22,6 +22,17 @@ class Goal:
 	var curl := 0.0
 	var line_dir := Vector3.ZERO
 	var line_range := Vector2(-0.8, 0.8)
+	## The target in the skeleton's frame when it was set: a released goal fades out from
+	## there, moving with the body (its world target went stale - at a sprint the hand was
+	## dragged ~10 cm back toward it for the frame or two of the release).
+	var target_sk := Transform3D()
+	var has_sk := false
+	## Held relative to the other hand (`rel_hand` >= 0, `rel` in that hand's frame): a support
+	## hand on a gun the other hand holds, placed from where that hand ends up THIS frame. (A
+	## world target worked out from last frame's gun trailed it, and jumped when the shouldered
+	## pose took the goal over with the current one.)
+	var rel_hand := -1
+	var rel := Transform3D()
 
 var goals := [Goal.new(), Goal.new(), Goal.new(), Goal.new()]
 var last_error := [0.0, 0.0, 0.0, 0.0]
@@ -69,6 +80,11 @@ func set_goal(hand: int, world_xform: Transform3D, weight := 1.0, use_rotation :
 	g.open = open
 	g.curl = 0.0
 	g.target = world_xform
+	g.rel_hand = -1
+	var sk := get_skeleton()
+	g.has_sk = sk != null
+	if sk:
+		g.target_sk = sk.global_transform.affine_inverse() * world_xform
 	g.want_weight = clampf(weight, 0.0, 1.0)
 	g.use_rotation = use_rotation
 	g.speed = speed
@@ -80,6 +96,14 @@ func set_line_goal(hand: int, point: Vector3, dir: Vector3, range_m := Vector2(-
 	var g: Goal = goals[hand]
 	g.line_dir = dir.normalized()
 	g.line_range = range_m
+
+
+## Keep `hand`'s goal (just set) where it is relative to `other`'s hand, `other_ref` being where
+## the other hand was (world) when the goal was worked out. Solved after the other hand.
+func follow_hand(hand: int, other: int, other_ref: Transform3D) -> void:
+	var g: Goal = goals[hand]
+	g.rel_hand = other
+	g.rel = other_ref.affine_inverse() * g.target
 
 
 ## Close the fingers of `hand` round a bar (after set_goal, which resets it).
@@ -130,14 +154,25 @@ func _process_modification_with_delta(delta: float) -> void:
 	if sk == null or _arms.size() < 2:
 		return
 	var inv := sk.global_transform.affine_inverse()
+	# Hands that follow the other hand go after it.
+	var order: Array[int] = []
 	for i in mini(goals.size(), _arms.size()):
+		if (goals[i] as Goal).rel_hand < 0:
+			order.append(i)
+	for i in mini(goals.size(), _arms.size()):
+		if (goals[i] as Goal).rel_hand >= 0:
+			order.append(i)
+	for i in order:
 		var g: Goal = goals[i]
+		if g.rel_hand >= 0 and g.rel_hand < _arms.size() and g.want_weight > 0.0:
+			g.target = sk.global_transform * sk.get_bone_global_pose(_arms[g.rel_hand][2]) * g.rel
+			g.target_sk = inv * g.target
 		g.weight = move_toward(g.weight, g.want_weight, delta * g.speed)
 		var w := smoothstep(0.0, 1.0, g.weight)
 		if w <= 0.001:
 			last_error[i] = 0.0
 			continue
-		var t_sk := inv * g.target
+		var t_sk := g.target_sk if g.want_weight <= 0.0 and g.has_sk else inv * g.target
 		var arm: Array = _arms[i]
 		if g.line_dir != Vector3.ZERO:
 			var ld := (inv.basis * g.line_dir).normalized()
