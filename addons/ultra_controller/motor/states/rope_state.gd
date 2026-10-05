@@ -8,6 +8,7 @@ extends MotorStateHandler
 
 const Id := MotorState.Id
 const BODY := 1.95                 ## hands to feet while hanging
+const COM_BELOW_HANDS := 1.0       ## hands to the body's centre of mass
 
 
 func next(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
@@ -42,7 +43,9 @@ func tick(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 		s.trav_s = clampf(s.trav_s - climb * 1.1 * m.dt, 0.3, rope.length - 0.2)
 	var L := s.trav_s + BODY
 	var v := s.trav_from
-	v.y -= m.gravity * m.dt
+	# The swing's period comes from where the weight is (the body's centre, ~1 m under the
+	# hands), not the feet we track: gravity scaled by L / L_com gives the right period.
+	v.y -= m.gravity * (L / (s.trav_s + COM_BELOW_HANDS)) * m.dt
 	if climb == 0.0:
 		var fwd := Vector3(-sin(i.yaw), 0, -cos(i.yaw))
 		var right := Vector3(cos(i.yaw), 0, -sin(i.yaw))
@@ -50,7 +53,7 @@ func tick(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 		var ang := (s.pos - a).angle_to(Vector3.DOWN)
 		var pump := 1.0 - smoothstep(deg_to_rad(40.0), deg_to_rad(65.0), ang)
 		v += (fwd * i.move.y + right * i.move.x * 0.6) * 3.2 * pump * m.dt
-	v *= 0.997
+	v *= 0.9985                       # air drag: a swing dies down over ~10 s
 	var prev := s.pos
 	var p := prev + v * m.dt
 	var d := p - a

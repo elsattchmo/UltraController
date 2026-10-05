@@ -7,6 +7,12 @@ extends RefCounted
 
 enum Action { NONE, EQUIPPING, READY, RELOADING, HOLSTERING, USING }
 
+## States that need both hands: the item in hand is stowed while they last.
+const TWO_HANDED: Array[int] = [MotorState.Id.MANTLE, MotorState.Id.VAULT, MotorState.Id.LEDGE_HANG,
+	MotorState.Id.LEDGE_CLIMB, MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.ROPE,
+	MotorState.Id.SWIM, MotorState.Id.DIVE, MotorState.Id.CRAWL, MotorState.Id.ROOT_MOTION,
+	MotorState.Id.RAGDOLL, MotorState.Id.DEAD, MotorState.Id.GET_UP]
+
 
 
 static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, replaying: bool) -> void:
@@ -19,10 +25,20 @@ static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, rep
 		var it := inv.get_slot(i.want_slot - 1)
 		if it and it.def() and it.def().can_equip(ItemDefinition.EquipSlot.MAIN_HAND):
 			want_uid = it.uid
-	# Traversal / ragdoll / swimming states put the item away.
 	if UltraInjury.weapon_hand(s) == 0:
 		want_uid = 0                                     # no working arm to hold it with
 	var busy := s.state in [MotorState.Id.GET_UP, MotorState.Id.ROOT_MOTION, MotorState.Id.SLIDE, MotorState.Id.CRAWL, MotorState.Id.MANTLE, MotorState.Id.VAULT, MotorState.Id.LEDGE_HANG, MotorState.Id.LEDGE_CLIMB, MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.ROPE, MotorState.Id.SWIM, MotorState.Id.DIVE, MotorState.Id.RAGDOLL, MotorState.Id.DEAD]
+	# Two-handed moves (climbing, hanging, ropes, swimming, crawling, rolling, down on the
+	# ground) stow what's in hand straight away; it comes back out once they're over (the
+	# selected slot is still wanted).
+	if s.state in TWO_HANDED:
+		want_uid = 0
+		if s.held_uid != 0:
+			_store_mag(c, s, replaying)
+			s.held_uid = 0
+			s.equipped = 0
+			s.mag = 0
+			_set_action(s, Action.NONE)
 	var def := ItemDB.by_index(s.equipped)
 	match s.action:
 		Action.NONE:

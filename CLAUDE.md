@@ -63,6 +63,13 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   Every rope swings and climbs (Kind is legacy): looking level, forward/back pumps; looking
   up/down > 25 deg, forward/back climbs toward the look (`UltraRope.climb_input`). The rope
   body collides (`test_move`): walls stop the swing, feet meeting the ground stand you up.
+  Swing period from the centre of mass (gravity scaled by L / (grip + 1 m)).
+  The drawn rope (UltraRope, presentation) is a verlet chain at 120 Hz: taut from anchor to the
+  climber's hands, free tail; floors are a height clamp inside the solve (+ static friction),
+  walls a swept ray; characters (holder: a slim body capsule) and moving props push it;
+  it sleeps when still. Ropes process after characters (process_priority 150).
+- Two-handed states (`UltraActionLayer.TWO_HANDED`: climbing, hanging, ropes, swimming,
+  crawling, rolling, down) stow the item in hand at once; it's drawn again afterwards.
   Hands/feet on rope, ledge, ladder are presentation (`UltraTraversalVisual`, IK priority 111 >
   equipment 110). `HandIKModifier` has 4 limbs (hands, then feet); `hand_basis(h, fingers, palm)`
   orients a hand (palm learned from the curled fingers). Ledge: palms over the lip. Ladder: the
@@ -104,7 +111,10 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   GET_UP the neck/head are low-passed against the chest (`BodyDynamicsModifier.head_calm`):
   the prone clip, played 1.4x, whips the head.
 - First person while down (RAGDOLL/DEAD/GET_UP): the camera is the head's real eye pushed
-  15 cm out of the face, view pitch >= -50 deg and roll <= 35 deg (`_tame_view`).
+  15 cm out of the face (swept clear of the floor), view pitch >= -50 deg and roll <= 25 deg
+  (`_tame_view`: heading from the top of the head when looking straight down, roll measured
+  around the view - measuring it against world up flipped +-90 deg face down). Getting up,
+  the view follows the head loosely (rate-limited 90 deg/s) and hands back to your aim.
 - Body materials dither away within 0.15-0.27 m of any camera (`_near_fade_mat`); the body and
   head meshes are both capped (`UltraMeshCap`, skin-coloured).
 - Walking never blends the walk with a side-step: below ~45 deg off forward the walk plays with

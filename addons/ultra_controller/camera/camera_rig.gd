@@ -22,6 +22,7 @@ var _head_eye_cached := Vector3.ZERO
 var _head_look_cached := Basis()
 var _down_w := 0.0                  ## knocked down / dead / getting up: the view is the head's
 var _down_q := Quaternion.IDENTITY
+var _down_p := Vector3.INF          ## low-passed down-eye position (world)
 var _neck_bone := -1
 var _neck_cached := Vector3.INF
 ## The eye stays this far above / in front of the neck joint (crouching or running bends the
@@ -254,25 +255,41 @@ func _process(delta: float) -> void:
 	_down_w = move_toward(_down_w, 1.0 if is_down else 0.0, delta * (6.0 if is_down else 2.0))
 	var cam_basis := rot * Basis(Vector3.BACK, roll)
 	if _down_w > 0.001:
+		var getting_up := character.state.state == Id2.GET_UP
 		var head_q := _tame_view((vis.basis.orthonormalized() * _head_look_cached).get_rotation_quaternion())
-		_down_q = head_q if _down_w < 0.02 else _down_q.slerp(head_q, 1.0 - exp(-14.0 * delta))
-		var dw := smoothstep(0.0, 1.0, _down_w)
-		# Out in front of the face: a tucked head puts the real eye right against the collar.
-		var face := Basis(_down_q) * Vector3.FORWARD
-		fp_pos = fp_pos.lerp(vis * _head_eye_cached + face * 0.15, dw)
 		# Never look back down into our own neck / chest (a tucked chin while getting up).
 		if _neck_cached != Vector3.INF:
 			var to_neck := (vis * _neck_cached - vis * _head_eye_cached).normalized()
-			var look := Basis(_down_q) * Vector3.FORWARD
+			var look := Basis(head_q) * Vector3.FORWARD
 			var lim := cos(deg_to_rad(60.0))
 			if look.dot(to_neck) > lim:
 				var axis := to_neck.cross(look)
 				if axis.length() > 0.001:
 					var ang := acos(clampf(look.dot(to_neck), -1.0, 1.0))
-					_down_q = Quaternion(axis.normalized(), deg_to_rad(60.0) - ang) * _down_q
+					head_q = Quaternion(axis.normalized(), deg_to_rad(60.0) - ang) * head_q
+		# Getting up: the get-up clip throws the head about. Follow it loosely and hand the view
+		# back to your own aim as you rise, so you're looking where you aim once you're up.
+		var handback := smoothstep(0.1, 0.75, character.state.state_time / UltraAnimDriver.GETUP_TIME) if getting_up else 0.0
+		head_q = head_q.slerp(cam_basis.get_rotation_quaternion(), handback)
+		if _down_w < 0.02 or _down_p == Vector3.INF:
+			_down_q = head_q
+		else:
+			var nq := _down_q.slerp(head_q, 1.0 - exp(-(4.0 if getting_up else 12.0) * delta))
+			var step := _down_q.angle_to(nq)
+			var max_step := deg_to_rad(90.0 if getting_up else 360.0) * delta
+			_down_q = _down_q.slerp(nq, max_step / step) if step > max_step else nq
+		var dw := smoothstep(0.0, 1.0, _down_w)
+		# Out in front of the face: a tucked head puts the real eye right against the collar.
+		var face := Basis(_down_q) * Vector3.FORWARD
+		var eye_t := vis * _head_eye_cached + face * 0.15
+		_down_p = eye_t if _down_p == Vector3.INF else _down_p.lerp(eye_t, 1.0 - exp(-(6.0 if getting_up else 18.0) * delta))
+		fp_pos = fp_pos.lerp(_down_p.lerp(fp_pos, handback), dw)
+		# Lying on your face, "in front of the face" is in the floor: keep the eye out of it.
+		fp_pos = _sweep_clear(vis.origin + Vector3.UP * 0.35, fp_pos)
 		cam_basis = Basis(cam_basis.get_rotation_quaternion().slerp(_down_q, dw))
 	else:
 		_down_q = cam_basis.get_rotation_quaternion()
+		_down_p = Vector3.INF
 	global_position = fp_pos.lerp(tp_pos, t)
 	camera.global_transform = Transform3D(cam_basis.slerp(rot * Basis(Vector3.BACK, roll), t) if t > 0.0 else cam_basis, global_position)
 	var eq := _equipment()
@@ -330,6 +347,23 @@ func _underwater_fx() -> void:
 
 ## Keep the first-person eye out of walls: the head bone can dip into a ledge while mantling
 ## or into the wall while hanging. Sweep from the capsule axis (at eye height) to the eye.
+## Sweep a small sphere from `origin` (known clear) toward `target`; stop short of geometry.
+func _sweep_clear(origin: Vector3, target: Vector3) -> Vector3:
+	var space := get_world_3d().direct_space_state
+	var sphere := SphereShape3D.new()
+	sphere.radius = maxf(cam_profile.near * 2.5, 0.08)
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = sphere
+	q.transform = Transform3D(Basis(), origin)
+	q.collision_mask = UltraLayers.WORLD_STATIC | UltraLayers.CLIMBABLE
+	q.exclude = _ray_excl
+	if not space.intersect_shape(q, 1).is_empty():
+		return target
+	q.motion = target - origin
+	var r := space.cast_motion(q)
+	return origin + (target - origin) * r[0]
+
+
 func _fp_guard(vis: Transform3D, eye: Vector3) -> Vector3:
 	var space := get_world_3d().direct_space_state
 	var h := clampf((vis.affine_inverse() * eye).y, 0.3, maxf(character.state.height - 0.12, 0.3))
@@ -353,11 +387,16 @@ func _fp_guard(vis: Transform3D, eye: Vector3) -> Vector3:
 static func _tame_view(q: Quaternion) -> Quaternion:
 	var b := Basis(q)
 	var f := -b.z
-	var yaw := atan2(-f.x, -f.z)
-	var pitch := clampf(asin(clampf(f.y, -1.0, 1.0)), deg_to_rad(-50.0), deg_to_rad(70.0))
-	var up := b.y
-	var flat_r := Vector3(cos(yaw), 0, -sin(yaw))
-	var roll := clampf(atan2(-up.dot(flat_r), up.y), deg_to_rad(-35.0), deg_to_rad(35.0))
+	# Heading: looking near straight down (lying on your face) the view direction alone gives
+	# a heading that spins wildly; the top of the head points where the face does then.
+	var hv := Vector2(f.x, f.z) + Vector2(b.y.x, b.y.z) * (-f.y)
+	var yaw := atan2(-hv.x, -hv.y)
+	var raw_pitch := asin(clampf(f.y, -1.0, 1.0))
+	var pitch := clampf(raw_pitch, deg_to_rad(-50.0), deg_to_rad(70.0))
+	# Roll: the head's up against the level "up" for that heading and pitch, measured around
+	# the view direction (measuring it against world up flips +-90 when looking down).
+	var level := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, raw_pitch)
+	var roll := clampf(atan2(-b.y.dot(level.x), b.y.dot(level.y)), deg_to_rad(-25.0), deg_to_rad(25.0))
 	return (Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch) * Basis(Vector3.BACK, roll)).get_rotation_quaternion()
 
 

@@ -158,7 +158,7 @@ func test_rope_swing() -> void:
 	if r:
 		check(absf(c.state.pos.distance_to(r.anchor()) - (c.state.trav_s + 1.95)) < 0.02, "rope length holds under load")
 	await drive(c, 20, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2.ZERO, InputFrame.B_JUMP), func(_ch: UltraCharacter) -> bool: return false)
-	check(c.state.state in [Id.FALL, Id.JUMP, Id.LAND, Id.IDLE, Id.MOVE], "jump lets go (%s)" % Id.keys()[c.state.state])
+	check(c.state.state != Id.ROPE, "jump lets go (%s)" % Id.keys()[c.state.state])
 
 
 ## Swing ropes climb too: look up + forward goes up the rope, look down + forward slides down.
@@ -261,3 +261,118 @@ func test_climbable_wall() -> void:
 	info("climb wall: %s; y %.2f" % [" ".join(trace), c.state.pos.y])
 	check(seen.has(Id.WALL_CLIMB), "walking into the climbable wall climbs it (no jump needed)")
 	check(c.state.pos.y > 5.9 and c.state.is_grounded(), "climbed out on top")
+
+
+## Two-handed moves stow the gun: it's put away for the ladder and drawn again on top.
+func test_gun_stowed_while_climbing() -> void:
+	var c := spawn("parkour_ladder", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	UltraItems.give(c, &"pistol")
+	var with_slot := func(move: Vector2) -> InputFrame:
+		var f := frame(move)
+		f.want_slot = 1
+		return f
+	await drive(c, 40, func(_k: int, _ch: UltraCharacter) -> InputFrame: return with_slot.call(Vector2.ZERO), func(_ch: UltraCharacter) -> bool: return false)
+	check(c.state.equipped != 0, "pistol drawn")
+	var drawn_on_ladder := [0, 0]
+	await drive(c, 600, func(_k: int, ch: UltraCharacter) -> InputFrame:
+		if ch.state.state == Id.LADDER:
+			drawn_on_ladder[0] += 1
+			if ch.state.held_uid != 0:
+				drawn_on_ladder[1] += 1
+		return with_slot.call(Vector2(0, 1)),
+		func(ch: UltraCharacter) -> bool: return ch.state.pos.y > 5.9 and ch.state.is_grounded() and ch.state.state in [Id.IDLE, Id.MOVE])
+	info("ladder ticks %d, with the gun in hand %d" % drawn_on_ladder)
+	check(drawn_on_ladder[0] > 30 and drawn_on_ladder[1] == 0, "the gun is stowed the whole climb")
+	await drive(c, 90, func(_k: int, _ch: UltraCharacter) -> InputFrame: return with_slot.call(Vector2.ZERO), func(ch: UltraCharacter) -> bool: return ch.state.action == UltraActionLayer.Action.READY)
+	check(c.state.equipped != 0 and c.state.action == UltraActionLayer.Action.READY, "and drawn again at the top")
+
+
+## The drawn rope reacts to the world: taut above a climber's hands, pushed aside by people
+## walking into it (and swinging after), lying on the ground without sinking into it, knocked
+## by a flying prop, and still swinging after you let go.
+func test_rope_reacts_to_the_world() -> void:
+	# A test rope over the speed lane: anchor 3 m up, 5 m long (2 m of it lies on the ground).
+	var r := UltraRope.new()
+	r.length = 5.0
+	add_child(r)
+	r.global_position = Vector3(-24, 3.0, -40)
+	await ticks(300)
+	var lowest := INF
+	var on_ground := 0
+	for k in 60:
+		var p := r.point_at(r.length * k / 59.0)
+		lowest = minf(lowest, p.y)
+		if p.y < 0.13:
+			on_ground += 1
+	info("rope on the ground: lowest point y %.3f, %d of 60 samples lying on it" % [lowest, on_ground])
+	check(lowest > -0.01 and on_ground > 10, "the long end lies on the ground, not through it")
+	check(r.is_still(), "and the rope comes to rest")
+	# Walk through it.
+	var c := spawn("parkour_rope", "res://addons/ultra_controller/profiles/fps.tres", true)
+	await ticks(3)
+	c.teleport(Vector3(-24, 0.1, -38), 0.0)
+	var before := r.point_at(2.0)
+	var pushed := [0.0]
+	await drive(c, 120, func(_k: int, _ch: UltraCharacter) -> InputFrame:
+		pushed[0] = maxf(pushed[0], r.point_at(2.0).distance_to(before))
+		return frame(Vector2(0, 1)), func(_ch: UltraCharacter) -> bool: return false)
+	info("walking through it pushed the rope %.2f m (walker went %s -> %s; %s)" % [pushed[0], Vector3(-24, 0.1, -38), c.state.pos, " ".join(trace)])
+	check(pushed[0] > 0.2, "walking into the rope pushes it aside")
+	await drive(c, 20, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2.ZERO), func(_ch: UltraCharacter) -> bool: return false)
+	check(not r.is_still(), "and it's still swinging just after")
+	c.teleport(Vector3(-24, 0.1, -60), 0.0)
+	await ticks(600)
+	check(r.is_still(), "then it settles again")
+	# A prop flying into it.
+	var rb := RigidBody3D.new()
+	rb.mass = 3.0
+	rb.collision_layer = UltraLayers.WORLD_DYNAMIC
+	rb.collision_mask = UltraLayers.WORLD_STATIC
+	rb.gravity_scale = 0.0
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3.ONE * 0.3
+	cs.shape = bs
+	rb.add_child(cs)
+	add_child(rb)
+	rb.global_position = Vector3(-27, 1.8, -40)
+	rb.linear_velocity = Vector3(8, 0, 0)
+	before = r.point_at(1.2)
+	var knocked := 0.0
+	for i in 40:
+		await ticks(1)
+		knocked = maxf(knocked, r.point_at(1.2).distance_to(before))
+	info("a 3 kg box at 8 m/s knocked the rope %.2f m" % knocked)
+	check(knocked > 0.15, "a flying prop knocks the rope about")
+	rb.queue_free()
+	r.queue_free()
+
+
+## Held, the rope is taut and straight from the anchor to the hands; let go, it keeps swinging.
+func test_rope_taut_when_held() -> void:
+	var c := spawn("parkour_rope", "res://addons/ultra_controller/profiles/fps.tres", true)
+	await ticks(3)
+	await drive(c, 200, func(_k: int, ch: UltraCharacter) -> InputFrame:
+		return frame(Vector2(0, 1), InputFrame.B_SPRINT | (InputFrame.B_JUMP if ch.state.pos.z < -55.4 and ch.state.is_grounded() else 0)),
+		func(ch: UltraCharacter) -> bool: return ch.state.state == Id.ROPE or ch.state.pos.y < 2.0)
+	check(c.state.state == Id.ROPE, "caught the rope")
+	if c.state.state != Id.ROPE:
+		return
+	var rope := UltraRope.find(c.state.trav_id)
+	var worst := [0.0]
+	await drive(c, 180, func(_k: int, ch: UltraCharacter) -> InputFrame:
+		var a := rope.anchor()
+		var h := UltraTraversalVisual.rope_grip(ch)
+		for k in 10:
+			var p := rope.point_at(ch.state.trav_s * 0.9 * k / 10.0)
+			var q := Geometry3D.get_closest_point_to_segment(p, a, h)
+			worst[0] = maxf(worst[0], p.distance_to(q))
+		return frame(Vector2(0, 1.0 if ch.state.vel.z < 0.0 else -1.0)), func(_ch: UltraCharacter) -> bool: return false)
+	info("held rope: worst bend between anchor and hands %.3f m" % worst[0])
+	check(worst[0] < 0.03, "taut and straight above the hands")
+	await drive(c, 10, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2.ZERO, InputFrame.B_JUMP), func(ch: UltraCharacter) -> bool: return ch.state.state != Id.ROPE)
+	var p0 := rope.point_at(rope.length)
+	await ticks(20)
+	info("let go: rope end moved %.2f m in 0.33 s" % rope.point_at(rope.length).distance_to(p0))
+	check(rope.point_at(rope.length).distance_to(p0) > 0.3, "let go, the rope swings on")

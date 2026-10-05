@@ -390,3 +390,46 @@ func test_getup_head_is_steady() -> void:
 	info("face-down get-up %s: head vs chest p90 %.0f, max %.0f deg/s" % [front[0], p90, speeds[-1]])
 	check(front[0], "landed face down -> the face-down get-up")
 	check(p90 < 85.0 and speeds[-1] < 140.0, "the head doesn't whip about (p90 %.0f, max %.0f deg/s)" % [p90, speeds[-1]])
+
+
+## First person while getting up: the view comes from the head but doesn't lurch about with
+## it, and hands back to where you're looking by the time you're up.
+func test_getup_camera_is_steady() -> void:
+	var rig := UltraCameraRig.new()
+	add_child(rig)
+	rig.attach(c)
+	c.teleport(Vector3(-24, 0.05, -14), 0.0)
+	(c.input_source as BotInputSource).set_steps([{"ticks": 100000, "yaw": 0.0, "pitch": 0.0}])
+	await ticks(20)
+	for push: Vector3 in [Vector3(0, 2.0, -6.0), Vector3(0, 2.0, 6.0)]:
+		c.knock_down(push)
+		var qs: Array[Quaternion] = []
+		var ps: Array[Vector3] = []
+		var front := [false]
+		for i in 420:
+			await get_tree().process_frame
+			if c.state.state == Id.GET_UP:
+				front[0] = front[0] or c.anim.getup_front
+				qs.append(rig.camera.global_basis.get_rotation_quaternion())
+				ps.append(rig.camera.global_position)
+			elif not qs.is_empty() and c.state.state == Id.IDLE:
+				break
+		var speeds: Array[float] = []
+		var jerks: Array[float] = []
+		for k in range(1, qs.size()):
+			speeds.append(rad_to_deg(qs[k - 1].angle_to(qs[k])) * 60.0)
+			if k >= 2:
+				jerks.append((ps[k] - 2.0 * ps[k - 1] + ps[k - 2]).length() * 3600.0)
+		speeds.sort()
+		jerks.sort()
+		if speeds.is_empty():
+			check(false, "got up")
+			continue
+		var p90 := speeds[speeds.size() * 9 / 10]
+		var end_fwd := -rig.camera.global_basis.z
+		info("get-up (face %s): camera turn p90 %.0f max %.0f deg/s, position accel p90 %.1f m/s2; ends looking %s" % ["down" if front[0] else "up", p90, speeds[-1], jerks[jerks.size() * 9 / 10], end_fwd.snapped(Vector3.ONE * 0.01)])
+		# (Before: the heading / roll of a face-down head flipped, ~700 deg/s p90, 1400 max.)
+		check(speeds[-1] < 120.0, "the view turns smoothly, never lurches (p90 %.0f, max %.0f deg/s)" % [p90, speeds[-1]])
+		check(end_fwd.dot(Vector3.FORWARD) > 0.9, "back to looking where you aim when you're up")
+		await ticks(30)
+	rig.queue_free()

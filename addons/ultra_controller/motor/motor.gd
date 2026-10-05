@@ -407,13 +407,22 @@ func update_balance(s: MotorState, i: InputFrame) -> void:
 	var p := body.global_position
 	var space := body.get_world_3d().direct_space_state
 	var mask := body.collision_mask & ~UltraLayers.CHARACTER
+	# Moving platforms are left out entirely: a ray can see a TickPlatform's pose a frame stale
+	# during replay, and client and server would disagree about the teeter.
+	var near_platform := [false]
 	var ray := func(from: Vector3, depth: float) -> Dictionary:
 		var q := PhysicsRayQueryParameters3D.create(from + Vector3.UP * 0.3, from + Vector3.DOWN * depth, mask, [body.get_rid()])
-		return space.intersect_ray(q)
+		var hit := space.intersect_ray(q)
+		if not hit.is_empty() and hit.collider is TickPlatform:
+			near_platform[0] = true
+		return hit
 	if not (ray.call(p, profile.step_height + 0.08) as Dictionary).is_empty():
 		s.teeter = maxf(s.teeter - dt * 2.0, 0.0)
 		return
 	var below: Dictionary = ray.call(p, profile.balance_drop + 0.3)
+	if near_platform[0]:
+		s.teeter = 0.0
+		return
 	if not below.is_empty() and p.y - (below.position as Vector3).y < profile.balance_drop:
 		s.teeter = maxf(s.teeter - dt * 2.0, 0.0)
 		return
@@ -423,7 +432,7 @@ func update_balance(s: MotorState, i: InputFrame) -> void:
 		var d := Vector3(sin(k * TAU / 8.0), 0.0, cos(k * TAU / 8.0))
 		if (ray.call(p + d * profile.radius * 0.9, profile.step_height + 0.08) as Dictionary).is_empty():
 			void_dir += d
-	if void_dir.length() < 0.01:
+	if void_dir.length() < 0.01 or near_platform[0]:
 		s.teeter = 0.0
 		return
 	void_dir = void_dir.normalized()
