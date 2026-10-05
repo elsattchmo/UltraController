@@ -247,6 +247,33 @@ func test_climb_onto_moving_platform() -> void:
 	chars.erase(c)
 
 
+## Standing in the elevator's shaft when it comes down: shoved out from under it, never pressed
+## through the floor (a flaky net test caught a player under it at y -1.1).
+func test_platform_comes_down_on_you() -> void:
+	var c := spawn("speed_start", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	var plat: TickPlatform = null
+	for tp: TickPlatform in TickPlatform.all:
+		if tp.name == "Elevator":
+			plat = tp
+	# Wait until it's up, then stand where it'll come down.
+	for i in 900:
+		await ticks(1)
+		if plat.pose_at(TickPlatform.current_tick).origin.y > 4.0:
+			break
+	c.teleport(Vector3(plat._origin.origin.x + 0.4, 0.05, plat._origin.origin.z + 0.3), 0.0)
+	var low := INF
+	for i in 600:
+		await ticks(1)
+		low = minf(low, c.state.pos.y)
+	var lp := plat.pose_at(TickPlatform.current_tick).affine_inverse() * c.state.pos
+	info("elevator came down: lowest feet y %.2f, ended at %s from its centre (y %.2f)" % [low, Vector2(lp.x, lp.z).snappedf(0.01), c.state.pos.y])
+	check(low > -0.1, "never pressed into the floor (lowest %.2f)" % low)
+	check(Vector2(lp.x, lp.z).length() > 1.7 or c.state.pos.y > 0.3, "pushed out from under it (or riding it)")
+	c.queue_free()
+	chars.erase(c)
+
+
 ## After a roll's travel is done, input takes over at once (the clip's tail no longer locks
 ## the player out), and the player moves where they steer.
 func test_roll_hands_back_control() -> void:

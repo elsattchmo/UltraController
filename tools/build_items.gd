@@ -139,7 +139,7 @@ func _pistol(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	d.stats = {
 		"mag_size": 12, "fire_interval": 0.15, "damage": 34.0, "range": 120.0, "spread_deg": 0.8,
 		"ads_spread_deg": 0.15, "reload_time": 2.08, "reload_commit": 1.55, "ammo": "ammo_9mm",
-		"impulse": 6.0, "recoil_pitch_deg": 3.4, "recoil_yaw_deg": 0.9, "ads_fov": 55.0, "smoke": 0.5,
+		"impulse": 6.0, "recoil_pitch_deg": 3.4, "recoil_yaw_deg": 0.9, "ads_fov": 55.0, "smoke": 0.1,
 	}
 	print("pistol grip_offset ", d.grip_offset)
 	print("pistol support_offset ", d.support_offset)
@@ -231,7 +231,7 @@ func _rifle(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	d.stats = {
 		"mag_size": 30, "fire_interval": 0.092, "damage": 30.0, "range": 300.0, "spread_deg": 1.4,
 		"ads_spread_deg": 0.06, "reload_time": 2.6, "reload_commit": 1.9, "ammo": "ammo_556",
-		"impulse": 7.0, "recoil_pitch_deg": 1.35, "recoil_yaw_deg": 0.55, "ads_fov": 52.0, "smoke": 0.7, "shell": "556",
+		"impulse": 7.0, "recoil_pitch_deg": 1.35, "recoil_yaw_deg": 0.55, "ads_fov": 52.0, "smoke": 0.14, "shell": "556",
 	}
 	print("rifle grip_offset ", d.grip_offset)
 	print("rifle support_offset ", d.support_offset)
@@ -315,7 +315,7 @@ func _shotgun(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 		"impulse": 3.0, "recoil_pitch_deg": 14.0, "recoil_yaw_deg": 3.0, "ads_fov": 58.0,
 		"reload_mode": "shell", "reload_start": 0.35, "shell_time": 0.55, "reload_end": 0.3,
 		# A big kick: the pump waits for the gun to come back down.
-		"pump_delay": 0.42, "pump_time": 0.46, "kick": 5.0, "shell": "12g", "smoke": 1.8,
+		"pump_delay": 0.42, "pump_time": 0.46, "kick": 5.0, "shell": "12g", "smoke": 1.26,
 	}
 	ResourceSaver.save(d, SHOTGUN + "shotgun_item.tres")
 	print("saved shotgun item; grip ", grip, " aim offset ", aim_offset)

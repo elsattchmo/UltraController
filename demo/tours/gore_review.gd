@@ -38,6 +38,12 @@ func _build() -> void:
 	steps.append({"t": 0.45, "slot": 3, "buttons": F.B_SECONDARY})
 	for k in 10:
 		steps.append({"t": 0.04, "slot": 3, "buttons": F.B_SECONDARY, "shot": "eject_%d" % k})
+	# A shotgun to the head, 3 m: it bursts.
+	steps.append({"call": _head_target, "t": 1.6, "slot": 3, "buttons": F.B_SECONDARY})
+	steps.append({"call": func() -> void: _set_view(5), "t": 0.05, "slot": 3, "buttons": F.B_SECONDARY | F.B_PRIMARY, "shot": "head_0"})
+	for k in 8:
+		steps.append({"t": 0.06, "slot": 3, "buttons": F.B_SECONDARY, "shot": "head_%d" % (k + 1)})
+	steps.append({"t": 1.5, "slot": 3, "shot": "head_after"})
 
 
 func _place_dummy() -> void:
@@ -47,6 +53,24 @@ func _place_dummy() -> void:
 	(p.character.input_source as BotInputSource).set_steps([{"ticks": 100000}])
 	_dummy = p.character
 	_track = true
+
+
+var _aim_head := false
+
+
+func _head_target() -> void:
+	var c: UltraCharacter = main.player
+	var fwd := Vector3(-sin(c.state.body_yaw), 0, -cos(c.state.body_yaw))
+	var right := Vector3(cos(c.state.body_yaw), 0, -sin(c.state.body_yaw))
+	var p := UltraNet.spawn_bot("Dummy2", Transform3D(Basis(Vector3.UP, c.state.body_yaw + PI), c.state.pos + fwd * 3.0 + right * 1.5))
+	(p.character.input_source as BotInputSource).set_steps([{"ticks": 100000}])
+	_dummy = p.character
+	_track = true
+	_aim_head = true
+	_view = 0
+	_cam.current = false
+	for n in main.find_children("*", "UltraCameraRig", true, false):
+		(n as UltraCameraRig).camera.current = true
 
 
 func _cut_arm() -> void:
@@ -79,7 +103,7 @@ func _process(delta: float) -> void:
 	var c: UltraCharacter = main.player
 	if _track and _dummy:
 		var rig: UltraCameraRig = main.find_children("*", "UltraCameraRig", true, false)[0]
-		var to := _dummy.state.pos + Vector3.UP * 1.25 - rig.global_position
+		var to := _dummy.state.pos + Vector3.UP * (1.62 if _aim_head else 1.25) - rig.global_position
 		_bot.live_yaw = atan2(-to.x, -to.z)
 		_bot.live_pitch = asin(to.normalized().y)
 	if _cam == null or _view == 0:
@@ -102,6 +126,10 @@ func _process(delta: float) -> void:
 				var m := eq.muzzle_transform().origin
 				_cam.global_position = m + right * 1.4 + Vector3.UP * 0.25 - fwd * 0.4
 				_cam.look_at(m + fwd * 0.3)
+		5:
+			var p := _dummy.visual_root.global_position + Vector3.UP * 1.3
+			_cam.global_position = p + right * 3.2 + Vector3.UP * 0.4 + fwd * 1.2
+			_cam.look_at(p + fwd * 0.6)
 		4:
 			if eq and eq.held_node:
 				var e := eq.eject_transform().origin

@@ -26,6 +26,9 @@ var severable := 0b1111111101
 ## a cut chain - an arm off at the shoulder bleeds as the upper arm). An arm off: dead in
 ## ~25 s; a leg off at the hip: ~18 s.
 @export var bleed_rate := PackedFloat32Array([0.0, 0.0, 4.0, 3.0, 4.0, 3.0, 5.5, 3.5, 5.5, 3.5])
+## A crippled region (still on) seeps: hp/s each - a slow bleed (one crippled limb takes
+## ~6 minutes to kill you; a medkit's 50 hp buys a few more).
+@export var cripple_bleed_rate := 0.25
 
 @export_group("Injuries")
 ## Ground speed with a hurt / crippled leg (worst leg).

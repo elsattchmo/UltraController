@@ -337,8 +337,19 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   bone: blood stays on the body). `wound()` = entry spray + exit spatter + body splats;
   UltraBodyFX pumps stumps with the heart (weaker as hp drops), drips, pools under anyone lying
   in it and under a body shot dead.
-- Gun smoke: muzzle puff per shot (`UltraEffects.smoke`, stat `smoke` 0.5 pistol .. 1.8
-  shotgun) and barrel wisps while hot (`EquipmentVisual._heat`). GPUParticles3D: CPUParticles3D
+- Crippled regions (limb hp 0, still on) seep `cripple_bleed_rate` (0.25 hp/s each) and drip.
+  Bleeding is taken in whole 0.1 hp steps as `rate * tick / 6` crosses them (exact at any rate;
+  hp is quantized to 0.1 every tick).
+- Gibs come from the body AND head meshes (the head is its own mesh). Buckshot / blast through
+  the head (`sever` event carries the hit kind) bursts it: `spawn_gib(head, dir, 9, 7.0)` splits
+  its triangles into chunks round its middle (Fibonacci directions), each with a flesh blob,
+  thrown out with a red mist. MAX_GIBS 32.
+- A TickPlatform coming down on someone not riding it shoves them out from under it
+  (`UltraMotor._out_from_under_platforms`): the elevator used to press a player standing in its
+  shaft through the floor (the flaky `net platform` case: the server spawned the player while
+  the elevator was up).
+- Gun smoke: muzzle puff per shot (`UltraEffects.smoke`, stat `smoke` 0.1 pistol, 0.14 rifle,
+  1.26 shotgun; it scales amount and thickness) and barrel wisps while hot (`EquipmentVisual._heat`). GPUParticles3D: CPUParticles3D
   with a colour ramp drew its newest particle as an opaque black quad.
 - Spent cases: `UltraEffects.SHELLS` by stat `shell` (9mm / 556 / 12g red hull, brass head),
   thrown toward `EquipmentVisual.eject_side()` = the side the M_EjectPort marker is on (they went

@@ -600,7 +600,7 @@ func _on_item_event(kind: StringName, _data: Dictionary) -> void:
 		if pumps():
 			_pump_t = 0.0
 			_pump_ejected = false
-		_heat = minf(_heat + (float(def.stat("smoke", 0.6)) if def else 0.6) * 0.45, 2.0)
+		_heat = minf(_heat + (float(def.stat("smoke", 0.6)) if def else 0.6) * 0.6, 2.0)
 
 
 # ---------------------------------------------------------------- barrel smoke

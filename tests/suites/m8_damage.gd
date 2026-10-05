@@ -501,3 +501,41 @@ func test_bleed_out() -> void:
 	info("bled out after another %.1f s" % (n / 60.0))
 	check(t.state.state == Id.DEAD and t.state.hp <= 0.0, "bleeds to death")
 	check(n / 60.0 > 10.0, "not at once (%.1f s)" % (n / 60.0))
+
+
+## A crippled limb (still on) seeps slowly: `cripple_bleed_rate` hp/s.
+func test_crippled_seeps() -> void:
+	var t := dummy(Vector3(-24, 0.05, -70))
+	await ticks(10)
+	hurt(t, R.THIGH_L, t.damage_profile.region_hp[R.THIGH_L] + 1.0)
+	await ticks(2)
+	check(UltraLimbs.status(t.state, R.THIGH_L) == S.CRIPPLED and t.state.severed == 0, "thigh crippled, still on")
+	var hp0 := t.state.hp
+	await ticks(600)
+	var lost := hp0 - t.state.hp
+	var rate := t.damage_profile.cripple_bleed_rate
+	info("crippled thigh: lost %.1f hp in 10 s (rate %.2f hp/s)" % [lost, rate])
+	check(absf(lost - rate * 10.0) < 0.3, "seeps at %.2f hp/s (lost %.1f in 10 s)" % [rate, lost])
+
+
+## Buckshot through the head: the head bursts - several chunks fly, not one whole head.
+func test_shotgun_head_bursts() -> void:
+	var t := dummy(Vector3(-24, 0.05, -70))
+	await ticks(10)
+	var before := get_tree().get_nodes_in_group(&"ultra_gib").size()
+	var d := UltraCombat.DamageInfo.new()
+	d.amount = 120.0
+	d.region = R.HEAD
+	d.kind = &"buckshot"
+	d.dir = Vector3.FORWARD
+	d.point = capsule_mid(t, R.HEAD)
+	t.apply_damage(d)
+	await ticks(5)
+	var gibs := get_tree().get_nodes_in_group(&"ultra_gib")
+	var pieces := gibs.size() - before
+	var spread := 0.0
+	for g: Node in gibs:
+		spread = maxf(spread, (g as Node3D).global_position.distance_to(d.point))
+	info("head blown off by buckshot: %d pieces, flying %.2f m out after 5 ticks" % [pieces, spread])
+	check((t.state.severed >> R.HEAD) & 1 == 1 and t.state.state == Id.DEAD, "head off, dead")
+	check(pieces >= 5, "it bursts into pieces (%d)" % pieces)

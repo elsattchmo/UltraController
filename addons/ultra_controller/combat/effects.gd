@@ -311,10 +311,14 @@ func smoke_particles(amount: int, life: float, peak_alpha: float, size: float, g
 
 
 ## A puff of gun smoke at the muzzle `at`, blown out along the barrel then rising and
-## spreading; `strength` 0.5 (pistol) .. 2 (shotgun).
+## spreading; `strength` 0.1 (pistol, a wisp) .. 1.26 (shotgun). It scales how much smoke there
+## is and how thick it is.
 func smoke(at: Transform3D, strength := 1.0) -> void:
-	var life := 1.6 + 0.6 * strength
-	var p := smoke_particles(int(clampf(10 * strength, 4, 30)), life, 0.26, 0.18 * (0.7 + 0.3 * strength), 3.0)
+	if strength <= 0.0:
+		return
+	var life := 1.2 + 0.8 * minf(strength, 1.5)
+	var thick := 0.26 * clampf(strength, 0.25, 1.0)
+	var p := smoke_particles(int(clampf(10 * strength, 2, 30)), life, thick, 0.18 * (0.7 + 0.3 * strength), 3.0)
 	p.one_shot = true
 	p.explosiveness = 0.85
 	var pm := p.process_material as ParticleProcessMaterial

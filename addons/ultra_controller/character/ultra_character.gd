@@ -368,12 +368,14 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	_was_wet = wet
 	if old != state.state:
 		state_changed.emit(old, state.state)
-	# Bleeding out (a limb off): health drains until it's gone. Authority only. In 0.1 s
-	# steps: health is quantized to 0.1 every tick, which would round a per-tick drain away.
-	if is_authority() and state.state != MotorState.Id.DEAD and tick % BLEED_TICKS == 0:
+	# Bleeding (a limb off, or crippled): health drains until it's gone. Authority only.
+	# Health is quantized to 0.1 every tick, which rounds a small per-tick drain away: take
+	# whole tenths, as the drain on the tick clock crosses them (exact over time at any rate).
+	if is_authority() and state.state != MotorState.Id.DEAD:
 		var bleed := UltraInjury.bleed_rate(state, damage_profile)
-		if bleed > 0.0:
-			state.hp = maxf(state.hp - bleed * delta * BLEED_TICKS, 0.0)
+		var tenths := floorf(bleed * tick / 6.0) - floorf(bleed * (tick - 1) / 6.0)
+		if bleed > 0.0 and tenths > 0.0:
+			state.hp = maxf(state.hp - tenths * 0.1, 0.0)
 			if state.hp <= 0.0:
 				var bd := UltraCombat.DamageInfo.new()
 				bd.amount = 0.0
@@ -591,7 +593,7 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 					state.limb_hp[k] = 0
 	UltraNet.world.broadcast(&"hit", [net_id, info.point, info.dir, info.amount, info.attacker_id, r, info.kind], false)
 	if cut != 0:
-		UltraNet.world.broadcast(&"sever", [net_id, cut, info.dir, info.point], true)
+		UltraNet.world.broadcast(&"sever", [net_id, cut, info.dir, info.point, info.kind], true)
 	damaged.emit(info)
 	var legs := (1 << R.THIGH_L) | (1 << R.SHIN_L) | (1 << R.THIGH_R) | (1 << R.SHIN_R)
 	var dead := state.hp <= 0.0 or (cut & (1 << R.HEAD)) != 0 or (dp.limb_damage and state.limb_hp[R.HEAD] == 0)
@@ -619,8 +621,6 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 		state.vel += Vector3(info.shove.x, 0.0, info.shove.z) * 0.7
 
 
-## Bleeding is applied every this many ticks.
-const BLEED_TICKS := 6
 ## A shove (UltraCombat.DamageInfo.shove, m/s) this big knocks you off your feet.
 const SHOVE_KNOCKDOWN := 3.5
 

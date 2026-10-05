@@ -46,6 +46,7 @@ func _ready() -> void:
 	_mm.material_override = _drop_mat
 	_mm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_mm.top_level = true
+	_mm.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF     # (moved every frame)
 	add_child(_mm)
 	for k in 4:
 		_tex.append(_splat_texture(k))

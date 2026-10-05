@@ -57,6 +57,19 @@ func pose_at(tick: int) -> Transform3D:
 			return Transform3D(_origin.basis, _origin.origin + travel * k)
 
 
+## Half the height of its collision shape (box / cylinder), for "is it coming down on us".
+func half_height() -> float:
+	for c in get_children():
+		var cs := c as CollisionShape3D
+		if cs == null or cs.shape == null:
+			continue
+		if cs.shape is BoxShape3D:
+			return (cs.shape as BoxShape3D).size.y * 0.5 + absf(cs.position.y)
+		if cs.shape is CylinderShape3D:
+			return (cs.shape as CylinderShape3D).height * 0.5 + absf(cs.position.y)
+	return 0.2
+
+
 func apply_tick(tick: int) -> void:
 	var xf := pose_at(tick)
 	global_transform = xf

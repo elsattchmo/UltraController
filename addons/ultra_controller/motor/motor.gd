@@ -116,6 +116,7 @@ func step(s: MotorState, input: InputFrame, p_dt: float) -> void:
 	body.global_position = s.pos
 	body.velocity = s.vel
 	_ride_platform(s)
+	_out_from_under_platforms(s)
 	_sample_water(s)
 
 	# Timers shared by every state.
@@ -363,6 +364,47 @@ func _ride_platform(s: MotorState) -> void:
 		s.trav_to = delta * s.trav_to
 		s.trav_point = delta * s.trav_point
 		s.trav_normal = (delta.basis * s.trav_normal).normalized()
+
+
+## A platform that has come down on someone not riding it (an elevator onto a player standing
+## in its shaft) shoves them out from under it, the short way - it used to press them through
+## the floor. A pure physics query on the platform's pose for this tick: client and server agree.
+func _out_from_under_platforms(s: MotorState) -> void:
+	if TickPlatform.all.is_empty():
+		return
+	var space := body.get_world_3d().direct_space_state
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = _capsule
+	q.collision_mask = body.collision_mask
+	q.exclude = [body.get_rid()]
+	q.transform = Transform3D(Basis(), body.global_position + Vector3(0, _capsule.height * 0.5, 0))
+	for hit in space.intersect_shape(q, 4):
+		var tp := hit.collider as TickPlatform
+		if tp == null or tp.platform_id == s.platform_id:
+			continue
+		var pose := tp.pose_at(platform_tick)
+		if pose.origin.y < body.global_position.y + 0.3:
+			continue                     # beside us or under our feet: the slide deals with it
+		# Only a fresh crush: its underside has just come down onto the head. A deep standing
+		# overlap (a client that hasn't synced the platform clock yet sees it somewhere else)
+		# isn't one - shoving then was a 2 m misprediction.
+		var top := body.global_position.y + _capsule.height
+		var under := pose.origin.y - tp.half_height()
+		if top - under > 0.25 or pose.origin.y >= tp.pose_at(platform_tick - 1).origin.y:
+			continue
+		var away := body.global_position - pose.origin
+		away.y = 0.0
+		var dir := away.normalized() if away.length() > 0.01 else Vector3.RIGHT
+		for k in 30:
+			q.transform.origin += dir * 0.1
+			var still := false
+			for h2 in space.intersect_shape(q, 4):
+				if h2.collider == tp:
+					still = true
+			if not still:
+				break
+		body.global_position = Vector3(q.transform.origin.x, body.global_position.y, q.transform.origin.z)
+		return
 
 
 func _update_platform(s: MotorState) -> void:

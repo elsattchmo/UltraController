@@ -59,7 +59,7 @@ stats = {
 "reload_mode": "shell",
 "reload_start": 0.35,
 "shell": "12g",
-"smoke": 1.8,
+"smoke": 1.26,
 "shell_time": 0.55,
 "spread_deg": 0.6
 }
