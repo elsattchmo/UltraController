@@ -57,6 +57,7 @@ func sample(tick: int) -> InputFrame:
 		var r: Variant = driver.call(tick, self)
 		if r is InputFrame:
 			(r as InputFrame).tick = tick
+			(r as InputFrame).aim_from = aim_from
 			live_yaw = r.yaw
 			live_pitch = r.pitch
 			return (r as InputFrame).quantize()
@@ -100,4 +101,5 @@ func sample(tick: int) -> InputFrame:
 	f.yaw = live_yaw
 	f.pitch = live_pitch
 	f.want_slot = want_slot
+	f.aim_from = aim_from
 	return f.quantize()

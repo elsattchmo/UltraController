@@ -72,6 +72,7 @@ var trav_kind: int = 0             ## UltraTraversal.Move
 var breath: float = 20.0           ## seconds of air left
 var teeter: float = 0.0            ## seconds perched on an edge over a drop (loses balance)
 var turn_v: float = 0.0            ## turn-in-place angular velocity (rad/s, eased in and out)
+var gun_low: float = 0.0           ## 0..1 the gun carried low for a sprint (eased, not a step)
 ## Free aim (weapon inertia / sway, UltraActionLayer._free_aim): the gun points along the aim
 ## plus `sway` (x = yaw, y = pitch, radians), a damped spring (`sway_v`, rad/s) that lags turns,
 ## bobs with the gait (`sway_phase`) and takes the recoil. `aim_prev_*` is last tick's aim.
@@ -120,6 +121,7 @@ func copy_from(o: MotorState) -> void:
 	breath = o.breath
 	teeter = o.teeter
 	turn_v = o.turn_v
+	gun_low = o.gun_low
 	sway = o.sway; sway_v = o.sway_v; sway_phase = o.sway_phase
 	aim_prev_yaw = o.aim_prev_yaw; aim_prev_pitch = o.aim_prev_pitch
 
@@ -186,6 +188,7 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_u16(clampi(int(roundf(breath * 100.0)), 0, 65535))
 	buf.put_u8(clampi(int(roundf(teeter * 100.0)), 0, 255))
 	buf.put_16(_q(turn_v, 1000.0))
+	buf.put_u8(clampi(int(roundf(gun_low * 255.0)), 0, 255))
 	buf.put_16(_q(sway.x, 10000.0)); buf.put_16(_q(sway.y, 10000.0))
 	buf.put_16(_q(sway_v.x, 1000.0)); buf.put_16(_q(sway_v.y, 1000.0))
 	buf.put_u16(int(roundf(fposmod(sway_phase, TAU) / TAU * 65536.0)) % 65536)
@@ -242,6 +245,7 @@ func decode(buf: StreamPeerBuffer) -> void:
 	breath = buf.get_u16() / 100.0
 	teeter = buf.get_u8() / 100.0
 	turn_v = buf.get_16() / 1000.0
+	gun_low = buf.get_u8() / 255.0
 	sway = Vector2(buf.get_16() / 10000.0, buf.get_16() / 10000.0)
 	sway_v = Vector2(buf.get_16() / 1000.0, buf.get_16() / 1000.0)
 	sway_phase = buf.get_u16() / 65536.0 * TAU

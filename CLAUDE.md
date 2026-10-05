@@ -203,22 +203,39 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   (`UltraMeshCap`). The FP eye is kept >= 13 cm above / 9 cm ahead of the Neck bone, so
   crouch and sprint look-downs never put the camera inside the shoulders.
 - Animation flow (m1_blend.test_transitions_flow: head/chest/hips acceleration through a course
-  of starts, stops, flips, crouch, turns and rifle changes; was 250-760 m/s^2, now <= ~80):
-  * `InertialBlendModifier` runs twice: `inertial` (first modifier, clip pose) and `settle`
-    (after Look, before ragdoll/dismember: catches the procedural layers). It DETECTS jumps
-    itself (incoming hips/spine/neck/head acceleration spike, or moving faster than 3 m/s /
-    900 deg/s) - trigger() from _process lands a frame before the tree changes the pose, so
-    explicit triggers alone missed every snap. Restart = continue from the extrapolated output
-    at its current velocity, offset decays on a critically damped spring (half-life 0.11 s).
-    Thighs are not detectors (a sprint swings them > 900 deg/s). No detection for the first
-    10 frames (rest pose -> first clip) nor while a turn clip plays (`detect`); `settle.amount`
-    fades to 0 while climbing / hanging / ragdolled (it lifted hands off rungs).
+  of starts, stops, flips, crouch, turns, jumps and rifle changes; was 250-760 m/s^2, now ~20-80):
+  * `InertialBlendModifier` (first modifier): trigger() opens a 4-frame WINDOW in which a jump
+    in the incoming pose is looked for (trigger() from _process lands a frame before the tree
+    changes the pose); never detects on its own - fast motion inside a clip (roll, jump) is
+    real. Restart: offset to where the output was heading, decaying from REST on a critically
+    damped spring (half-life 0.11 s). Giving the offset the old velocity ADDED it to the new
+    clip's motion (legs flung twice as far in a roll) - don't. No end-of-stack smoothing pass:
+    it fought the IK (feet through floors, hands off rungs).
   * Weights that used to follow speed / flags instantly are springs (`_ease_w`, half-life
-    0.09 s): idle<->move mixes (ground/crouch/swim), item and raise/lower weights. Gait
-    position on the blend spaces uses an eased speed (`_ease_speed`); the bladed run->sprint
-    blend (hips square up ~40 deg) is eased too. One-shots use the ease curve.
+    0.09 s): idle<->move mixes, item / raise-lower / stance weights, the TP shouldered pose
+    (`EquipmentVisual._tp_w`, `_tp_ads`). Gait position uses an eased speed (`_ease_speed`);
+    stopping HOLDS the last direction (`_nw_hold`, `_bl_hold`) while the move weight fades.
+    The bladed run->sprint blend is eased from the proper walk/run base point.
+  * Sprint gun lowering is eased in the sim (`MotorState.gun_low`, codec'd): as a step, the
+    free-aim zone snapped the gun (and the arms) down in one tick. The spine aim leaves the
+    sprint lowering to the lowered pose.
+  * Landing depth scales with the impact (`land/depth` Blend2 idle<->Jump_Land): a hop dips a
+    little, a big drop squats (every hop used to sink ~45 cm, at 2.4x speed).
   * TP shouldered gun blends the GUN from where the clip's hand holds it to the shouldered
     pose and keeps both hands at weight 1 on it (switching hand targets snapped the hands).
+- Sprint = Mixamo "Fast Run" (S_Fast, 5.53 m/s; planted toe 0.37 m/s at 6.2). Tried: Standard
+  Sprint (1.2 m/s slip), Two Cycle Sprint (2-stride clip, 0.95-1.3 m/s slip even cut to one
+  stride), Fast/Intent runs. `tours/sprint_review` films the cycle side on.
+- Throwing a carried prop: upper-body one-shot "push" = UAL Push (arms out) held PUSH_HOLD
+  0.3 s then faded; `_upper_lean` folds 85 % of the clip's hip lean into a Spine track (an
+  upper-body layer rides on upright locomotion hips - a whole-body lean lifted the arms
+  overhead; Push had no Spine track at all, rest-constant tracks are dropped at import).
+  Library track paths differ: find bone tracks by subname (`_bone_track`).
+- Aim: `InputFrame.aim_from` (camera position minus the sim eye, mm, <= 5 m; set by the camera
+  rig) - shots start there (`UltraActionLayer.shot_origin`; a camera behind the body starts the
+  ray level with the body), so crosshair, dot and bullet agree at close range / looking down.
+  The HUD dot resolves the ray like a real shot (`UltraCombat.trace`: characters only through
+  a limb - the wide HitVolume put the dot in the air in front of anyone close).
 - Turn in place: the motor turns the body eased (`turn_in_place_rate` 180 deg/s, `_accel` 720,
   `MotorState.turn_v`, codec'd); the anim plays a Mixamo turn clip (roles stand/crouch/aim
   _turn_l/_r: T_StandL90/R90, T_CrouchB_L/R, T_RifleL90/R90) with the Hips' yaw stripped

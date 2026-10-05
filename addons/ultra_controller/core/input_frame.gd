@@ -22,7 +22,7 @@ const B_DODGE := 1 << 14
 const B_GRAB := 1 << 15         ## interact held: grab physically instead of picking up / using
 const B_RESPAWN := 1 << 16      ## ask the server to put this player back at a spawn point
 
-const ENCODED_SIZE := 17
+const ENCODED_SIZE := 23
 
 var tick: int = 0
 var move := Vector2.ZERO        ## x = right, y = forward; length <= 1
@@ -31,6 +31,9 @@ var pitch: float = 0.0          ## absolute aim pitch (radians, + = up)
 var buttons: int = 0
 var target_id: int = 0          ## interaction / grab target net id (0 = none)
 var want_slot: int = 0          ## hotbar slot the player wants in hand (1..9), 0 = empty hands
+## Where the player's camera is, relative to the simulated eye (world axes, metres, <= 5 m):
+## shots start there, so the crosshair, the gun dot and the bullet agree at any range.
+var aim_from := Vector3.ZERO
 
 
 func has(bit: int) -> bool:
@@ -52,7 +55,12 @@ func quantize() -> InputFrame:
 	move = Vector2(roundf(move.x * 127.0) / 127.0, roundf(move.y * 127.0) / 127.0)
 	yaw = _q_yaw(yaw)
 	pitch = roundf(clampf(pitch, -1.55, 1.55) * 20000.0) / 20000.0
+	var a := aim_from.limit_length(AIM_FROM_MAX)
+	aim_from = Vector3(roundf(a.x * 1000.0), roundf(a.y * 1000.0), roundf(a.z * 1000.0)) / 1000.0
 	return self
+
+
+const AIM_FROM_MAX := 5.0
 
 
 static func _q_yaw(y: float) -> float:
@@ -69,6 +77,7 @@ func copy() -> InputFrame:
 	f.buttons = buttons
 	f.target_id = target_id
 	f.want_slot = want_slot
+	f.aim_from = aim_from
 	return f
 
 
@@ -81,7 +90,9 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_u32(buttons)
 	buf.put_u16(target_id)
 	buf.put_u8(want_slot)
-	# 4+1+1+2+2+4+2+1 = ENCODED_SIZE (17) bytes
+	var a := aim_from.limit_length(AIM_FROM_MAX)
+	buf.put_16(int(roundf(a.x * 1000.0))); buf.put_16(int(roundf(a.y * 1000.0))); buf.put_16(int(roundf(a.z * 1000.0)))
+	# 4+1+1+2+2+4+2+1+6 = ENCODED_SIZE (23) bytes
 
 
 static func decode(buf: StreamPeerBuffer) -> InputFrame:
@@ -93,4 +104,5 @@ static func decode(buf: StreamPeerBuffer) -> InputFrame:
 	f.buttons = buf.get_u32()
 	f.target_id = buf.get_u16()
 	f.want_slot = buf.get_u8()
+	f.aim_from = Vector3(buf.get_16(), buf.get_16(), buf.get_16()) / 1000.0
 	return f

@@ -304,6 +304,8 @@ func _process(delta: float) -> void:
 		_down_p = Vector3.INF
 	global_position = fp_pos.lerp(tp_pos, t)
 	camera.global_transform = Transform3D(cam_basis.slerp(rot * Basis(Vector3.BACK, roll), t) if t > 0.0 else cam_basis, global_position)
+	# Shots start where we look from (UltraActionLayer.shot_origin): tell the sim where that is.
+	src.aim_from = global_position - (character.visual_feet + Vector3.UP * (character.state.height - 0.16))
 	var eq := _equipment()
 	var ads := eq.ads if eq else 0.0
 	if eq:

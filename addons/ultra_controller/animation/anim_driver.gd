@@ -26,7 +26,6 @@ var foot_ik: FootIKModifier
 var hand_ik: HandIKModifier
 var weapon_pose: WeaponPoseModifier
 var look: LookModifier
-var settle: InertialBlendModifier
 var skeleton: Skeleton3D
 
 ## Presentation inputs, written by the character every frame.
@@ -131,11 +130,6 @@ func setup(p_player: AnimationPlayer, p_skeleton: Skeleton3D) -> void:
 	look = LookModifier.new()
 	look.name = "Look"
 	skeleton.add_child(look)
-	# Last pass of the stack (before the ragdoll / dismemberment, added later): the procedural
-	# layers (aim, stance, gun pose, IK) can jump too - this one catches those.
-	settle = InertialBlendModifier.new()
-	settle.name = "Settle"
-	skeleton.add_child(settle)
 
 
 func _clip(role: StringName) -> StringName:
@@ -150,6 +144,10 @@ const BRISK_RATE := 1.75
 ## so its bad leg is the left; Injured_Walk_Back the other way round).
 ## Lose_Balance: the stretch where the arms windmill (before the walk-off).
 const TEETER_SEG := Vector2(3.3, 4.4)
+## Throwing a carried prop: the arms-out "Push" pose held briefly - the one-shot's quick fade
+## in from the carry (hands at the chest) is the shove itself; faded out after PUSH_HOLD s.
+const PUSH_HOLD := 0.3
+var _push_t := 0.0
 const LIMP_F_BAD_LEG := "l"
 const LIMP_B_BAD_LEG := "r"
 var _has_limp := false
@@ -396,7 +394,13 @@ func _build() -> AnimationNodeBlendTree:
 	land.add_node("clip", _anim(&"jump_land", false), Vector2(0, 0))
 	land.add_node("speed", AnimationNodeTimeScale.new(), Vector2(200, 0))
 	land.connect_node("speed", 0, "clip")
-	land.connect_node("output", 0, "speed")
+	# How deep the landing squats: a hop barely dips, a big drop goes all the way down (the clip
+	# is a deep squat - every small jump sank the body ~45 cm).
+	land.add_node("stand", _anim(&"idle"), Vector2(200, 150))
+	land.add_node("depth", AnimationNodeBlend2.new(), Vector2(400, 0))
+	land.connect_node("depth", 0, "stand")
+	land.connect_node("depth", 1, "speed")
+	land.connect_node("output", 0, "depth")
 	loco.add_node("land", land, Vector2(600, 0))
 	loco.add_node("land_heavy", _anim_from(&"land_heavy", 0.45), Vector2(600, 200))
 
@@ -554,6 +558,23 @@ func _build() -> AnimationNodeBlendTree:
 	root.connect_node("hit", 0, "upper")
 	root.connect_node("hit", 1, "hit_src")
 	var out_node := "hit"
+	# Throwing a carried prop: a two-handed push from the chest (upper body).
+	if _role_anim(&"push_throw"):
+		var push := AnimationNodeOneShot.new()
+		push.fadein_time = 0.11
+		push.fadeout_time = 0.3
+		push.fadein_curve = _ease_curve()
+		push.fadeout_curve = _ease_curve()
+		push.filter_enabled = true
+		for b in _upper_body_bones():
+			push.set_filter_path(NodePath("%GeneralSkeleton:" + b), true)
+		root.add_node("push", push, Vector2(600, 100))
+		var pa := AnimationNodeAnimation.new()
+		pa.animation = _upper_lean(_clip(&"push_throw"), 0.85)
+		root.add_node("push_src", pa, Vector2(450, 250))
+		root.connect_node("push", 0, out_node)
+		root.connect_node("push", 1, "push_src")
+		out_node = "push"
 	if _role_anim(&"teeter"):
 		var tb := AnimationNodeBlend2.new()
 		tb.filter_enabled = true
@@ -566,7 +587,7 @@ func _build() -> AnimationNodeBlendTree:
 		ta.loop_mode = Animation.LOOP_LINEAR
 		ta.timeline_length = TEETER_SEG.y - TEETER_SEG.x
 		root.add_node("teeter_src", ta, Vector2(550, 200))
-		root.connect_node("teeter", 0, "hit")
+		root.connect_node("teeter", 0, out_node)
 		root.connect_node("teeter", 1, "teeter_src")
 		out_node = "teeter"
 	root.connect_node("output", 0, out_node)
@@ -621,6 +642,10 @@ func _process(delta: float) -> void:
 	var speed := local_v.length()
 	_drive_state(speed)
 	_drive_ground(local_v, speed, delta)
+	if _push_t > 0.0:
+		_push_t -= delta
+		if _push_t <= 0.0:
+			tree.set("parameters/push/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
 	_drive_body(delta)
 
 
@@ -810,7 +835,7 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	tree.set(LOCO + "ground/rate/scale", rate)
 	if _eight_way and _neutral:
 		var bladed := _item_w > 0.5 and not is_nan(modifier.item_hips_yaw) and absf(modifier.item_hips_yaw) > BLADED_HIPS
-		_stance_w = move_toward(_stance_w, 1.0 if bladed else 0.0, delta * 3.0)
+		_stance_w = _ease_w(&"stance", 1.0 if bladed else 0.0, delta)
 		var sw := smoothstep(0.0, 1.0, _stance_w)
 		tree.set(LOCO + "ground/stance/blend_amount", sw)
 		tree.set(LOCO + "ground/idle_stance/blend_amount", sw)
@@ -830,7 +855,8 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	# walking speed in a couple of ticks: the legs then cut from one pose to the other).
 	tree.set(LOCO + "ground/mix/blend_amount", _ease_w(&"ground", smoothstep(0.05, 0.45, speed), delta))
 	_drive_turn(moving, delta)
-	tree.set(LOCO + "land/speed/scale", lerpf(2.4, 1.0, clampf((land_impact - 3.0) / 6.0, 0.0, 1.0)))
+	tree.set(LOCO + "land/speed/scale", lerpf(1.5, 1.0, clampf((land_impact - 3.0) / 6.0, 0.0, 1.0)))
+	tree.set(LOCO + "land/depth/blend_amount", lerpf(0.3, 1.0, smoothstep(3.0, 11.0, land_impact)))
 	# Climbing cycles run at the speed you climb (and hold still when you stop).
 	var cr := climb_speed / 0.6
 	tree.set(LOCO + "ladder/rate/scale", climb_speed / _ladder_speed)
@@ -1021,9 +1047,8 @@ func _drive_turn(moving: bool, delta: float) -> void:
 	var amt := float(_turn_dir) * smoothstep(0.0, 1.0, _turn_w)
 	# The turn clip's own quick steps are real motion (played from the body's turn): don't
 	# smooth them as if they were jumps.
-	for m: InertialBlendModifier in [inertial, settle]:
-		if m:
-			m.detect = _turn_w < 0.05
+	if inertial:
+		inertial.detect = _turn_w < 0.05
 	for n: Array in _turn_nodes:
 		tree.set(n[0] + "_turn/blend_amount", amt)
 		if _turn_dir != 0:
@@ -1083,8 +1108,19 @@ func _build_neutral(bs: AnimationNodeBlendSpace2D) -> void:
 
 ## [hips warp, blend point, rate] for the neutral set.
 func _neutral_point(theta: float, speed: float, moving: bool) -> Array:
+	# Stopping: hold the last direction while the move weight eases out (jumping back to the
+	# forward walk snapped the legs round).
 	if not moving:
-		return [0.0, _nw_ring[0], 1.0]
+		return [_nw_hold[0], _nw_hold[1], 1.0] if not _nw_hold.is_empty() else [0.0, _nw_ring[0], 1.0]
+	_nw_hold = _neutral_point_moving(theta, speed)
+	return _nw_hold
+
+
+var _nw_hold := []
+var _bl_hold := []
+
+
+func _neutral_point_moving(theta: float, speed: float) -> Array:
 	var snapped := _snap_dir(theta, _nw_ring, "n")
 	var warp := angle_difference(snapped, theta)
 	var k := 0
@@ -1130,8 +1166,15 @@ func _travel_model(clip: StringName) -> Vector2:
 ## [hips warp, blend point, rate] for the bladed 8-way set: the nearest clip direction (with
 ## hysteresis), hips turned the rest; sprints the same among the sprint clips.
 func _ring_point(theta: float, speed: float, moving: bool) -> Array:
-	if not moving or _bl_walk.is_empty():
-		return [0.0, _bl_walk[0] if not _bl_walk.is_empty() else Vector2.ZERO, 1.0]
+	if _bl_walk.is_empty():
+		return [0.0, Vector2.ZERO, 1.0]
+	if not moving:
+		return [_bl_hold[0], _bl_hold[1], 1.0] if not _bl_hold.is_empty() else [0.0, _bl_walk[0], 1.0]
+	_bl_hold = _ring_point_moving(theta, speed)
+	return _bl_hold
+
+
+func _ring_point_moving(theta: float, speed: float) -> Array:
 	var snapped := _snap_dir(theta, _bl_walk, "b")
 	var warp := angle_difference(snapped, theta)
 	var dir := Vector2(sin(snapped), cos(snapped))
@@ -1144,14 +1187,17 @@ func _ring_point(theta: float, speed: float, moving: bool) -> Array:
 	# Run -> sprint squares the hips up (~40 deg): eased, so it takes a few tenths of a second.
 	var sprinting := not _bl_sprint.is_empty() and speed > r_run * 1.05 and absf(theta) < deg_to_rad(75.0)
 	var kk := _ease_w(&"b_sprint", smoothstep(r_run * 1.05, best.length() * 0.95, speed) if sprinting else 0.0, get_process_delta_time())
+	var base: Array
+	if speed < r_walk:
+		base = [warp, dir * r_walk, maxf(speed / r_walk, 0.45)]
+	else:
+		var sp := minf(speed, r_run)
+		base = [warp, dir * sp, clampf(speed / sp, 1.0, 1.5)]
 	if kk > 0.001:
 		var w8 := clampf(angle_difference(atan2(best.x, best.y), theta), -deg_to_rad(30.0), deg_to_rad(30.0))
-		var c8 := (dir * maxf(r_run, minf(speed, r_run))).lerp(best, kk)
-		return [lerp_angle(warp, w8, kk), c8, clampf(speed / maxf(c8.length(), 0.01), 0.8, 1.4)]
-	if speed < r_walk:
-		return [warp, dir * r_walk, maxf(speed / r_walk, 0.45)]
-	var sp := minf(speed, r_run)
-	return [warp, dir * sp, clampf(speed / sp, 1.0, 1.5)]
+		var c8: Vector2 = (base[1] as Vector2).lerp(best, kk)
+		return [lerp_angle(warp, w8, kk), c8, lerpf(base[2], clampf(speed / maxf(c8.length(), 0.01), 0.8, 1.4), kk)]
+	return base
 
 
 ## The travel direction pulled onto a clip direction of the walk ring: the current clip holds
@@ -1408,10 +1454,6 @@ func _drive_body(delta: float) -> void:
 	var climbing := state in [MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.LEDGE_HANG,
 		MotorState.Id.LEDGE_CLIMB, MotorState.Id.MANTLE, MotorState.Id.ROPE]
 	_climb_look = move_toward(_climb_look, 1.0 if climbing else 0.0, delta * 4.0)
-	# The settle pass (after the IK) would lift hands and feet off rungs / holds while it smooths.
-	if settle:
-		var exact := climbing or state in [MotorState.Id.LEDGE_HANG, MotorState.Id.VAULT, MotorState.Id.RAGDOLL, MotorState.Id.DEAD, MotorState.Id.GET_UP]
-		settle.amount = move_toward(settle.amount, 0.0 if exact else 1.0, delta * 5.0)
 	modifier.spine_aim_scale = lerpf(1.0, 0.15, smoothstep(0.0, 1.0, _climb_look))
 	var pitch_lim := lerpf(1.35, 0.95, _climb_look)
 	modifier.aim_pitch = clampf(aim_pitch, -pitch_lim, pitch_lim) * _aim_w
@@ -1633,6 +1675,49 @@ func _reversed(clip: StringName, from: float, to: float) -> StringName:
 
 
 ## A left/right mirrored copy of a clip, made once and kept in the same library.
+## For an upper-body one-shot: a copy of `clip` whose Spine also carries `share` of the clip's
+## hip lean. (Upper-body layers ride on the locomotion's hips: a clip that leans the whole body
+## - Push leans the hips ~40 deg into the wall - would otherwise lift the arms overhead.)
+func _upper_lean(clip: StringName, share: float) -> StringName:
+	var s := String(clip)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var clip_name := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	if l == null or not l.has_animation(clip_name):
+		return clip
+	var out := "%s_lean%d" % [clip_name, int(share * 100)]
+	if not l.has_animation(out):
+		var a := (l.get_animation(clip_name) as Animation).duplicate(true) as Animation
+		var ht := _bone_track(a, "Hips", Animation.TYPE_ROTATION_3D)
+		var st := _bone_track(a, "Spine", Animation.TYPE_ROTATION_3D)
+		var hb := skeleton.find_bone("Hips")
+		var sb := skeleton.find_bone("Spine")
+		if st < 0 and ht >= 0 and sb >= 0:
+			# (A spine at rest has no track - the import drops rest-constant ones.)
+			st = a.add_track(Animation.TYPE_ROTATION_3D)
+			a.track_set_path(st, NodePath(String(a.track_get_path(ht)).replace(":Hips", ":Spine")))
+			var sr := skeleton.get_bone_rest(sb).basis.get_rotation_quaternion()
+			for k in a.track_get_key_count(ht):
+				a.rotation_track_insert_key(st, a.track_get_key_time(ht, k), sr)
+		if ht >= 0 and st >= 0 and hb >= 0:
+			var rest := skeleton.get_bone_rest(hb).basis.get_rotation_quaternion()
+			for k in a.track_get_key_count(st):
+				var hq: Quaternion = a.rotation_track_interpolate(ht, a.track_get_key_time(st, k))
+				var lean := rest.slerp(hq, share)
+				var sq: Quaternion = a.track_get_key_value(st, k)
+				a.track_set_key_value(st, k, (rest.inverse() * lean * sq).normalized())
+		l.add_animation(out, a)
+	return StringName((lib + "/" if lib != "" else "") + out)
+
+
+## The track animating `bone` (whatever the library spells the skeleton path as).
+static func _bone_track(a: Animation, bone: String, type: int) -> int:
+	for t in a.get_track_count():
+		if a.track_get_type(t) == type and String(a.track_get_path(t).get_concatenated_subnames()) == bone:
+			return t
+	return -1
+
+
 func _mirrored(clip: StringName) -> StringName:
 	var s := String(clip)
 	var lib := s.get_slice("/", 0) if s.contains("/") else ""
@@ -1667,5 +1752,9 @@ func item_event(kind: StringName) -> void:
 			tree.set("parameters/upper_src/reload/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 		&"reload_cancel":
 			tree.set("parameters/upper_src/reload/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
+		&"throw":
+			if tree.get("parameters/push/request") != null:
+				tree.set("parameters/push/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+				_push_t = PUSH_HOLD
 
 

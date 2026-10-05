@@ -121,7 +121,7 @@ func test_turn_in_place() -> void:
 		slips.sort()
 		var med := slips[slips.size() / 2] if not slips.is_empty() else 0.0
 		var p90 := slips[slips.size() * 9 / 10] if not slips.is_empty() else 0.0
-		info("%s: state %s, turned in %.2f s, turn clip weight peak %.2f, planted toe median %.2f m/s p90 %.2f (smoothing restarts %d / %d)" % [spec[0], MotorState.Id.keys()[c.state.state], done_at / 60.0, peak_w, med, p90, c.anim.inertial.jumps, c.anim.settle.jumps])
+		info("%s: state %s, turned in %.2f s, turn clip weight peak %.2f, planted toe median %.2f m/s p90 %.2f (smoothing restarts %d)" % [spec[0], MotorState.Id.keys()[c.state.state], done_at / 60.0, peak_w, med, p90, c.anim.inertial.jumps])
 		check(done_at > 0 and done_at < 90, "%s: turned onto the aim within 1.5 s" % spec[0])
 		check(peak_w > 0.9, "%s: the turn clip played" % spec[0])
 		check(med < 0.15 and p90 < 0.6, "%s: planted feet don't skate round (median %.2f, p90 %.2f)" % [spec[0], med, p90])

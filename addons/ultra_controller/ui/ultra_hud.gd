@@ -222,7 +222,9 @@ func _update_gun_dot(delta: float) -> void:
 		if character.hit_volume:
 			excl.append(character.hit_volume.get_rid())
 		var q := PhysicsRayQueryParameters3D.create(origin, far, UltraCombat.MASK, excl)
-		var hit := space.intersect_ray(q)
+		# Resolved like the shot itself: a character only where a limb is (its wide hit volume
+		# put the dot in the air in front of anyone close).
+		var hit := UltraCombat.trace(space, q, origin, dir)
 		if not hit.is_empty():
 			point = hit.position
 	if cam.is_position_behind(point):

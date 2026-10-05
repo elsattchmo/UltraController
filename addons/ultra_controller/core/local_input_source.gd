@@ -186,6 +186,7 @@ func sample(tick: int) -> InputFrame:
 	f.yaw = live_yaw
 	f.pitch = live_pitch
 	f.want_slot = want_slot
+	f.aim_from = aim_from
 	if target_provider.is_valid():
 		f.target_id = int(target_provider.call())
 	if not enabled:

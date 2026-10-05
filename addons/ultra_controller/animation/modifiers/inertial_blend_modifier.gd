@@ -1,15 +1,17 @@
 @tool
 class_name InertialBlendModifier
 extends SkeletonModifier3D
-## Inertialization: wherever the animation jumps (a state switch, a blend space snapping to
-## another clip, a weight that changes in a frame), the pose on screen carries on where it was
-## heading and settles onto the new animation on a critically damped spring.
-##   * Detects jumps itself - a spike in the incoming pose's acceleration at the hips / spine /
-##     thighs - so it never depends on when the driver asks (calls made in _process often land
-##     a frame before the AnimationTree actually changes the pose). trigger() forces one.
-##   * At a jump the output continues from the pose extrapolated along its last motion, so it
-##     stays continuous in position and speed; the offset to the new pose then decays with zero
-##     initial rate (no lurch as the fade starts, unlike an ease-out curve).
+## Inertialization: when the animation switches (a state change, a blend space snapping to
+## another clip, a turn starting), the pose on screen settles onto the new animation on a
+## critically damped spring instead of cutting.
+##   * trigger() opens a short window (a few frames) in which the jump is looked for in the
+##     incoming pose (acceleration spike at the hips / spine / head): the driver asks in
+##     _process, often a frame before the AnimationTree actually changes the pose. Outside a
+##     window nothing is touched - fast motion inside a clip (a roll, a jump) is real.
+##   * The offset starts from where the output was heading and decays with zero initial rate
+##     (no lurch as the fade starts, unlike an ease-out curve). It must NOT carry the old
+##     velocity as offset velocity: that is added on top of the new clip's own motion and
+##     flung fast-moving limbs (legs in a roll) twice as far.
 ## First modifier in the stack, so it works on the clip pose.
 
 ## Spring half-life (s): how long half the offset takes to fade.
@@ -23,7 +25,8 @@ extends SkeletonModifier3D
 @export_range(0.2, 10.0, 0.1) var jump_speed := 3.0
 @export_range(60.0, 2000.0, 10.0) var jump_turn_speed := 900.0
 
-var _pending := false
+var _window := 0
+const WINDOW := 4                        ## frames after a trigger() in which a jump is smoothed
 var _hips := -1
 var _core := PackedInt32Array()
 var _in1: Array[Quaternion] = []
@@ -36,6 +39,7 @@ var _hout1 := Vector3.ZERO
 var _hout2 := Vector3.ZERO
 var _frames := 0
 const WARMUP := 10
+const MAX_STEP := 0.12                   ## rad: at most this much of the last frame's motion carried on
 var _dt1 := 1.0 / 60.0
 var _off: Array[Vector3] = []           ## per-bone offset rotation (axis * angle) on the clip pose
 var _offv: Array[Vector3] = []
@@ -53,7 +57,7 @@ var reason := ""
 
 
 func trigger() -> void:
-	_pending = true
+	_window = WINDOW
 
 
 func _process_modification_with_delta(delta: float) -> void:
@@ -70,7 +74,7 @@ func _process_modification_with_delta(delta: float) -> void:
 	var h_in := sk.get_bone_pose_position(_hips) if _hips >= 0 else Vector3.ZERO
 	var dt := maxf(delta, 0.0)
 	# (Not while warming up: the first frames go from the rest pose to the first clip.)
-	if _frames >= WARMUP and (_pending or (detect and _jumped(q_in, h_in))):
+	if _frames >= WARMUP and _window > 0 and detect and _jumped(q_in, h_in):
 		# This frame shows exactly where the old motion was heading; the spring takes it from here.
 		_restart(q_in, h_in)
 	elif _active:
@@ -95,7 +99,7 @@ func _process_modification_with_delta(delta: float) -> void:
 			_offv.fill(Vector3.ZERO)
 			_hoff = Vector3.ZERO
 			_hoffv = Vector3.ZERO
-	_pending = false
+	_window = maxi(_window - 1, 0)
 	if _active and amount > 0.001:
 		for b in n:
 			if _off[b] != Vector3.ZERO:
@@ -134,8 +138,8 @@ func _setup(sk: Skeleton3D, n: int) -> void:
 	_active = false
 
 
-## Did the incoming pose jump this frame? Its acceleration spiked, or it moved faster than a
-## body part moves on its own (a blend weight swept across in a couple of frames).
+## Did the incoming pose jump this frame (inside a trigger window)? Its acceleration spiked, or
+## it moved faster than a body part moves on its own.
 func _jumped(q_in: Array[Quaternion], h_in: Vector3) -> bool:
 	var v := h_in - _hin1
 	if (v - (_hin1 - _hin2)).length() > jump_pos or v.length() > jump_speed * maxf(_dt1, 1.0 / 240.0):
@@ -152,18 +156,19 @@ func _jumped(q_in: Array[Quaternion], h_in: Vector3) -> bool:
 	return false
 
 
-## Re-inertialize: the output carries on from where it was heading - its last pose moved on by
-## its last motion - at the speed it had; the offset from the new pose to that then decays.
+## Re-inertialize: this frame shows where the output was heading (its last pose moved on by
+## its last motion, capped); the offset from the new pose to that then decays from rest.
 func _restart(q_in: Array[Quaternion], h_in: Vector3) -> void:
-	var idt := 1.0 / maxf(_dt1, 1e-4)
 	for b in q_in.size():
 		var step := (_out1[b] * _out2[b].inverse()).normalized()
+		if step.get_angle() > MAX_STEP:
+			step = Quaternion.IDENTITY.slerp(step, MAX_STEP / step.get_angle())
 		var pred := (step * _out1[b]).normalized()
 		_off[b] = _to_vec((pred * q_in[b].inverse()).normalized())
-		_offv[b] = _to_vec(step) * idt
+		_offv[b] = Vector3.ZERO
 	if _hips >= 0:
-		_hoff = (_hout1 + (_hout1 - _hout2)) - h_in
-		_hoffv = (_hout1 - _hout2) * idt
+		_hoff = (_hout1 + (_hout1 - _hout2).limit_length(0.03)) - h_in
+		_hoffv = Vector3.ZERO
 	_active = true
 	jumps += 1
 

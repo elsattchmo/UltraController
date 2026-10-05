@@ -9,6 +9,9 @@ var live_yaw: float = 0.0
 var live_pitch: float = 0.0
 ## Presentation state owned by the source (view mode, ADS) that also rides in the frame.
 var view_tp := false
+## The camera's position relative to the simulated eye (set every frame by the camera rig);
+## rides in the frame so shots start where the player looks from.
+var aim_from := Vector3.ZERO
 
 
 func sample(_tick: int) -> InputFrame:
@@ -16,6 +19,7 @@ func sample(_tick: int) -> InputFrame:
 	f.tick = _tick
 	f.yaw = live_yaw
 	f.pitch = live_pitch
+	f.aim_from = aim_from
 	return f.quantize()
 
 

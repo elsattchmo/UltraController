@@ -136,8 +136,10 @@ func gun_ray() -> Dictionary:
 	var src := character.input_source
 	var yaw := src.live_yaw if src else character.last_input.yaw
 	var pitch := src.live_pitch if src else character.last_input.pitch
-	var origin := character.visual_feet + Vector3.UP * (character.state.height - 0.16)
-	return {"origin": origin, "dir": UltraActionLayer.gun_dir(yaw, pitch, sway_now())}
+	var eye := character.visual_feet + Vector3.UP * (character.state.height - 0.16)
+	var dir := UltraActionLayer.gun_dir(yaw, pitch, sway_now())
+	var af := src.aim_from if src else character.last_input.aim_from
+	return {"origin": UltraActionLayer.shot_origin(eye, af, dir), "dir": dir}
 
 
 ## World rotation from the aim onto the gun (free aim), about wherever it is applied.
@@ -159,6 +161,11 @@ func _aim_body() -> void:
 	# (Breathing - a few hundredths of a degree - isn't worth twisting the spine for at this
 	# distance: only what's past a 0.25 deg deadband turns the body.)
 	var sw := sway_now()
+	# The sprint's lowering is the lowered pose's job (aiming the spine down after it too dipped
+	# the body as the sprint ended).
+	var low := smoothstep(0.0, 1.0, character.state.gun_low)
+	if held_def and low > 0.0:
+		sw -= Vector2(deg_to_rad(held_def.sprint_lower_deg.x) * _side, deg_to_rad(held_def.sprint_lower_deg.y)) * low
 	sw -= sw.limit_length(deg_to_rad(0.25))
 	var w := anim.modifier.weapon_aim
 	if w <= 0.0 or held_def == null:
@@ -443,10 +450,15 @@ func _shoulder_gun(fp_target: Transform3D, fp_w: float) -> void:
 	# Third person: weapon up, two working hands, not reloading / sprinting (the clips do those).
 	var up := s.action == UltraActionLayer.Action.READY and _side == 1 and UltraInjury.two_hands(s)
 	wp.from_body = true
-	wp.weight = anim.modifier.weapon_aim if up and anim.modifier else 0.0
+	# Eased: reloading / holstering / lowering used to drop the shouldered pose (hands, stance,
+	# cheek) in a frame.
+	var dt := get_process_delta_time()
+	_tp_w = move_toward(_tp_w, anim.modifier.weapon_aim if up and anim.modifier else 0.0, dt * 2.2)
+	_tp_ads = move_toward(_tp_ads, ads, dt * 2.5)
+	wp.weight = smoothstep(0.0, 1.0, _tp_w)
 	wp.eye_target = Vector3.INF
 	wp.gun_dir = gun_ray().dir
-	wp.ads = ads
+	wp.ads = smoothstep(0.0, 1.0, _tp_ads)
 	# Aiming: the eye a hand's width behind the rear sight, a little above the sight line.
 	wp.eye_in_gun = UltraPoseSampler.marker(held_node, "M_RearSight").origin + Vector3(0.0, 0.03, 0.11)
 	wp.grip_inv = grip().affine_inverse()
@@ -470,6 +482,8 @@ func _support_under(gun: Transform3D) -> Transform3D:
 
 
 var _left_reach := 0.0
+var _tp_w := 0.0
+var _tp_ads := 0.0
 
 
 ## Slide a left-hand target along `dir` (at most `max_slide` m) until the left arm can reach it.

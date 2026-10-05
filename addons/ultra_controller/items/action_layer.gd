@@ -153,7 +153,15 @@ static func aim_ray(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDe
 	var right := dir.cross(Vector3.UP).normalized()
 	var up := right.cross(dir).normalized()
 	dir = (dir + (right * cos(a) + up * sin(a)) * tan(r)).normalized()
-	return {"origin": eye, "dir": dir, "seq": s.fire_seq}
+	return {"origin": shot_origin(eye, i.aim_from, dir), "dir": dir, "seq": s.fire_seq}
+
+
+## Shots start where the player's camera is (the eye + the frame's aim_from): crosshair, gun
+## dot and bullet then agree however close the target. A camera behind the body (third
+## person) starts the ray level with the body, so nothing between the camera and us is hit.
+static func shot_origin(eye: Vector3, aim_from: Vector3, dir: Vector3) -> Vector3:
+	var from := eye + aim_from
+	return from + dir * maxf((eye - from).dot(dir), 0.0)
 
 
 ## Where the gun points: the aim turned by the free-aim offset (x = yaw, y = pitch).
@@ -185,6 +193,7 @@ static func _free_aim(c: UltraCharacter, s: MotorState, i: InputFrame, def: Item
 	if not armed:
 		s.sway = Vector2.ZERO
 		s.sway_v = Vector2.ZERO
+		s.gun_low = 0.0
 		return
 	# A snap of the aim (spawn, teleport, respawn) isn't a turn.
 	if absf(dyaw) > 0.5 or absf(dpitch) > 0.5:
@@ -210,9 +219,13 @@ static func _free_aim(c: UltraCharacter, s: MotorState, i: InputFrame, def: Item
 	var target := Vector2(sin(ph) * amp * 0.8, (0.5 - absf(cos(ph))) * amp * 0.7)
 	if speed < 0.1:
 		target = Vector2(sin(ph * 0.5) * amp * 0.5, sin(ph) * amp)      # slow breathing figure
-	if sprinting:
+	# Carried low for a sprint - eased in and out (as a step the free-aim zone snapped the gun,
+	# and the arms with it, down in a single tick).
+	s.gun_low = move_toward(s.gun_low, 1.0 if sprinting else 0.0, dt * 4.0)
+	if s.gun_low > 0.0:
 		var side := -1.0 if UltraInjury.weapon_hand(s) == -1 else 1.0
-		target += Vector2(deg_to_rad(def.sprint_lower_deg.x) * side, deg_to_rad(def.sprint_lower_deg.y))
+		var k := smoothstep(0.0, 1.0, s.gun_low)
+		target += Vector2(deg_to_rad(def.sprint_lower_deg.x) * side, deg_to_rad(def.sprint_lower_deg.y)) * k
 	# Inertia: the gun doesn't follow all of this tick's turn straight away.
 	var lag := def.sway_inertia * (calm if ads else 1.0) * clampf(shaky, 1.0, 2.0)
 	s.sway -= Vector2(dyaw, dpitch) * lag

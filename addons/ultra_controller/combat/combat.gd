@@ -47,6 +47,12 @@ static func hitscan(shooter: UltraCharacter, origin: Vector3, dir: Vector3, def:
 	return hit
 
 
+## The shot's ray resolved like a real shot (characters only through a limb) - for the HUD's
+## gun dot (no lag compensation: the local view).
+static func trace(space: PhysicsDirectSpaceState3D, q: PhysicsRayQueryParameters3D, origin: Vector3, dir: Vector3) -> Dictionary:
+	return _cast(space, q, origin, dir)
+
+
 ## A ray that knows bodies aren't capsules: a character's capsule only counts if the ray also
 ## passes through one of its limbs (checked where the character *was*, under lag compensation);
 ## otherwise the shot carries on past it.

@@ -435,3 +435,30 @@ func test_tp_gun_up_faces_the_aim() -> void:
 	var off := rad_to_deg(absf(angle_difference(c.state.body_yaw, deg_to_rad(150.0))))
 	info("TP rifle up, view swung 150 deg: body %.1f deg off the aim, action %d" % [off, c.state.action])
 	check(off < 10.0, "the body came round with the gun (%.1f deg off)" % off)
+
+
+## Looking down at the ground close by (and at ADS): the dot stays on the crosshair - shots
+## start where the camera is (InputFrame.aim_from), so there's no parallax at short range.
+func test_gun_dot_close_range() -> void:
+	UltraItems.give(c, &"rifle")
+	var rig := UltraCameraRig.new()
+	add_child(rig)
+	rig.attach(c)
+	rig.camera.current = true
+	var hud := UltraHUD.new()
+	hud.character = c
+	add_child(hud)
+	var sl := _slot(&"rifle")
+	var res := []
+	for spec: Array in [["looking down 60", 0, -1.05], ["ADS down 45", InputFrame.B_SECONDARY, -0.8], ["level", 0, 0.0]]:
+		await _run([{"ticks": 90, "slot": sl, "pitch": spec[2], "yaw": 0.0, "buttons": spec[1]}])
+		await get_tree().process_frame
+		var cam := rig.camera
+		var fwd := -cam.global_basis.z
+		var off := rad_to_deg(cam.project_ray_normal(hud.dot_pos).angle_to(fwd))
+		var gun := rad_to_deg(c.state.sway.length())
+		res.append("%s: dot %.2f deg off the crosshair (gun sway %.2f)" % [spec[0], off, gun])
+		check(hud.dot_visible and off < gun + 0.6, "%s: the dot sits on the crosshair (%.2f deg)" % [spec[0], off])
+	info(", ".join(res))
+	hud.queue_free()
+	rig.queue_free()
