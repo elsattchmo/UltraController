@@ -196,7 +196,8 @@ func _on_player_added(p: NetPlayer) -> void:
 		menu = null
 
 
-## Playground loadout: a pistol (slot 1), the carbine (slot 2), the shotgun (slot 3) and ammo (the server
+## Playground loadout: a pistol (slot 1), the carbine (2), the shotgun (3), a bat (4), a machete
+## (5) and ammo (the server
 ## grants it; owners get it replicated).
 func _give_starting_kit(c: UltraCharacter) -> void:
 	if args.has("no-kit"):
@@ -205,6 +206,9 @@ func _give_starting_kit(c: UltraCharacter) -> void:
 	UltraItems.give(c, &"rifle", 1)
 	if ItemDB.get_def(&"shotgun"):
 		UltraItems.give(c, &"shotgun", 1)
+	for mw: StringName in [&"bat", &"machete"]:
+		if ItemDB.get_def(mw):
+			UltraItems.give(c, mw, 1)
 	UltraItems.give(c, &"ammo_9mm", 36)
 	UltraItems.give(c, &"ammo_556", 90)
 	if ItemDB.get_def(&"ammo_12g"):

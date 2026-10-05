@@ -60,6 +60,16 @@ static func get_course(name: String) -> Array:
 				out.append({"ticks": 30, "slot": 1}.merged(aim))
 			out.append({"ticks": 300, "slot": 1}.merged(aim))
 			return out
+		"butt":
+			# From the dummy-yard marker: rifle up, walk up to Dummy B, stock to the head (a
+			# knockout every client must see), then two more strikes at the air.
+			var aim := {"yaw": PI, "pitch": 0.0}
+			var out := [{"ticks": 60, "slot": 2}.merged(aim), {"ticks": 600, "slot": 2, "to": Vector3(19.0, 0, 40.8), "radius": 0.15}.merged(aim), {"ticks": 30, "slot": 2}.merged(aim)]
+			for i in 3:
+				out.append({"ticks": 2, "slot": 2, "tap": InputFrame.B_MELEE}.merged(aim))
+				out.append({"ticks": 50, "slot": 2}.merged(aim))
+			out.append({"ticks": 300, "slot": 2}.merged(aim))
+			return out
 		"swim":
 			# Walk into the deep end, swim, dive, come up, swim in circles (water under lag).
 			return [

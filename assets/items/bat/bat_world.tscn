@@ -1,0 +1,17 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/items/world_item.gd" id="1_f3nfg"]
+[ext_resource type="PackedScene" path="res://assets/items/bat/bat.glb" id="2_6dl7u"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_513x1"]
+size = Vector3(0.08, 0.8, 0.08)
+
+[node name="Bat" type="RigidBody3D" unique_id=533653226]
+script = ExtResource("1_f3nfg")
+item_id = &"bat"
+
+[node name="Visual" type="Node3D" parent="." unique_id=279521093 instance=ExtResource("2_6dl7u")]
+
+[node name="Shape" type="CollisionShape3D" parent="." unique_id=1238440360]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.27, 0)
+shape = SubResource("BoxShape3D_513x1")

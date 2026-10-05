@@ -5,7 +5,7 @@ extends RefCounted
 ## predicted and replayed exactly like movement. Authority-only side effects (hitscan damage,
 ## inventory changes) go through `character.authority`; presentation goes out as events.
 
-enum Action { NONE, EQUIPPING, READY, RELOADING, HOLSTERING, USING }
+enum Action { NONE, EQUIPPING, READY, RELOADING, HOLSTERING, USING, MELEE }
 
 ## States that need both hands: the item in hand is stowed while they last.
 const TWO_HANDED: Array[int] = [MotorState.Id.MANTLE, MotorState.Id.VAULT, MotorState.Id.LEDGE_HANG,
@@ -63,10 +63,14 @@ static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, rep
 		Action.READY:
 			if want_uid != s.held_uid:
 				_set_action(s, Action.HOLSTERING)
+			elif def and not busy and _melee_start(c, s, i, def, replaying):
+				pass
 			elif def and def.kind == ItemDefinition.Kind.FIREARM:
 				_firearm(c, s, i, def, busy, replaying)
 		Action.RELOADING:
 			_reload(c, s, i, def, busy, replaying)
+		Action.MELEE:
+			_melee(c, s, i, def, busy, replaying)
 
 
 ## Game rule (same on every machine): reloads never run out and never use up reserve ammo.
@@ -78,6 +82,11 @@ static func reserve_of(c: UltraCharacter, ammo_id: StringName) -> int:
 	if infinite_ammo:
 		return 9999
 	return c.inventory.count_of(ammo_id) if c.inventory else 0
+
+
+## The item is up in the hands, ready to use (a strike is part of being ready).
+static func is_up(action: int) -> bool:
+	return action == Action.READY or action == Action.MELEE
 
 
 static func _set_action(s: MotorState, a: int) -> void:
@@ -214,7 +223,7 @@ static func _free_aim(c: UltraCharacter, s: MotorState, i: InputFrame, def: Item
 	s.aim_prev_yaw = i.yaw
 	s.aim_prev_pitch = i.pitch
 	var armed := def != null and def.kind == ItemDefinition.Kind.FIREARM and s.held_uid != 0 \
-			and s.action in [Action.EQUIPPING, Action.READY, Action.RELOADING]
+			and s.action in [Action.EQUIPPING, Action.READY, Action.RELOADING, Action.MELEE]
 	if not armed:
 		s.sway = Vector2.ZERO
 		s.sway_v = Vector2.ZERO
@@ -344,3 +353,83 @@ static func _reload_shells(c: UltraCharacter, s: MotorState, i: InputFrame, def:
 	if done and t >= float(k_now) * each + end_t:
 		_set_action(s, Action.READY)
 		s.fire_cd = maxf(s.fire_cd, 0.1)
+
+
+# ---------------------------------------------------------------- melee
+
+const COMBO_QUEUED := 0x80
+## This swing's blow has been dealt. (action_t is quantized to the millisecond: a "just
+## crossed the hit time" test could step right over it.)
+const COMBO_LANDED := 0x40
+
+
+## A strike with what's in hand: gun-butt (a firearm, the melee button) or a melee weapon's
+## swing (the attack button). Starts Action.MELEE; true if it did.
+static func _melee_start(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDefinition, replaying: bool) -> bool:
+	var go := false
+	if def.kind == ItemDefinition.Kind.FIREARM:
+		go = UltraMotor.pressed_edge(s, i, InputFrame.B_MELEE)
+	elif def.kind == ItemDefinition.Kind.MELEE:
+		go = UltraMotor.pressed_edge(s, i, InputFrame.B_PRIMARY) or UltraMotor.pressed_edge(s, i, InputFrame.B_MELEE)
+	if not go or s.fire_cd > 0.0:
+		return false
+	s.melee_combo = 0
+	_begin_swing(c, s, replaying)
+	return true
+
+
+static func _begin_swing(c: UltraCharacter, s: MotorState, replaying: bool) -> void:
+	_set_action(s, Action.MELEE)
+	s.melee_seq = (s.melee_seq + 1) & 255
+	c.emit_item_event(&"melee", {"combo": s.melee_combo & 0x3F}, replaying)
+
+
+## Swing `k` of the item's combo: {time, hit_from, hit_to, reach, damage, kind, knockback, impulse}.
+## Melee weapons list theirs in stats "melee" (one Dictionary per swing); a firearm without one
+## swings its stock (long guns) or whips (pistols).
+static func melee_swing(def: ItemDefinition, k: int) -> Dictionary:
+	var list: Variant = def.stat("melee", null) if def else null
+	if list is Array and not (list as Array).is_empty():
+		var a := list as Array
+		return a[clampi(k, 0, a.size() - 1)]
+	# Gun-butts. clip / seg / contact are presentation (AnimDriver.play_swing, third person):
+	# Mixamo "Advancing And Punching With Butt Of A Rifle" (a step in, the stock driven forward,
+	# a step back) and "Overhand Strike With Pistol"; contact frames measured.
+	if def and def.equip_slots & ItemDefinition.EquipSlot.BACK:          # a long gun: the stock
+		return {"time": 0.72, "hit_from": 0.45, "hit_to": 0.55, "reach": 1.6, "damage": 20.0, "kind": &"blunt", "knockback": 4.2, "impulse": 14.0,
+			"clip": &"butt_long", "seg": Vector2(0.15, 2.3), "contact": 1.05}
+	return {"time": 0.56, "hit_from": 0.36, "hit_to": 0.44, "reach": 1.35, "damage": 14.0, "kind": &"blunt", "knockback": 3.0, "impulse": 9.0,
+		"clip": &"butt_pistol", "seg": Vector2(0.25, 1.6), "contact": 0.93}
+
+
+static func combo_length(def: ItemDefinition) -> int:
+	var list: Variant = def.stat("melee", null) if def else null
+	return (list as Array).size() if list is Array else 1
+
+
+static func _melee(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDefinition, busy: bool, replaying: bool) -> void:
+	if def == null or busy:
+		s.melee_combo = 0
+		_set_action(s, Action.READY)
+		c.emit_item_event(&"melee_cancel", {}, replaying)
+		return
+	var k := s.melee_combo & 0x3F
+	var sw := melee_swing(def, k)
+	var t := s.action_t
+	# The blow lands as the swing reaches its hit window (once).
+	if t >= float(sw.hit_from) and not (s.melee_combo & COMBO_LANDED):
+		s.melee_combo |= COMBO_LANDED
+		var res := UltraCombat.melee_sweep(c, s, i, sw, c.is_authority() and not replaying)
+		c.emit_item_event(&"melee_hit", res, replaying)
+	# Another press late in the swing chains the next one (melee weapons).
+	if def.kind == ItemDefinition.Kind.MELEE and t > float(sw.time) * 0.45 \
+			and (UltraMotor.pressed_edge(s, i, InputFrame.B_PRIMARY) or UltraMotor.pressed_edge(s, i, InputFrame.B_MELEE)):
+		s.melee_combo |= COMBO_QUEUED
+	if t >= float(sw.time):
+		if s.melee_combo & COMBO_QUEUED and k + 1 < combo_length(def):
+			s.melee_combo = k + 1
+			_begin_swing(c, s, replaying)
+		else:
+			s.melee_combo = 0
+			_set_action(s, Action.READY)
+			s.fire_cd = maxf(s.fire_cd, 0.08)

@@ -200,6 +200,32 @@ func _equipment() -> UltraEquipmentVisual:
 
 ## Where the gun points, on this pane: the shot ray (simulated eye, gun direction) to the first
 ## thing it hits (or its range), projected through this player's camera.
+## Knocked out: the pane goes black fast, stays black, and comes back slowly on waking.
+var _black: ColorRect
+var _black_a := 0.0
+
+
+func _drive_blackout(delta: float) -> void:
+	var out := character.state.has(MotorState.F_UNCONSCIOUS)
+	_black_a = move_toward(_black_a, 1.0 if out else 0.0, delta * (4.0 if out else 0.8))
+	if _black == null and _black_a > 0.0:
+		_black = ColorRect.new()
+		_black.color = Color.BLACK
+		_black.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_black.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_root.add_child(_black)
+	if _black:
+		_black.move_to_front()
+		# Eased: a slow bleed of light back in, then clearing.
+		_black.modulate.a = smoothstep(0.0, 1.0, _black_a)
+		_black.visible = _black_a > 0.001
+
+
+## Blacked out (0..1) - tests and other HUD layers read it.
+func blackout() -> float:
+	return _black_a
+
+
 const EDGE_INSET := 18.0               ## px: an off-screen gun dot is kept this far inside the edge
 
 
@@ -208,7 +234,7 @@ func _update_gun_dot(delta: float) -> void:
 	var def := character.held_def()
 	var eq := _equipment()
 	var armed := def != null and def.kind == ItemDefinition.Kind.FIREARM and eq != null and s.held_uid != 0 \
-			and s.action in [UltraActionLayer.Action.EQUIPPING, UltraActionLayer.Action.READY, UltraActionLayer.Action.RELOADING]
+			and s.action in [UltraActionLayer.Action.EQUIPPING, UltraActionLayer.Action.READY, UltraActionLayer.Action.RELOADING, UltraActionLayer.Action.MELEE]
 	_armed_a = move_toward(_armed_a, 1.0 if armed else 0.0, delta * 8.0)
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
 	dot_visible = false
@@ -249,7 +275,7 @@ func _update_gun_dot(delta: float) -> void:
 		var k := minf(half.x / maxf(absf(d2.x), 0.0001), half.y / maxf(absf(d2.y), 0.0001))
 		dot_pos = c2 + d2 * k
 	dot_visible = true
-	var want := 0.35 if s.action != UltraActionLayer.Action.READY else 1.0
+	var want := 0.35 if not UltraActionLayer.is_up(s.action) else 1.0
 	_dot_a = move_toward(_dot_a, want, delta * 6.0)
 
 
@@ -298,6 +324,7 @@ func _process(delta: float) -> void:
 	_hit_t = maxf(_hit_t - delta, 0.0)
 	_msg_t = maxf(_msg_t - delta, 0.0)
 	_msg.visible = _msg_t > 0.0
+	_drive_blackout(delta)
 	_health.value = s.hp
 	# Bleeding out: the bar pulses (faster the faster it drains).
 	var bleed := UltraInjury.bleed_rate(s, character.damage_profile) if s.state != MotorState.Id.DEAD else 0.0

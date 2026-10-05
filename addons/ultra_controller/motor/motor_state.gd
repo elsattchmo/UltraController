@@ -16,6 +16,7 @@ const F_WAS_GROUNDED := 1 << 2
 const F_SPRINTING := 1 << 3
 const F_ON_PLATFORM := 1 << 4
 const F_HARD_LANDING := 1 << 5
+const F_UNCONSCIOUS := 1 << 6      ## knocked out: limp on the ground until `ko_t` runs out
 
 var pos := Vector3.ZERO
 var vel := Vector3.ZERO
@@ -81,6 +82,13 @@ var sway_v := Vector2.ZERO
 var sway_phase: float = 0.0
 var aim_prev_yaw: float = 0.0
 var aim_prev_pitch: float = 0.0
+## Knockout (RAGDOLL + F_UNCONSCIOUS): seconds left out cold, and knockouts taken (they get longer).
+var ko_t: float = 0.0
+var ko_count: int = 0
+## Melee (UltraActionLayer, Action.MELEE): swing number in the combo, and +1 per swing (remote
+## clients play it on change, like fire_seq).
+var melee_combo: int = 0
+var melee_seq: int = 0
 
 
 func has(f: int) -> bool:
@@ -124,6 +132,8 @@ func copy_from(o: MotorState) -> void:
 	gun_low = o.gun_low
 	sway = o.sway; sway_v = o.sway_v; sway_phase = o.sway_phase
 	aim_prev_yaw = o.aim_prev_yaw; aim_prev_pitch = o.aim_prev_pitch
+	ko_t = o.ko_t; ko_count = o.ko_count
+	melee_combo = o.melee_combo; melee_seq = o.melee_seq
 
 
 ## Error metric used by reconciliation (metres, plus a penalty for discrete mismatches).
@@ -135,6 +145,9 @@ func diff(o: MotorState) -> float:
 		d += 1.0
 	if severed != o.severed or limb_hp != o.limb_hp:
 		d += 1.0
+	if melee_seq != o.melee_seq or melee_combo != o.melee_combo or (flags & F_UNCONSCIOUS) != (o.flags & F_UNCONSCIOUS):
+		d += 1.0
+	d += absf(ko_t - o.ko_t) * 0.1
 	d += absf(action_t - o.action_t) + absf(hp - o.hp) * 0.01
 	d += (sway - o.sway).length() * 2.0 + (sway_v - o.sway_v).length() * 0.05
 	return d
@@ -194,6 +207,10 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_u16(int(roundf(fposmod(sway_phase, TAU) / TAU * 65536.0)) % 65536)
 	buf.put_u16(int(roundf(fposmod(aim_prev_yaw, TAU) / TAU * 65536.0)) % 65536)
 	buf.put_16(int(roundf(clampf(aim_prev_pitch, -1.55, 1.55) * 20000.0)))
+	buf.put_u16(clampi(int(roundf(ko_t * 1000.0)), 0, 65535))
+	buf.put_u8(clampi(ko_count, 0, 255))
+	buf.put_u8(clampi(melee_combo, 0, 255))
+	buf.put_u8(melee_seq & 255)
 
 
 func decode(buf: StreamPeerBuffer) -> void:
@@ -251,6 +268,10 @@ func decode(buf: StreamPeerBuffer) -> void:
 	sway_phase = buf.get_u16() / 65536.0 * TAU
 	aim_prev_yaw = buf.get_u16() / 65536.0 * TAU
 	aim_prev_pitch = buf.get_16() / 20000.0
+	ko_t = buf.get_u16() / 1000.0
+	ko_count = buf.get_u8()
+	melee_combo = buf.get_u8()
+	melee_seq = buf.get_u8()
 
 
 ## Round-trip through the codec, so a predicting client and the server hold the same bits.

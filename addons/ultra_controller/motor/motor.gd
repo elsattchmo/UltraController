@@ -231,7 +231,7 @@ func update_body_yaw(s: MotorState, input: InputFrame, moving: bool) -> void:
 
 ## A firearm in hand, up and ready (it faces the aim, and turns in place sooner).
 static func gun_up(s: MotorState) -> bool:
-	if s.held_uid == 0 or s.action != UltraActionLayer.Action.READY:
+	if s.held_uid == 0 or not UltraActionLayer.is_up(s.action):
 		return false
 	var d := ItemDB.by_index(s.equipped)
 	return d != null and d.kind == ItemDefinition.Kind.FIREARM

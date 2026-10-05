@@ -69,6 +69,9 @@ func watch(c: UltraCharacter) -> void:
 
 
 func _on_item(c: UltraCharacter, kind: StringName, data: Dictionary) -> void:
+	if kind == &"melee_hit":
+		_melee_fx(c, data)
+		return
 	if kind != &"fire":
 		return
 	var eq := c.get_node_or_null("Equipment") as UltraEquipmentVisual
@@ -103,6 +106,22 @@ func _on_item(c: UltraCharacter, kind: StringName, data: Dictionary) -> void:
 				sparks(hit.position, hit.normal)
 	else:
 		tracer(muzzle.origin, muzzle.origin + (-muzzle.basis.z) * 40.0)
+
+
+## A melee blow landing (as this machine saw it): a club leaves a little blood, a blade a lot;
+## a wall or a prop takes sparks / a knock.
+func _melee_fx(c: UltraCharacter, data: Dictionary) -> void:
+	if not data.get("hit", false):
+		return
+	var who := UltraNet.world.character(int(data.get("character", 0))) if int(data.get("character", 0)) != 0 else null
+	var def := c.held_def()
+	var sw := UltraActionLayer.melee_swing(def, c.state.melee_combo & 0x3F) if def else {}
+	var blade := StringName(sw.get("kind", &"blunt")) == &"blade"
+	if who:
+		if who.damage_profile.blood_on() and blood_fx:
+			blood_fx.wound(who, data.point, data.dir, 30.0 if blade else 8.0)
+	else:
+		sparks(data.point, data.normal)
 
 
 func _shot_fx(c: UltraCharacter, muzzle: Transform3D, origin: Vector3, dir: Vector3, reach: float) -> void:
@@ -182,6 +201,9 @@ func shell(at: Transform3D, out: Vector3, kind := "9mm") -> void:
 		kind = "9mm"
 	var spec: Array = SHELLS[kind]
 	var rb: RigidBody3D
+	for k in range(_shells.size() - 1, -1, -1):
+		if not is_instance_valid(_shells[k]):
+			_shells.remove_at(k)
 	if _shells.size() >= MAX_SHELLS:
 		rb = _shells.pop_front()
 		rb.queue_free()
@@ -239,10 +261,7 @@ func shell(at: Transform3D, out: Vector3, kind := "9mm") -> void:
 	var big := kind == "12g"
 	rb.linear_velocity = gun_right * randf_range(2.0, 2.8) * (1.15 if big else 1.0) + gun_up * randf_range(1.6, 2.4) + gun_back * randf_range(0.2, 0.6)
 	rb.angular_velocity = gun_up * randf_range(-14, -8) + gun_right * randf_range(-6, 6)
-	get_tree().create_timer(12.0).timeout.connect(func() -> void:
-		if is_instance_valid(rb):
-			_shells.erase(rb)
-			rb.queue_free())
+	get_tree().create_timer(12.0).timeout.connect(rb.queue_free)
 
 
 # ---------------------------------------------------------------- smoke
@@ -436,6 +455,18 @@ func splash(at: Vector3, strength := 1.0) -> void:
 
 ## Blood where a shot struck (`dir`: the shot, if known - spatter flies out behind; `who`: the
 ## body, which gets splashed round the wound).
+## Splinters and dust (something wooden smashing), `size` m across.
+func dust(at: Vector3, size := 0.6) -> void:
+	if _dust_mat == null:
+		_dust_mat = StandardMaterial3D.new()
+		_dust_mat.albedo_color = Color(0.55, 0.42, 0.28)
+		_dust_mat.roughness = 1.0
+	_burst(at, Vector3.UP, _dust_mat, int(clampf(size * 30.0, 10, 40)), 3.0, 0.8)
+
+
+var _dust_mat: StandardMaterial3D
+
+
 func blood(at: Vector3, normal: Vector3, who: UltraCharacter = null, dir := Vector3.ZERO, amount := 20.0) -> void:
 	if blood_fx == null:
 		_burst(at, normal, _blood_mat, 14, 1.8, 0.45)

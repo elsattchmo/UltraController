@@ -6,6 +6,8 @@ extends InputSource
 ## A step is a Dictionary: {"ticks": int, "move": Vector2, "yaw": float (abs, optional),
 ## "yaw_rate": float (rad/s, optional), "pitch": float, "buttons": int, "tap": int}
 ## "tap" bits are held for the first tick only (edge presses like jump).
+## "to": Vector3 (+ "radius", default 1) walks there and ends the step on arrival ("ticks" is
+## then the limit).
 
 signal finished
 
@@ -86,8 +88,17 @@ func sample(tick: int) -> InputFrame:
 			f.target_id = _nearest_interactable()
 		if _step_tick == 0:
 			f.buttons |= int(s.get("tap", 0))
+		var arrived := false
+		if s.has("to") and body != null:
+			var to: Vector3 = (s["to"] as Vector3) - body.global_position
+			to.y = 0.0
+			arrived = to.length() <= float(s.get("radius", 1.0))
+			if not arrived:
+				f.move = Vector2(0, 1)
+				if not s.has("yaw"):
+					live_yaw = atan2(-to.x, -to.z)
 		_step_tick += 1
-		if _step_tick >= int(s.get("ticks", 1)):
+		if _step_tick >= int(s.get("ticks", 1)) or arrived:
 			_step += 1
 			_step_tick = 0
 			if _step >= steps.size():

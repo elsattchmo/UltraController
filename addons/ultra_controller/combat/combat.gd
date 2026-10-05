@@ -124,6 +124,62 @@ static func hitscan_pellets(shooter: UltraCharacter, origin: Vector3, dirs: Arra
 	return hits
 
 
+## A melee blow (swing `sw` from UltraActionLayer.melee_swing): rays fanned across the aim from
+## the eye out to the swing's reach, characters through their limbs (lag-compensated like a
+## shot). The nearest thing struck takes it - a character first if any ray finds one. With
+## `deal`, the authority deals the damage (and the shove: a club rocks you, a big one floors
+## you; to the head it knocks you out); without, it's the predicting client's look (effects).
+## Returns {hit, point, normal, dir, character (net id or 0), region}.
+static func melee_sweep(c: UltraCharacter, s: MotorState, i: InputFrame, sw: Dictionary, deal: bool) -> Dictionary:
+	var space := c.get_world_3d().direct_space_state
+	var excl: Array[RID] = [c.get_rid()]
+	if c.hit_volume:
+		excl.append(c.hit_volume.get_rid())
+	var eye := s.pos + Vector3.UP * (s.height - 0.16)
+	var reach := float(sw.reach)
+	var probe := func() -> Dictionary:
+		var best := {}
+		var best_d := INF
+		for off_deg: float in [0.0, -14.0, 14.0, -28.0, 28.0]:
+			var d := UltraActionLayer.gun_dir(i.yaw + deg_to_rad(off_deg), i.pitch, Vector2.ZERO)
+			var q := PhysicsRayQueryParameters3D.create(eye, eye + d * reach, MASK, excl.duplicate())
+			var h := _cast(space, q, eye, d)
+			if h.is_empty():
+				continue
+			h["dir"] = d
+			var who := UltraCharacter.of_collider(h.collider)
+			# Characters first, then the ray nearest the aim (aim at an arm, hit the arm).
+			var dist := eye.distance_to(h.position) * 0.01 + absf(off_deg) - (1000.0 if who else 0.0)
+			if dist < best_d:
+				best_d = dist
+				best = h
+		return best
+	var hit: Dictionary = UltraNet.world.rewound(c, probe) if deal else probe.call()
+	if hit.is_empty():
+		return {"hit": false}
+	var dir: Vector3 = hit.dir
+	var who := UltraCharacter.of_collider(hit.collider)
+	var out := {"hit": true, "point": hit.position, "normal": hit.normal, "dir": dir, "character": who.net_id if who else 0, "region": int(hit.get("region", -1))}
+	if deal:
+		var info := DamageInfo.new()
+		info.amount = float(sw.damage)
+		info.kind = StringName(sw.kind)
+		info.dir = dir
+		info.point = hit.position
+		info.normal = hit.normal
+		info.attacker_id = c.net_id
+		info.collider = hit.collider
+		info.region = int(hit.get("region", -1))
+		var flat := Vector3(dir.x, 0.0, dir.z).normalized()
+		if who:
+			info.shove = flat * float(sw.knockback)
+		apply(info, float(sw.get("impulse", 8.0)))
+		var sp: NetPlayer = UltraNet.players.get(c.net_id)
+		var peer := sp.peer_id if sp and sp.role == NetPlayer.Role.AUTHORITY_REMOTE else 0
+		UltraNet.world.broadcast(&"impact", [info.point, info.normal, &"flesh" if who else &"surface", c.net_id], false, peer)
+	return out
+
+
 ## The shot's ray resolved like a real shot (characters only through a limb) - for the HUD's
 ## gun dot (no lag compensation: the local view).
 static func trace(space: PhysicsDirectSpaceState3D, q: PhysicsRayQueryParameters3D, origin: Vector3, dir: Vector3) -> Dictionary:
@@ -168,6 +224,10 @@ static func apply(info: DamageInfo, impulse: float) -> void:
 		(target as UltraCharacter).apply_damage(info)
 	elif target and target.has_method("take_damage"):
 		target.call("take_damage", info)
+	else:
+		var br := UltraBreakable.find_on(col)
+		if br:
+			br.take_damage(info)
 	if col is RigidBody3D and not (col as RigidBody3D).freeze:
 		var rb := col as RigidBody3D
 		rb.apply_impulse(info.dir * impulse, info.point - rb.global_position)

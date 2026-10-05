@@ -1,0 +1,67 @@
+[gd_resource type="Resource" script_class="ItemDefinition" format=3]
+
+[ext_resource type="PackedScene" path="res://assets/items/machete/machete.glb" id="1_bcbsq"]
+[ext_resource type="Script" path="res://addons/ultra_controller/items/item_definition.gd" id="2_unljk"]
+[ext_resource type="PackedScene" path="res://assets/items/machete/machete_world.tscn" id="3_xsm48"]
+
+[resource]
+script = ExtResource("2_unljk")
+id = &"machete"
+display_name = "Machete"
+description = "A long blade. It cuts - limbs come off."
+kind = 7
+mass = 0.7
+world_scene = ExtResource("3_xsm48")
+equip_scene = ExtResource("1_bcbsq")
+equip_slots = 9
+grip_offset = Transform3D(-0.024715513, 0.9996868, -0.003909141, 0.93723285, 0.024531543, 0.34783986, 0.34782672, 0.004933417, -0.93754584, 0.0075475574, 0.08934392, 0.028544307)
+holster_offset = Transform3D(0.886815, -0.40083727, -0.22997542, -0.45094135, -0.8594078, -0.24097757, -0.10104983, 0.31740797, -0.94288975, 0.04391706, 0.15809143, -0.2208066)
+holster_bone = &"UpperChest"
+anim_roles = {
+"aim": "machete_idle",
+"idle": "machete_idle"
+}
+anim_clips = {
+"machete_combo": ["mixamo/M_SwordCombo"],
+"machete_idle": ["Idle_Sword"]
+}
+equip_time = 0.45
+stats = {
+"melee": [{
+"clip": &"machete_combo",
+"contact": 1.02,
+"damage": 30.0,
+"hit_from": 0.41000000000000003,
+"hit_to": 0.51,
+"impulse": 15.0,
+"kind": &"blade",
+"knockback": 1.2,
+"reach": 1.55,
+"seg": Vector2(0.45, 1.8),
+"time": 0.68
+}, {
+"clip": &"machete_combo",
+"contact": 2.0,
+"damage": 30.0,
+"hit_from": 0.43,
+"hit_to": 0.53,
+"impulse": 15.0,
+"kind": &"blade",
+"knockback": 1.2,
+"reach": 1.55,
+"seg": Vector2(1.4, 2.75),
+"time": 0.71
+}, {
+"clip": &"machete_combo",
+"contact": 3.0,
+"damage": 44.0,
+"hit_from": 0.43,
+"hit_to": 0.53,
+"impulse": 22.0,
+"kind": &"blade",
+"knockback": 2.0,
+"reach": 1.7,
+"seg": Vector2(2.4, 4.05),
+"time": 0.93
+}]
+}

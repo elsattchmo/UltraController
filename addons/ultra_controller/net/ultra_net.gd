@@ -438,6 +438,8 @@ func _build_snapshot(peer: int) -> PackedByteArray:
 			b.put_u16(s.equipped)
 			b.put_u8(s.action)
 			b.put_u8(s.fire_seq)
+			b.put_u8(s.melee_seq & 255)
+			b.put_u8(s.melee_combo & 0x3F)
 			b.put_u16(clampi(int(s.hp * 10.0), 0, 65535))
 			b.put_u32(UltraLimbs.pack(s))
 	world.write_props(b)
@@ -568,6 +570,8 @@ func _s2c_snapshot(bytes: PackedByteArray) -> void:
 			var s := MotorState.new()
 			s.decode(b)
 			if p:
+				if p.synced_from < 0:
+					p.synced_from = p.client_tick
 				p.server_tick_offset = ack_server - ack
 				_reconcile(p, ack, depth, s)
 		else:
@@ -588,6 +592,8 @@ func _s2c_snapshot(bytes: PackedByteArray) -> void:
 			e.equipped = b.get_u16()
 			e.action = b.get_u8()
 			e.fire_seq = b.get_u8()
+			e.melee_seq = b.get_u8()
+			e.melee_combo = b.get_u8()
 			e.hp = b.get_u16() / 10.0
 			e.limbs = b.get_u32()
 			if p:
@@ -633,6 +639,11 @@ func _reconcile(p: NetPlayer, ack: int, depth: int, server: MotorState) -> void:
 		p.state_history[t % NetPlayer.HISTORY] = c.state.copy()
 	TickPlatform.set_all(p.client_tick - 1 + p.server_tick_offset)
 	var jump := before - c.state.pos
+	# Ticks predicted before the first ack ran on a guessed server clock (a moving platform
+	# anywhere): the first rebase onto the server is a sync, not a misprediction.
+	if ack < p.synced_from:
+		c.visual_offset += jump if jump.length() < 1.0 else Vector3.ZERO
+		return
 	p.corrections += 1
 	p.last_correction = jump.length()
 	p.correction_sum += jump.length()

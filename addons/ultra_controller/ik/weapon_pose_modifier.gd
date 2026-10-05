@@ -26,6 +26,8 @@ var eye_in_gun := Vector3.ZERO
 var grip_inv := Transform3D()
 var support := Transform3D()
 var hand_ik: HandIKModifier
+## Third person: an extra offset of the gun in its own frame (a gun-butt strike).
+var extra := Transform3D.IDENTITY
 var _hands_set := false
 var _rhand := -1
 ## Shoulder pocket from the UpperArm joint (metres; x toward the centre, y up, z forward).
@@ -158,7 +160,7 @@ func _gun_to_body(sk: Skeleton3D, sc: float, w: float) -> void:
 	if _rhand < 0:
 		_rhand = sk.find_bone("RightHand" if side == 1 else "LeftHand")
 	var clip_gun := (xf * sk.get_bone_global_pose(_rhand)) * grip_inv.affine_inverse()
-	gun = clip_gun.orthonormalized().interpolate_with(Transform3D(b, p - b * stock), w)
+	gun = clip_gun.orthonormalized().interpolate_with(Transform3D(b, p - b * stock), w) * extra
 	last_gap = 0.0
 	if ads > 0.0:
 		var inv := xf.affine_inverse()

@@ -135,6 +135,9 @@ fi
 if [ "$SUITE" = "m8" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
 	SERVER_ARGS="--spawn=dummies" CLIENT_BOT="limbshot" net_case limbs 1 --lag=120 --jitter=20 --loss=2 --expect-shots=4 --expect-remote-injury
 fi
+if [ "$SUITE" = "m9" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
+	SERVER_ARGS="--spawn=dummies" CLIENT_BOT="butt" net_case melee 1 --lag=120 --jitter=20 --loss=2 --max-correction=0.35 --expect-melee-hits=1 --expect-remote-ko
+fi
 if [ "$SUITE" = "m4" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
 	SERVER_ARGS="--spawn=range" CLIENT_BOT="gunplay" net_case gunplay 1 --lag=120 --jitter=20 --loss=2 --expect-shots=12
 fi

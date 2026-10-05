@@ -165,7 +165,7 @@ func _build_visual() -> void:
 		tv.name = "TraversalHands"
 		add_child(tv)
 		tv.setup(self)
-		item_event.connect(func(kind: StringName, _d: Dictionary) -> void: anim.item_event(kind))
+		item_event.connect(func(kind: StringName, d: Dictionary) -> void: anim.item_event(kind, d))
 		body_fx = UltraBodyFX.new()
 		body_fx.name = "BodyFX"
 		add_child(body_fx)
@@ -414,6 +414,11 @@ func apply_remote(pos: Vector3, vel: Vector3, yaw: float, e: Dictionary) -> void
 		if def == null:
 			pass
 	state.fire_seq = seq
+	var mseq: int = e.get("melee_seq", state.melee_seq)
+	if mseq != state.melee_seq:
+		state.melee_combo = int(e.get("melee_combo", 0))
+		item_event.emit(&"melee", {"remote": true, "combo": state.melee_combo})
+	state.melee_seq = mseq
 	state.equipped = int(e.get("equipped", 0))
 	state.action = int(e.get("action", 0))
 	state.hp = float(e.get("hp", state.hp))
@@ -494,7 +499,7 @@ func _process(delta: float) -> void:
 		anim.held_def = UltraGrab.CARRY_DEF if state.held_id != 0 else held_def()
 		anim.item_action = state.action
 		var sprinting := state.has(MotorState.F_SPRINTING) and Vector2(state.vel.x, state.vel.z).length() > profile.jog_speed * 0.9
-		anim.item_ready_pose = 0.0 if sprinting or state.action != UltraActionLayer.Action.READY else 1.0
+		anim.item_ready_pose = 0.0 if sprinting or not UltraActionLayer.is_up(state.action) else 1.0
 		if state.held_id != 0:
 			anim.item_action = UltraActionLayer.Action.READY
 			anim.item_ready_pose = 1.0
@@ -575,11 +580,16 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 		r = R.TORSO
 	info.region = r
 	var mult := dp.region_mult[r] if dp.limb_damage else 1.0
+	# Blunt trauma to the head knocks you out more than it kills you: its own (milder)
+	# multiplier, and the skull takes half.
+	var blunt_head := info.kind in BLUNT and r == R.HEAD and dp.limb_damage
+	if blunt_head:
+		mult = dp.blunt_head_mult
 	state.hp = maxf(state.hp - info.amount * mult, 0.0)
 	var cut := 0
 	if dp.limb_damage and info.kind != &"drown" and info.kind != &"bleed":
 		var max_hp := dp.region_hp[r]
-		var after := state.limb_hp[r] / 100.0 * max_hp - info.amount
+		var after := state.limb_hp[r] / 100.0 * max_hp - info.amount * (0.5 if blunt_head else 1.0)
 		state.limb_hp[r] = clampi(int(ceil(after / max_hp * 100.0)), 0, 100)
 		var sharp := info.kind == &"blast" or info.kind == &"blade"
 		# Buckshot (the pellets that struck this region, summed) tears off a limb it destroys.
@@ -610,6 +620,12 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 		state.vel = motor.body.velocity
 		UltraNet.world.broadcast(&"died", [net_id, info.attacker_id], true)
 		died.emit()
+	elif _knocks_out(info, r, mult):
+		var push2 := info.dir * clampf(info.amount * 0.06, 1.5, 6.0)
+		if info.shove.length() > push2.length():
+			push2 = info.shove.limit_length(8.0)
+		var over := info.amount * mult - (dp.ko_head if r == R.HEAD else dp.ko_heavy)
+		knock_out(push2 + Vector3.UP * 1.0, clampf(5.0 + over * 0.25, 5.0, 12.0))
 	elif info.amount * mult >= dp.knockdown_damage or info.kind == &"blast" or (cut & legs) != 0 \
 			or info.shove.length() >= SHOVE_KNOCKDOWN:
 		var push := info.dir * clampf(info.amount * 0.08, 2.0, 8.0)
@@ -619,6 +635,35 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 	elif info.shove != Vector3.ZERO and state.state not in [MotorState.Id.RAGDOLL, MotorState.Id.GET_UP]:
 		# A lighter blast: rocked back a step.
 		state.vel += Vector3(info.shove.x, 0.0, info.shove.z) * 0.7
+
+
+## Blunt trauma (a club, a gun-butt, a thrown prop) to the head past `ko_head`, or a heavy
+## blunt blow anywhere past `ko_heavy` (after the region multiplier), knocks you out cold.
+func _knocks_out(info: UltraCombat.DamageInfo, r: int, mult: float) -> bool:
+	if not (info.kind in BLUNT):
+		return false
+	var dp := damage_profile
+	return (r == UltraLimbs.Region.HEAD and info.amount >= dp.ko_head) or info.amount * mult >= dp.ko_heavy
+
+
+const BLUNT: Array[StringName] = [&"blunt", &"impact"]
+
+
+## Authority: knocked out - limp for `secs` (longer for each knockout taken: x1.5, x2, x2.5),
+## then you come round and get up. Already down: out cold where you lie.
+func knock_out(push: Vector3, secs: float) -> void:
+	if not is_authority() or state.state == MotorState.Id.DEAD:
+		return
+	if state.state == MotorState.Id.GET_UP:
+		state.trav_from = push                  # (back down: no get-up half way)
+		motor.change_state(state, last_input, MotorState.Id.RAGDOLL)
+		state.vel = motor.body.velocity
+	if state.state != MotorState.Id.RAGDOLL:
+		knock_down(push)
+	secs *= 1.0 + 0.5 * mini(state.ko_count, 3)
+	state.ko_count += 1
+	state.set_flag(MotorState.F_UNCONSCIOUS, true)
+	state.ko_t = maxf(state.ko_t, secs)
 
 
 ## A shove (UltraCombat.DamageInfo.shove, m/s) this big knocks you off your feet.
@@ -643,6 +688,9 @@ func respawn(at: Transform3D) -> void:
 	state.breath = profile.breath_time
 	state.state = MotorState.Id.IDLE
 	state.action = 0
+	state.set_flag(MotorState.F_UNCONSCIOUS, false)
+	state.ko_t = 0.0
+	state.ko_count = 0
 	teleport(at.origin, at.basis.get_euler().y)
 
 
@@ -665,7 +713,7 @@ func held_def() -> ItemDefinition:
 
 ## Does the body turn to face the aim right now? (first person, or TP aiming modes)
 func faces_aim() -> bool:
-	if state.equipped != 0 and state.action == UltraActionLayer.Action.READY:
+	if state.equipped != 0 and UltraActionLayer.is_up(state.action):
 		return true                       # holding a weapon ready: always face the aim
 	if not last_input.has(InputFrame.B_VIEW_TP):
 		return true

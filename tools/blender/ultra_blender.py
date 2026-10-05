@@ -11,6 +11,8 @@ Commands
   mirror           Make a left/right mirrored copy of an action (--action X --out Y).
   make-pistol      Rebuild the pistol model + markers and export assets/items/pistol/pistol.glb
                    (the same build the project shipped with).
+  make-bat         Build the baseball bat (GripBody up the handle).
+  make-machete     Build the machete (edge forward).
   make-shotgun     Build the 12-gauge pump-action (the fore-end is its own "Pump" node).
   make-rifle       Build the carbine (two-handed: pistol grip, handguard, stock, iron sights,
                    magazine, markers) and export assets/items/rifle/rifle.glb.
@@ -468,6 +470,51 @@ def cmd_make_shotgun(args):
     k.export(root, args.out or os.path.join(PROJECT, "assets", "items", "shotgun", "shotgun.glb"))
 
 
+def cmd_make_bat(args):
+    """A wooden baseball bat. Held at the handle near the knob: the GripBody empty (Godot +Y =
+    authored +Z, up the handle) sits in the fist, the bat runs on up out of the top of it."""
+    fresh_scene()
+    coll = bpy.data.collections.new("Bat")
+    bpy.context.scene.collection.children.link(coll)
+    k = _Kit(coll)
+    wood = k.mat("Bat_Wood", (0.62, 0.44, 0.25), 0.0, 0.5)
+    tape = k.mat("Bat_Tape", (0.06, 0.06, 0.07), 0.0, 0.85)
+    root = bpy.data.objects.new("Bat", None)
+    coll.objects.link(root)
+    k.cyl("Knob", 0.024, 0.02, (0, 0, -0.105), (0, 0, 0), wood, root, segments=14)
+    k.cyl("Handle", 0.0155, 0.20, (0, 0, -0.0), (0, 0, 0), tape, root, segments=12)
+    k.cyl("Taper", 0.0175, 0.24, (0, 0, 0.22), (0, 0, 0), wood, root, segments=14, r2=0.031)
+    k.cyl("Barrel", 0.031, 0.30, (0, 0, 0.49), (0, 0, 0), wood, root, segments=16, r2=0.035)
+    k.cyl("EndCap", 0.035, 0.03, (0, 0, 0.655), (0, 0, 0), wood, root, segments=16, r2=0.028)
+    for name, loc in (("GripBody", (0, 0, -0.03)), ("M_Tip", (0, 0, 0.66)), ("M_Grip", (0, 0, 0)), ("M_Holster", (0, 0, 0.25))):
+        k.empty(name, loc, root)
+    k.export(root, args.out or os.path.join(PROJECT, "assets", "items", "bat", "bat.glb"))
+
+
+def cmd_make_machete(args):
+    """A machete: a long single-edged blade on a riveted handle. GripBody up the handle (+Z
+    authored), the edge facing forward (-Y authored = Godot -Z, along the index finger)."""
+    fresh_scene()
+    coll = bpy.data.collections.new("Machete")
+    bpy.context.scene.collection.children.link(coll)
+    k = _Kit(coll)
+    steel = k.mat("Machete_Steel", (0.62, 0.63, 0.65), 0.9, 0.3)
+    edge = k.mat("Machete_Edge", (0.85, 0.86, 0.88), 1.0, 0.15)
+    grip = k.mat("Machete_Grip", (0.08, 0.06, 0.05), 0.0, 0.7)
+    root = bpy.data.objects.new("Machete", None)
+    coll.objects.link(root)
+    k.box("Handle", (0.024, 0.034, 0.13), (0, 0.004, 0.0), material=grip, parent=root, bevel=0.005)
+    k.box("Guard", (0.012, 0.05, 0.012), (0, -0.004, 0.072), material=steel, parent=root, bevel=0.002)
+    k.box("Blade", (0.004, 0.048, 0.40), (0, -0.002, 0.28), material=steel, parent=root, bevel=0.0, taper=(1.0, 1.0))
+    k.box("Edge", (0.0025, 0.008, 0.40), (0, -0.028, 0.28), material=edge, parent=root, bevel=0.0)
+    k.box("Tip", (0.004, 0.05, 0.06), (0, -0.008, 0.505), rot=(25, 0, 0), material=steel, parent=root, bevel=0.0)
+    for zz in (-0.035, 0.02):
+        k.cyl("Rivet%d" % int(zz * 1000), 0.004, 0.026, (0, 0.004, zz), (0, 90, 0), steel, root, segments=8)
+    for name, loc in (("GripBody", (0, 0.004, -0.0)), ("M_Tip", (0, -0.01, 0.53)), ("M_Grip", (0, 0, 0)), ("M_Holster", (0, 0, 0.2))):
+        k.empty(name, loc, root)
+    k.export(root, args.out or os.path.join(PROJECT, "assets", "items", "machete", "machete.glb"))
+
+
 def main():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     p = argparse.ArgumentParser(prog="ultra_blender")
@@ -487,12 +534,16 @@ def main():
     mr.add_argument("--out")
     ms = sub.add_parser("make-shotgun")
     ms.add_argument("--out")
+    mb = sub.add_parser("make-bat")
+    mb.add_argument("--out")
+    mm = sub.add_parser("make-machete")
+    mm.add_argument("--out")
     mt = sub.add_parser("mixamo-test")
     mt.add_argument("--action")
     mt.add_argument("--name")
     a = p.parse_args(argv)
     {"make-edit": cmd_make_edit, "export-actions": cmd_export_actions, "mirror": cmd_mirror,
-     "make-pistol": cmd_make_pistol, "make-rifle": cmd_make_rifle, "make-shotgun": cmd_make_shotgun, "mixamo-test": cmd_mixamo_test}[a.cmd](a)
+     "make-pistol": cmd_make_pistol, "make-rifle": cmd_make_rifle, "make-shotgun": cmd_make_shotgun, "make-bat": cmd_make_bat, "make-machete": cmd_make_machete, "mixamo-test": cmd_mixamo_test}[a.cmd](a)
 
 
 if __name__ == "__main__":

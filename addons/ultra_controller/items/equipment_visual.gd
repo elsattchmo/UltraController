@@ -112,6 +112,15 @@ func _process(delta: float) -> void:
 		if mag:
 			var hide := s.action == UltraActionLayer.Action.RELOADING and s.action_t > 0.35 and s.action_t < float(held_def.stat("reload_commit", 1.5)) - 0.2
 			mag.visible = not hide
+	if _melee_t >= 0.0:
+		# Simulated characters show the strike where the sim has it (the event can arrive a
+		# frame late); remote ones run their own clock from the event.
+		if s.action == UltraActionLayer.Action.MELEE and character.net_role != UltraCharacter.ROLE_INTERPOLATED:
+			_melee_t = maxf(_melee_t, s.action_t)
+		else:
+			_melee_t += delta
+		if _melee_sw.is_empty() or _melee_t > float(_melee_sw.time):
+			_melee_t = -1.0
 	_drive_hands(delta)
 	_drive_held_prop(delta)
 	_aim_body()
@@ -170,10 +179,15 @@ func _aim_body() -> void:
 	# The aiming clip's own barrel direction, taken back out (a bladed rifle clip points the
 	# gun off to one side of the chest).
 	var clip := held_def.aim_clip_offset * Vector2(float(_side), 1.0)
+	# A gun-butt strike swings the shoulders into it (a pistol whips down).
+	var mk := melee_amount()
+	if mk != 0.0 and held_def.kind == ItemDefinition.Kind.FIREARM:
+		anim.modifier.aim_yaw += 0.35 * mk * w
+		anim.modifier.aim_pitch -= (0.55 if not _long_gun() else 0.15) * mk * w
 	# Whatever is left - the clip's barrel under this stance, crouch, the legs' warp (the
 	# pistol pointed ~20 deg left of the aim) - is measured off the gun as last drawn and
 	# trimmed out by turning the spine a little further each frame.
-	if held_node and w > 0.3 and character.state.action == UltraActionLayer.Action.READY:
+	if held_node and w > 0.3 and character.state.action == UltraActionLayer.Action.READY:   # (not mid-strike)
 		var barrel := -held_node.global_basis.z.normalized()
 		var want := gun_ray().dir as Vector3
 		var err := Vector2(angle_difference(atan2(-want.x, -want.z), atan2(-barrel.x, -barrel.z)),
@@ -372,7 +386,7 @@ func _drive_hands(delta: float) -> void:
 	if anim == null or anim.hand_ik == null:
 		return
 	var s := character.state
-	var ready := held_node != null and s.action == UltraActionLayer.Action.READY
+	var ready := held_node != null and UltraActionLayer.is_up(s.action)
 	var aiming := ready and character.last_input.has(InputFrame.B_SECONDARY) and held_def and held_def.kind == ItemDefinition.Kind.FIREARM
 	ads = move_toward(ads, 1.0 if aiming else 0.0, delta * 6.0)
 	_recoil.target = Vector3.ZERO
@@ -386,6 +400,7 @@ func _drive_hands(delta: float) -> void:
 	_shell_fp_w = move_toward(_shell_fp_w, 1.0 if shell_fp else 0.0, delta * 4.0)
 	var fp_drive := camera != null and held_node != null and ready and held_def.kind == ItemDefinition.Kind.FIREARM 		and anim.sprint_carry < 0.5          # (sprinting with a rifle the body carries it, as others see it)
 	fp_drive = fp_drive or shell_fp
+	anim.fp_gun = fp_drive
 	_fp_w = move_toward(_fp_w, 1.0 if fp_drive else 0.0, delta * 4.0)
 	if camera and held_node and _fp_w > 0.001:
 		var rear := UltraPoseSampler.marker(held_node, "M_RearSight")
@@ -411,6 +426,8 @@ func _drive_hands(delta: float) -> void:
 		target_gun.origin += target_gun.basis * (_recoil.value as Vector3) * lerpf(1.0, 0.5, e)
 		# Racking the pump jolts the gun back and down a touch.
 		target_gun.origin += target_gun.basis * Vector3(0.0, -0.012, 0.022) * pump_amount()
+		# A gun-butt strike.
+		target_gun = target_gun * melee_offset()
 		# Free aim: turn the gun onto the simulated gun direction - about the rear sight at the
 		# hip, about the eye when aiming (so the sights stay in line with the eye and the dot).
 		var rot := sway_rotation()
@@ -477,16 +494,18 @@ func _shoulder_gun(fp_target: Transform3D, fp_w: float) -> void:
 		wp.eye_target = camera.global_position
 		return
 	# Third person: weapon up, two working hands, not reloading / sprinting (the clips do those).
-	var up := s.action == UltraActionLayer.Action.READY and _side == 1 and UltraInjury.two_hands(s)
+	var up := UltraActionLayer.is_up(s.action) and _side == 1 and UltraInjury.two_hands(s)
 	wp.from_body = true
 	# Eased: reloading / holstering / lowering used to drop the shouldered pose (hands, stance,
 	# cheek) in a frame.
 	var dt := get_process_delta_time()
 	# (A reload lets go quickly - the clip's hands have to get to the magazine.)
-	var reloading := s.action == UltraActionLayer.Action.RELOADING
+	# (So does a strike played from a clip.)
+	var reloading := s.action == UltraActionLayer.Action.RELOADING or anim.swing_w > 0.0
 	_tp_w = move_toward(_tp_w, anim.modifier.weapon_aim if up and anim.modifier else 0.0, dt * (6.0 if reloading else 2.2))
 	_tp_ads = move_toward(_tp_ads, ads, dt * 2.5)
 	wp.weight = smoothstep(0.0, 1.0, _tp_w)
+	wp.extra = melee_offset() if anim.swing_w <= 0.0 else Transform3D.IDENTITY
 	wp.eye_target = Vector3.INF
 	wp.gun_dir = gun_ray().dir
 	wp.ads = smoothstep(0.0, 1.0, _tp_ads)
@@ -589,10 +608,15 @@ func _drive_reload(delta: float) -> void:
 
 func ready_support() -> bool:
 	var s := character.state
-	return s.action == UltraActionLayer.Action.READY and _side == 1 and UltraInjury.two_hands(s) and held_def != null and held_def.two_handed
+	return UltraActionLayer.is_up(s.action) and _side == 1 and UltraInjury.two_hands(s) and held_def != null and held_def.two_handed
 
 
 func _on_item_event(kind: StringName, _data: Dictionary) -> void:
+	if kind == &"melee":
+		_melee_t = 0.0
+		_melee_sw = UltraActionLayer.melee_swing(held_def, int(_data.get("combo", 0)))
+	elif kind == &"melee_cancel":
+		_melee_t = -1.0
 	if kind == &"fire":
 		_slide_kick = 0.045
 		var def := character.held_def()
@@ -753,6 +777,42 @@ func _drive_shells() -> void:
 			_shell_mesh.transform = Transform3D(Basis(Vector3.FORWARD, PI * 0.5), Vector3(0.0, 0.085, 0.025))
 			_set_layers(_shell_mesh)
 		_shell_mesh.visible = true
+
+
+# ---------------------------------------------------------------- gun-butt
+
+var _melee_t := -1.0                  ## s into the strike being shown (-1: none)
+var _melee_sw := {}
+
+
+func _long_gun() -> bool:
+	return held_def != null and held_def.equip_slots & ItemDefinition.EquipSlot.BACK != 0
+
+
+## -0.3..1: where the strike is - drawn back, driven through the blow, recovering.
+func melee_amount() -> float:
+	if _melee_t < 0.0 or _melee_sw.is_empty() or held_def == null or held_def.kind != ItemDefinition.Kind.FIREARM:
+		return 0.0
+	var h: float = _melee_sw.hit_from
+	var T: float = _melee_sw.time
+	var t := _melee_t
+	if t < h * 0.55:
+		return -0.3 * smoothstep(0.0, 1.0, t / (h * 0.55))
+	if t < h:
+		return lerpf(-0.3, 1.0, smoothstep(0.0, 1.0, (t - h * 0.55) / (h * 0.45)))
+	return 1.0 - smoothstep(0.0, 1.0, (t - h) / maxf(T - h, 0.01))
+
+
+## The gun's offset for a gun-butt strike, in its own frame (-Z the barrel): a long gun is
+## driven forward stock-first, swung across; a pistol whips down and forward.
+func melee_offset() -> Transform3D:
+	var k := melee_amount()
+	if k == 0.0:
+		return Transform3D.IDENTITY
+	if _long_gun():
+		var b := Basis(Vector3.UP, -0.85 * k) * Basis(Vector3.BACK, 0.4 * k)
+		return Transform3D(b, Vector3(-0.10 * k, 0.06 * k, -0.36 * k))
+	return Transform3D(Basis(Vector3.RIGHT, -1.0 * k), Vector3(0.0, -0.04 * k, -0.24 * k))
 
 
 ## Held item in first person: same layers as the body so it's never culled.

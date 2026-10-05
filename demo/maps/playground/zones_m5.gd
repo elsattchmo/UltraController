@@ -22,6 +22,7 @@ func build() -> void:
 	_crate_stairs(z)
 	_heavy_gate(z)
 	_seesaw(z)
+	_breakables(z)
 
 
 ## Rigid prop with collision, grab interactable (by mass) and replication.
@@ -212,3 +213,68 @@ func _seesaw(z: Node3D) -> void:
 	m4._world_item(z, "res://assets/items/medkit/medkit_world.tscn", base + Vector3(-6, 3.15, 5))
 	b._label(z, "SEESAW — drop a heavy crate on the high end", base + Vector3(0, 2.4, -1), 44)
 	b._marker("seesaw", z.position + base + Vector3(3, 0.1, -3), 180)
+
+
+## Smash things: a stack of wooden crates (two with something inside), wooden barrels, a row of
+## bottles on a table and a glass window - shoot them, club them, throw things at them, drop
+## them. (UltraBreakable on each; it replicates through the body's NetObject.)
+func _breakables(z: Node3D) -> void:
+	var o := Vector3(6, 0, 13)
+	b._label(z, "BREAKABLES", o + Vector3(0, 3.0, -2.2), 56)
+	b._marker("breakables", z.position + o + Vector3(-1.4, 0.1, -3.2), 180)
+	var wood := Color(0.62, 0.43, 0.22)
+	for row in 2:
+		for col in 3:
+			var rb := prop(z, "WoodCrate%d_%d" % [row, col], "box", Vector3(0.55, 0.55, 0.55), 10.0, o + Vector3(-2.6 + col * 0.58, 0.34 + row * 0.56, 0), wood)
+			var drops := []
+			if row == 0 and col == 1:
+				drops = ["ammo_9mm", 12]
+			elif row == 1 and col == 2:
+				drops = ["medkit", 1]
+			_breakable(rb, UltraBreakable.Kind.WOOD, 75.0, drops)
+	for i in 2:
+		var bar := prop(z, "WoodBarrel%d" % i, "cylinder", Vector3(0.28, 0.85, 0), 18.0, o + Vector3(-0.4 + i * 0.7, 0.5, 0), Color(0.5, 0.33, 0.18))
+		_breakable(bar, UltraBreakable.Kind.WOOD, 95.0, [])
+	# A table of bottles.
+	b._box(z, "BottleTable", Vector3(1.8, 0.06, 0.7), o + Vector3(2.4, 0.82, 0), Vector3.ZERO, b.grid_accent)
+	for leg in [Vector3(-0.8, 0, -0.28), Vector3(0.8, 0, -0.28), Vector3(-0.8, 0, 0.28), Vector3(0.8, 0, 0.28)]:
+		b._box(z, "TableLeg%d" % int(leg.x * 10 + leg.z * 100), Vector3(0.06, 0.8, 0.06), o + Vector3(2.4, 0.4, 0) + leg, Vector3.ZERO, b.grid_accent)
+	var glass := StandardMaterial3D.new()
+	glass.albedo_color = Color(0.25, 0.55, 0.3, 0.7)
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.roughness = 0.05
+	glass.metallic_specular = 0.9
+	for i in 6:
+		var bot := prop(z, "Bottle%d" % i, "cylinder", Vector3(0.04, 0.26, 0), 0.4, o + Vector3(1.75 + i * 0.26, 0.99, 0), Color(0.2, 0.5, 0.25))
+		((bot.get_child(0) as MeshInstance3D)).material_override = glass
+		_breakable(bot, UltraBreakable.Kind.GLASS, 2.0, [], 1.2)
+	# A window: two posts, a lintel and a pane.
+	var w := o + Vector3(5.2, 0, 0)
+	b._box(z, "WindowPostL", Vector3(0.12, 2.2, 0.12), w + Vector3(-0.8, 1.1, 0), Vector3.ZERO, b.grid_accent)
+	b._box(z, "WindowPostR", Vector3(0.12, 2.2, 0.12), w + Vector3(0.8, 1.1, 0), Vector3.ZERO, b.grid_accent)
+	b._box(z, "WindowLintel", Vector3(1.72, 0.12, 0.12), w + Vector3(0, 2.2, 0), Vector3.ZERO, b.grid_accent)
+	b._box(z, "WindowSill", Vector3(1.72, 0.7, 0.12), w + Vector3(0, 0.35, 0), Vector3.ZERO, b.grid_accent)
+	var pane_mat := StandardMaterial3D.new()
+	pane_mat.albedo_color = Color(0.75, 0.88, 1.0, 0.28)
+	pane_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	pane_mat.roughness = 0.03
+	pane_mat.metallic_specular = 1.0
+	var pane: StaticBody3D = b._box(z, "WindowPane", Vector3(1.48, 1.38, 0.02), w + Vector3(0, 1.39, 0), Vector3.ZERO, pane_mat)
+	var no := NetObject.new()
+	no.name = "NetObject"
+	pane.add_child(no)
+	_breakable(pane, UltraBreakable.Kind.GLASS, 3.0, [])
+
+
+func _breakable(body: Node, kind: int, health: float, drops: Array, impact_min := -1.0) -> void:
+	var br := UltraBreakable.new()
+	br.kind = kind
+	br.health = health
+	br.drops = drops
+	br.impact_scale = 1.2
+	if kind == UltraBreakable.Kind.GLASS:
+		br.impact_min = 3.0 if impact_min < 0.0 else impact_min
+		br.impact_scale = 2.0
+		br.impact_dv = 2.5
+	body.add_child(br)
+	b._own(br)

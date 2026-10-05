@@ -28,6 +28,7 @@ anim_roles = {
 "reload": "rifle_reload"
 }
 anim_clips = {
+"butt_long": ["mixamo/M_RiflePunch"],
 "rifle_aim": ["mixamo/Rifle_Idle_Aiming", "Pistol_Aim_Neutral"],
 "rifle_idle": ["mixamo/Rifle_Idle", "Pistol_Idle"],
 "rifle_reload": ["mixamo/Rifle_Reload", "Pistol_Reload"]
@@ -45,7 +46,7 @@ free_aim_deg = 6.0
 sway_amount = 1.35
 ads_sway_mult = 0.3
 recoil_gun_deg = 1.8
-sprint_lower_deg = Vector2(88.9, -13.5)
+sprint_lower_deg = Vector2(66.4, -8.1)
 stats = {
 "ads_fov": 52.0,
 "ads_spread_deg": 0.06,
@@ -58,8 +59,8 @@ stats = {
 "recoil_pitch_deg": 1.35,
 "recoil_yaw_deg": 0.55,
 "reload_commit": 1.9,
+"reload_time": 2.6,
 "shell": "556",
 "smoke": 0.14,
-"reload_time": 2.6,
 "spread_deg": 1.4
 }

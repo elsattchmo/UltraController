@@ -42,11 +42,20 @@ func mark_dirty() -> void:
 
 func net_state() -> Dictionary:
 	var p := get_parent()
-	return p.call("get_net_state") if p.has_method("get_net_state") else {}
+	var d: Dictionary = p.call("get_net_state") if p.has_method("get_net_state") else {}
+	# A breakable body (a "Breakable" child) carries whether it's broken.
+	var br := p.get_node_or_null("Breakable") as UltraBreakable
+	if br:
+		d = d.duplicate()
+		d["broken"] = br.broken
+	return d
 
 
 func apply_state(d: Dictionary) -> void:
 	var p := get_parent()
 	if p.has_method("set_net_state"):
 		p.call("set_net_state", d)
+	var br := p.get_node_or_null("Breakable") as UltraBreakable
+	if br:
+		br.apply_broken(bool(d.get("broken", false)))
 	state_applied.emit()

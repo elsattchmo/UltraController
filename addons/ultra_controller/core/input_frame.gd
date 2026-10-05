@@ -21,6 +21,7 @@ const B_CRAWL := 1 << 13        ## state bit: toggled crawl (double-tap crouch)
 const B_DODGE := 1 << 14
 const B_GRAB := 1 << 15         ## interact held: grab physically instead of picking up / using
 const B_RESPAWN := 1 << 16      ## ask the server to put this player back at a spawn point
+const B_MELEE := 1 << 17        ## strike: a gun-butt with a firearm, a swing with a melee weapon
 
 const ENCODED_SIZE := 23
 

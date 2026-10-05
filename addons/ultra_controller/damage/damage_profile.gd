@@ -39,6 +39,12 @@ var severable := 0b1111111101
 @export_range(1, 3, 0.05) var injured_arm_reload := 1.5
 ## A hit this heavy (after the region multiplier) knocks you down.
 @export var knockdown_damage := 45.0
+## Knockouts (blunt trauma: clubs, gun-butts, thrown props): a hit to the head of at least
+## `ko_head`, or a blunt blow anywhere of at least `ko_heavy` after the region multiplier.
+@export var ko_head := 18.0
+@export var ko_heavy := 55.0
+## Blunt to the head counts this much against overall health (a bullet: region_mult, 3x).
+@export var blunt_head_mult := 1.2
 
 
 func gore_on() -> bool:

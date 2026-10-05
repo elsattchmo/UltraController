@@ -4,7 +4,7 @@ extends Resource
 ## Everything about one kind of item. Instances (stacks, ammo, durability) are ItemInstance.
 ## Items live in res://assets/items/**/<id>_item.tres and are indexed by ItemDB.
 
-enum Kind { MISC, FIREARM, AMMO, KEY, CONSUMABLE, THROWABLE, TOOL }
+enum Kind { MISC, FIREARM, AMMO, KEY, CONSUMABLE, THROWABLE, TOOL, MELEE }
 enum EquipSlot { NONE = 0, MAIN_HAND = 1, OFF_HAND = 2, HIP = 4, BACK = 8 }
 enum FireMode { SEMI, AUTO }
 

@@ -17,6 +17,7 @@ var _i := -1
 var _t0 := 0.0
 var _bot: BotInputSource
 var _slot := 0
+var _tapped := -1
 
 
 func _ready() -> void:
@@ -70,8 +71,10 @@ func _drive(tick: int, _src: BotInputSource) -> InputFrame:
 		f.buttons = int(s.get("buttons", 0))
 		if s.has("slot"):
 			_slot = int(s["slot"])
-		if s.has("tap") and _now() - _t0 < 0.05:
+		# A tap: the first 0.05 s, and at least one tick (slow motion runs ticks seconds apart).
+		if s.has("tap") and (_now() - _t0 < 0.05 or _tapped != _i):
 			f.buttons |= int(s["tap"])
+			_tapped = _i
 		_bot.live_yaw += deg_to_rad(float(s.get("yaw_rate", 0.0))) / Engine.physics_ticks_per_second
 		f.yaw = _bot.live_yaw        # (after the rate, or it never accumulates)
 	if _bot.view_tp:

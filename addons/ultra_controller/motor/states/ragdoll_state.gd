@@ -25,6 +25,8 @@ func enter(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 func next(m: UltraMotor, s: MotorState, _i: InputFrame) -> int:
 	if s.hp <= 0.0:
 		return Id.DEAD
+	if s.state == Id.RAGDOLL and s.has(MotorState.F_UNCONSCIOUS):
+		return -1                        # out cold: no getting up, no coming round to swim
 	if s.state == Id.RAGDOLL:
 		# Limp in the water, not lying on the bottom: come round and swim.
 		if m.water != null and m.water_depth > 0.15 and not s.is_grounded():
@@ -42,7 +44,18 @@ func next(m: UltraMotor, s: MotorState, _i: InputFrame) -> int:
 	return -1
 
 
+func exit(_m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
+	if s.state == Id.RAGDOLL:
+		s.set_flag(MotorState.F_UNCONSCIOUS, false)
+		s.ko_t = 0.0
+
+
 func tick(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
+	# Knocked out: count down; coming round, the usual "lain still" check gets us up.
+	if s.state == Id.RAGDOLL and s.has(MotorState.F_UNCONSCIOUS):
+		s.ko_t = maxf(s.ko_t - m.dt, 0.0)
+		if s.ko_t <= 0.0:
+			s.set_flag(MotorState.F_UNCONSCIOUS, false)
 	var v := m.body.velocity
 	if s.state == Id.RAGDOLL and m.water != null and m.water_depth > 0.15 and not s.is_grounded():
 		# Limp in the water: thick drag, and the body bobs back up to float at the surface.

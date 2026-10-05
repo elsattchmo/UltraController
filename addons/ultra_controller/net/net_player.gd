@@ -36,6 +36,8 @@ var client_tick: int = 0
 var last_acked: int = -1
 ## server_tick - client_tick for our frames (moving platforms need the server's clock).
 var server_tick_offset: int = 0
+## Client: the first of our ticks predicted with the server's clock known (set at the first ack).
+var synced_from: int = -1
 var input_history: Array = []      ## [InputFrame] ring by tick % HISTORY
 var state_history: Array = []      ## [MotorState] after simulating that tick
 var server_queue_depth: int = 0

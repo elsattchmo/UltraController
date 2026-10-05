@@ -207,6 +207,7 @@ func sample(tick: int) -> InputFrame:
 	if f.move.y < 0.3: _sprint_toggled = false          # stop or turn back: sprint ends
 	if pressed(&"walk"): b |= InputFrame.B_WALK
 	if pressed(&"respawn"): b |= InputFrame.B_RESPAWN
+	if pressed(&"melee"): b |= InputFrame.B_MELEE
 	# interact / grab are pulses (tap vs hold), held for exactly one tick
 	b |= _interact_pulse
 	_interact_pulse = 0

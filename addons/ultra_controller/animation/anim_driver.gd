@@ -596,6 +596,43 @@ func _build() -> AnimationNodeBlendTree:
 	root.connect_node("upper", 0, "loco")
 	root.connect_node("upper", 1, "upper_src")
 
+	# Sprinting with a rifle (GTA's arms-only carry filter): the legs, hips, spine and head run
+	# the plain upright sprint; only the arms (clavicles down) take one held frame of the rifle
+	# sprint clip - port arms, the rifle across the chest. The rifle clip's own torso leaned
+	# forward and twisted to the side, which looked wrong.
+	var carry_arms := AnimationNodeBlend2.new()
+	carry_arms.filter_enabled = true
+	for b in _arm_bones():
+		carry_arms.set_filter_path(NodePath("%GeneralSkeleton:" + b), true)
+	root.add_node("carry_arms", carry_arms, Vector2(400, 0))
+	var ca_clip := AnimationNodeAnimation.new()
+	if _role_anim(&"e_sprint_f"):
+		ca_clip.animation = _clip(&"e_sprint_f")
+	root.add_node("carry_arms_clip", ca_clip, Vector2(150, 400))
+	root.add_node("carry_arms_seek", AnimationNodeTimeSeek.new(), Vector2(250, 400))
+	root.add_node("carry_arms_hold", AnimationNodeTimeScale.new(), Vector2(350, 400))
+	root.connect_node("carry_arms_seek", 0, "carry_arms_clip")
+	root.connect_node("carry_arms_hold", 0, "carry_arms_seek")
+	# ... and the chest still: one held frame of the plain sprint (upright) for Spine..UpperChest,
+	# so the shoulders don't counter-rotate the held rifle every stride (only the hips run).
+	var carry_chest := AnimationNodeBlend2.new()
+	carry_chest.filter_enabled = true
+	for b in ["Spine", "Chest", "UpperChest"]:
+		carry_chest.set_filter_path(NodePath("%GeneralSkeleton:" + b), true)
+	root.add_node("carry_chest", carry_chest, Vector2(330, 0))
+	var cc_clip := AnimationNodeAnimation.new()
+	if _role_anim(&"n_sprint_f"):
+		cc_clip.animation = _clip(&"n_sprint_f")
+	root.add_node("carry_chest_clip", cc_clip, Vector2(150, 500))
+	root.add_node("carry_chest_seek", AnimationNodeTimeSeek.new(), Vector2(250, 500))
+	root.add_node("carry_chest_hold", AnimationNodeTimeScale.new(), Vector2(350, 500))
+	root.connect_node("carry_chest_seek", 0, "carry_chest_clip")
+	root.connect_node("carry_chest_hold", 0, "carry_chest_seek")
+	root.connect_node("carry_chest", 0, "upper")
+	root.connect_node("carry_chest", 1, "carry_chest_hold")
+	root.connect_node("carry_arms", 0, "carry_chest")
+	root.connect_node("carry_arms", 1, "carry_arms_hold")
+
 	var hit := AnimationNodeOneShot.new()
 	hit.fadein_time = 0.06
 	hit.fadeout_time = 0.25
@@ -606,9 +643,34 @@ func _build() -> AnimationNodeBlendTree:
 		hit.set_filter_path(NodePath("%GeneralSkeleton:" + b), true)
 	root.add_node("hit", hit, Vector2(500, 0))
 	root.add_node("hit_src", _anim(&"hit_chest", false), Vector2(350, 200))
-	root.connect_node("hit", 0, "upper")
+	root.connect_node("hit", 0, "carry_arms")
 	root.connect_node("hit", 1, "hit_src")
 	var out_node := "hit"
+	# Strikes (melee weapon swings, gun-butts): one segment of a swing clip, played time-scaled
+	# so its contact frame lands on the simulated hit. Standing, the whole body swings (hips
+	# and legs drive the blow - GTA / RDR play standing attacks full-body); moving, only the
+	# upper body does, over the running legs, with part of the clip's hip lean folded into the
+	# spine. Two layers fed the same segment, seeked together: "swing" (upper body) and
+	# "swing_full" (whole body); weights from _drive_swing.
+	var sw := AnimationNodeBlend2.new()
+	sw.filter_enabled = true
+	for b in _upper_body_bones():
+		sw.set_filter_path(NodePath("%GeneralSkeleton:" + b), true)
+	root.add_node("swing", sw, Vector2(560, 50))
+	var sf := AnimationNodeBlend2.new()
+	root.add_node("swing_full", sf, Vector2(640, 50))
+	for k: String in ["swing_src", "swing_full_src"]:
+		var src := _anim(&"hit_chest", false)
+		root.add_node(k, src, Vector2(420, 230))
+		root.add_node(k + "_seek", AnimationNodeTimeSeek.new(), Vector2(480, 230))
+		root.add_node(k + "_ts", AnimationNodeTimeScale.new(), Vector2(540, 230))
+		root.connect_node(k + "_seek", 0, k)
+		root.connect_node(k + "_ts", 0, k + "_seek")
+	root.connect_node("swing", 0, out_node)
+	root.connect_node("swing", 1, "swing_src_ts")
+	root.connect_node("swing_full", 0, "swing")
+	root.connect_node("swing_full", 1, "swing_full_src_ts")
+	out_node = "swing_full"
 	# Throwing a carried prop: a two-handed push from the chest (upper body).
 	if _role_anim(&"push_throw"):
 		var push := AnimationNodeOneShot.new()
@@ -716,6 +778,7 @@ func _process(delta: float) -> void:
 	if state in TRAVERSING:
 		local_v = Vector2.ZERO
 	_drive_ground(local_v, local_v.length(), delta)
+	_drive_swing(speed, delta)
 	if _push_t > 0.0:
 		_push_t -= delta
 		if _push_t <= 0.0:
@@ -916,7 +979,8 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	if _eight_way and _neutral:
 		var bladed := _item_w > 0.5 and not is_nan(modifier.item_hips_yaw) and absf(modifier.item_hips_yaw) > BLADED_HIPS
 		_stance_w = _ease_w(&"stance", 1.0 if bladed else 0.0, delta)
-		var sw := smoothstep(0.0, 1.0, _stance_w)
+		# (Sprinting with the rifle carried, the legs run the plain sprint: see carry_arms.)
+		var sw := smoothstep(0.0, 1.0, _stance_w) * (1.0 - smoothstep(0.0, 1.0, sprint_carry))
 		tree.set(LOCO + "ground/stance/blend_amount", sw)
 		tree.set(LOCO + "ground/idle_stance/blend_amount", sw)
 	if _has_limp:
@@ -1605,7 +1669,7 @@ func _drive_item(delta: float) -> void:
 	var want := 0.0
 	if has_layer:
 		match item_action:
-			UltraActionLayer.Action.EQUIPPING, UltraActionLayer.Action.READY, UltraActionLayer.Action.RELOADING:
+			UltraActionLayer.Action.EQUIPPING, UltraActionLayer.Action.READY, UltraActionLayer.Action.RELOADING, UltraActionLayer.Action.MELEE:
 				want = 1.0
 	if state in [MotorState.Id.ROOT_MOTION, MotorState.Id.SLIDE, MotorState.Id.CRAWL]:
 		want = 0.0
@@ -1619,13 +1683,18 @@ func _drive_item(delta: float) -> void:
 	var gsp := Vector2(velocity.x, velocity.z).length()
 	var carry := _stance_w > 0.5 and item_ready_pose < 0.5 and item_action == UltraActionLayer.Action.READY 		and gsp > SPRINT_CARRY_SPEED and state in [MotorState.Id.MOVE, MotorState.Id.IDLE]
 	sprint_carry = _ease_w(&"carry", 1.0 if carry and _role_anim(&"e_sprint_f") else 0.0, delta)
-	tree.set("parameters/upper/blend_amount", smoothstep(0.0, 1.0, _item_w))
+	var cw := smoothstep(0.0, 1.0, sprint_carry)
+	tree.set("parameters/upper/blend_amount", smoothstep(0.0, 1.0, _item_w) * (1.0 - cw))
 	tree.set("parameters/upper_src/pose/blend_amount", _pose_w)
-	tree.set("parameters/upper_src/carry/blend_amount", smoothstep(0.0, 1.0, sprint_carry))
-	tree.set("parameters/upper_src/carry_seek/seek_request", SPRINT_CARRY_T)
-	tree.set("parameters/upper_src/carry_hold/scale", 0.0)
+	tree.set("parameters/upper_src/carry/blend_amount", 0.0)
+	tree.set("parameters/carry_arms/blend_amount", cw * smoothstep(0.0, 1.0, _item_w))
+	tree.set("parameters/carry_arms_seek/seek_request", SPRINT_CARRY_T)
+	tree.set("parameters/carry_arms_hold/scale", 0.0)
+	tree.set("parameters/carry_chest/blend_amount", cw * smoothstep(0.0, 1.0, _item_w))
+	tree.set("parameters/carry_chest_seek/seek_request", 0.0)
+	tree.set("parameters/carry_chest_hold/scale", 0.0)
 	if modifier:
-		modifier.weapon_aim = _item_w * _pose_w
+		modifier.weapon_aim = _item_w * _pose_w * (1.0 - smoothstep(0.0, 1.0, swing_w))
 		# A held item's static upper body on running legs: steady the torso against the swing
 		# (a little less with a one-handed item: the pistol run looked frozen).
 		# Unarmed, part of it too: the sprint clip rocks the shoulders and head side to side.
@@ -1863,8 +1932,76 @@ func play_hit(head: bool) -> void:
 	tree.set("parameters/hit/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 
 
-func item_event(kind: StringName) -> void:
+## A strike (swing `sw` from UltraActionLayer.melee_swing): its clip role's segment `seg`
+## [from, to], played so the clip's `contact` time lands on the sim's `hit_from`; it fades out
+## when the simulated swing is over (`time`) unless the next swing of a combo takes over.
+## Swings without a clip (or whose role has no animation) play nothing.
+func play_swing(sw: Dictionary) -> void:
+	var role := StringName(sw.get("clip", &""))
+	if tree == null or role == &"" or _role_anim(role) == null or fp_gun:
+		return
+	var seg: Vector2 = sw.get("seg", Vector2(0.0, _role_anim(role).length))
+	var contact := float(sw.get("contact", seg.x + float(sw.hit_from)))
+	var rate := clampf((contact - seg.x) / maxf(float(sw.hit_from), 0.05), 0.4, 3.0)
+	var clip := _segment(_clip(role), seg.x, seg.y)
+	var root := tree.tree_root as AnimationNodeBlendTree
+	var up := root.get_node("swing_src") as AnimationNodeAnimation
+	var full := root.get_node("swing_full_src") as AnimationNodeAnimation
+	var lean := _upper_lean(clip, 0.6)
+	if up.animation != lean:
+		up.animation = lean
+	if full.animation != clip:
+		full.animation = clip
+	for k: String in ["swing_src", "swing_full_src"]:
+		tree.set("parameters/%s_seek/seek_request" % k, 0.0)
+		tree.set("parameters/%s_ts/scale" % k, rate)
+	_swing_left = float(sw.time)
+	_swing_len = (seg.y - seg.x) / rate
+	if swing_w < 0.05:
+		_stand_w = _swing_stand_target()        # (decided as it starts; eased after)
+	inertial.trigger()
+
+
+var _swing_left := 0.0
+var _swing_len := 0.0
+## First person with a camera-placed gun (EquipmentVisual): its strikes are procedural.
+var fp_gun := false
+## 0..1: how much a strike is showing (EquipmentVisual lets the procedural aim / gun pose go).
+var swing_w := 0.0
+var _stand_w := 0.0
+var _swing_speed := 0.0
+const SWING_IN := 0.07
+const SWING_OUT := 0.28
+
+
+## Full body when standing still or barely moving on the ground, upper body over a run.
+func _swing_stand_target() -> float:
+	if state not in [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.CROUCH]:
+		return 0.0
+	return 1.0 - smoothstep(0.5, 2.2, _swing_speed)
+
+
+func _drive_swing(speed: float, delta: float) -> void:
+	_swing_speed = speed
+	var on := false
+	if _swing_left > 0.0:
+		_swing_left -= delta
+		_swing_len -= delta
+		on = _swing_len > SWING_OUT * 0.5
+	swing_w = move_toward(swing_w, 1.0 if on else 0.0, delta / (SWING_IN if on else SWING_OUT))
+	_stand_w = move_toward(_stand_w, _swing_stand_target(), delta * 3.0)
+	var w := smoothstep(0.0, 1.0, swing_w)
+	tree.set("parameters/swing/blend_amount", w)
+	tree.set("parameters/swing_full/blend_amount", w * smoothstep(0.0, 1.0, _stand_w))
+
+
+func item_event(kind: StringName, data := {}) -> void:
 	match kind:
+		&"melee":
+			if held_def:
+				play_swing(UltraActionLayer.melee_swing(held_def, int(data.get("combo", 0)) & 0x3F))
+		&"melee_cancel":
+			_swing_left = 0.0
 		&"fire":
 			tree.set("parameters/upper_src/fire/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 		&"reload":

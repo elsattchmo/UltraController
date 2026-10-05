@@ -19,6 +19,7 @@ func _ready() -> void:
 	_pistol(skel, lib)
 	_rifle(skel, lib)
 	_shotgun(skel, lib)
+	_melee(skel, lib)
 	_ammo()
 	_misc()
 	_keys()
@@ -82,6 +83,12 @@ func _world_scenes_first() -> void:
 		var sg := (load(SHOTGUN + "shotgun.glb") as PackedScene).instantiate() as Node3D
 		sg.name = "Visual"
 		_world_scene(SHOTGUN + "shotgun_world.tscn", &"shotgun", sg, Vector3(0.06, 0.2, 1.0), Vector3(0, 0.0, -0.15))
+	for mw: Array in [["bat", Vector3(0.08, 0.08, 0.8), Vector3(0, 0.27, 0)], ["machete", Vector3(0.05, 0.06, 0.62), Vector3(0, 0.22, 0)]]:
+		var path := "res://assets/items/%s/%s.glb" % [mw[0], mw[0]]
+		if ResourceLoader.exists(path):
+			var v := (load(path) as PackedScene).instantiate() as Node3D
+			v.name = "Visual"
+			_world_scene("res://assets/items/%s/%s_world.tscn" % [mw[0], mw[0]], StringName(mw[0]), v, Vector3(mw[1].x, mw[1].z, mw[1].y), mw[2])
 	_world_scene("res://assets/items/ammo/ammo_12g_world.tscn", &"ammo_12g", _box_visual(Vector3(0.12, 0.08, 0.08), Color(0.6, 0.12, 0.08)), Vector3(0.12, 0.08, 0.08))
 	_world_scene("res://assets/items/medkit/medkit_world.tscn", &"medkit", _box_visual(Vector3(0.22, 0.09, 0.16), Color(0.9, 0.9, 0.9)), Vector3(0.22, 0.09, 0.16))
 	for k in [["red", Color(0.9, 0.15, 0.1)], ["blue", Color(0.15, 0.35, 0.95)], ["green", Color(0.15, 0.8, 0.25)]]:
@@ -134,6 +141,7 @@ func _pistol(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	var holster_model := Transform3D(holster_basis.rotated(Vector3.FORWARD, deg_to_rad(-8.0)), Vector3(-0.235, 0.84, 0.0))
 	d.holster_offset = hips.affine_inverse() * holster_model
 	d.anim_roles = {"idle": "pistol_idle", "aim": "pistol_aim_neutral", "aim_up": "pistol_aim_up", "aim_down": "pistol_aim_down", "fire": "pistol_shoot", "reload": "pistol_reload"}
+	d.anim_clips = {"butt_pistol": ["mixamo/M_PistolStrike"]}           # (gun-butt: UltraActionLayer.melee_swing)
 	d.equip_time = 0.35
 	d.recoil_gun_deg = 3.0
 	d.stats = {
@@ -213,6 +221,7 @@ func _rifle(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 		"rifle_idle": ["mixamo/Rifle_Idle", "Pistol_Idle"],
 		"rifle_aim": ["mixamo/Rifle_Idle_Aiming", "Pistol_Aim_Neutral"],
 		"rifle_reload": ["mixamo/Rifle_Reload", "Pistol_Reload"],
+		"butt_long": ["mixamo/M_RiflePunch"],              # (gun-butt, long guns)
 	}
 	d.equip_time = 0.6
 	d.fire_mode = ItemDefinition.FireMode.AUTO
@@ -329,13 +338,106 @@ func _shotgun(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	ResourceSaver.save(ammo, "res://assets/items/ammo/ammo_12g_item.tres")
 
 
+## Melee weapons, swung with the UAL sword clips (a three-swing combo: Sword_Regular_A, B, C;
+## contact = the swing hand's fastest moment, measured: A 0.24 s, B 0.24 s, C 0.64 s). The
+## bat is blunt (knocks out); the machete is a blade (cuts limbs off). Gripped in the sword
+## idle's hand (UltraGripFit on the GripBody up the handle).
+## Melee weapons. Each swing of a combo is a segment of one Mixamo combo clip (the next swing
+## starts where the last one's follow-through ends, so a chained combo plays the clip straight
+## through), time-scaled by `rate`: its contact frame (the hand's speed peak, measured with
+## tools/measure_melee.gd) lands on the sim's hit_from; control comes back at `ctrl`.
+## Swing spec: [clip from, contact, ctrl, segment end, reach, damage, knockback, (rate)].
+func _melee(skel: Skeleton3D, lib: AnimationLibrary) -> void:
+	var mix: AnimationLibrary = load(MANNEQUIN + "anims/mixamo.res") if ResourceLoader.exists(MANNEQUIN + "anims/mixamo.res") else null
+	for spec: Array in [
+		# Bat: both hands, Mixamo "Two Handed Club Combo Attack" (overhead, a cut down and
+		# across, a short swing back) from "Two Handed Weapon Stance".
+		["bat", "Baseball bat", "Ash bat. Blunt: a blow to the head knocks a man out.", 1.0, &"blunt",
+			"M_Club2Idle", "M_Club2Combo", 1.35, [
+			[0.75, 1.48, 1.80, 2.20, 1.7, 30.0, 3.0],
+			[1.80, 2.80, 3.30, 3.60, 1.7, 26.0, 2.6, 1.6],
+			[3.30, 3.92, 4.40, 4.80, 1.8, 36.0, 5.0]]],
+		# Machete: one hand, the sword combo (forehand, backhand, a lunging cut).
+		["machete", "Machete", "A long blade. It cuts - limbs come off.", 0.7, &"blade",
+			"", "M_SwordCombo", 1.4, [
+			[0.45, 1.02, 1.40, 1.80, 1.55, 30.0, 1.2],
+			[1.40, 2.00, 2.40, 2.75, 1.55, 30.0, 1.2],
+			[2.40, 3.00, 3.70, 4.05, 1.7, 44.0, 2.0]]],
+	]:
+		var path := "res://assets/items/%s/%s.glb" % [spec[0], spec[0]]
+		if not ResourceLoader.exists(path):
+			continue
+		var idle_clip: String = spec[5]
+		var combo: String = spec[6]
+		var have_idle := mix != null and idle_clip != "" and mix.has_animation(idle_clip)
+		# The grip is fitted to the hand as the idle holds it.
+		UltraPoseSampler.pose(mix.get_animation(idle_clip) if have_idle else lib.get_animation("Idle_Sword"), skel, 0.5)
+		var node := (load(path) as PackedScene).instantiate() as Node3D
+		var grip := UltraGripFit.fit(skel, node)
+		node.free()
+		var d := ItemDefinition.new()
+		d.id = StringName(spec[0])
+		d.display_name = spec[1]
+		d.description = spec[2]
+		d.kind = ItemDefinition.Kind.MELEE
+		d.mass = spec[3]
+		d.max_stack = 1
+		d.equip_scene = load(path)
+		var wpath := "res://assets/items/%s/%s_world.tscn" % [spec[0], spec[0]]
+		d.world_scene = load(wpath) if ResourceLoader.exists(wpath) else null
+		d.equip_slots = ItemDefinition.EquipSlot.MAIN_HAND | ItemDefinition.EquipSlot.BACK
+		d.grip_offset = grip
+		d.two_handed = false
+		# Slung on the back, handle up over the right shoulder.
+		UltraPoseSampler.pose(lib.get_animation("Idle_A"), skel, 0.5)
+		var chest := UltraPoseSampler.global_pose(skel, skel.find_bone("UpperChest"))
+		var up := Vector3(-0.45, -1.0, 0.0).normalized()          # down and to the left: handle up right
+		var y := up
+		var z := (Vector3(0, 0, -1) - y * y.z).normalized()
+		var b := Basis(y.cross(z), y, z)
+		d.holster_bone = &"UpperChest"
+		d.holster_offset = chest.affine_inverse() * Transform3D(b, chest.origin + Vector3(-0.02, -0.02, -0.16) - b * Vector3(0, 0.25, 0))
+		# Roles are shared by every character: each weapon names its own.
+		var r := String(spec[0])
+		d.anim_roles = {"idle": r + "_idle", "aim": r + "_idle"}
+		d.anim_clips = {r + "_idle": ["mixamo/" + idle_clip, "Idle_Sword"] if have_idle else ["Idle_Sword"],
+			r + "_combo": ["mixamo/" + combo]}
+		var swings := []
+		for w: Array in spec[8]:
+			var rate: float = w[7] if w.size() > 7 else spec[7]
+			var hit_from: float = (w[1] - w[0]) / rate
+			swings.append({"time": snappedf((w[2] - w[0]) / rate, 0.01), "hit_from": snappedf(hit_from, 0.01),
+				"hit_to": snappedf(hit_from + 0.1, 0.01), "reach": w[4], "damage": w[5], "kind": spec[4],
+				"knockback": w[6], "impulse": w[5] * 0.5,
+				"clip": StringName(r + "_combo"), "seg": Vector2(w[0], w[3]), "contact": w[1]})
+		d.equip_time = 0.45
+		d.stats = {"melee": swings}
+		ResourceSaver.save(d, "res://assets/items/%s/%s_item.tres" % [spec[0], spec[0]])
+		print("saved melee weapon ", spec[0], " grip ", grip, " swings ", swings.map(func(x: Dictionary) -> String: return "%.2f/%.2f" % [x.hit_from, x.time]))
+
+
 ## Sprinting, the rifle is carried at port arms (AnimDriver: one frame of the rifle sprint clip
 ## on the item layer); the free aim goes where that barrel points (yaw toward the off side,
 ## pitch; degrees, skeleton space: +Z forward, +X the character's left).
 func _carry_dir(skel: Skeleton3D, mix: AnimationLibrary, grip: Transform3D, fallback: Vector2) -> Vector2:
 	if mix == null or not mix.has_animation("R_Sprint_F"):
 		return fallback
+	# As AnimDriver draws it: the arms (clavicles out) from the rifle sprint's held frame on
+	# the body of the plain sprint.
 	UltraPoseSampler.pose(mix.get_animation("R_Sprint_F"), skel, UltraAnimDriver.SPRINT_CARRY_T)
+	var arms := {}
+	for bn in ["LeftShoulder", "RightShoulder"]:
+		var root_b := skel.find_bone(bn)
+		for b in skel.get_bone_count():
+			var p := b
+			while p >= 0 and p != root_b:
+				p = skel.get_bone_parent(p)
+			if p == root_b:
+				arms[b] = skel.get_bone_pose(b)
+	if mix.has_animation("S_Fast"):
+		UltraPoseSampler.pose(mix.get_animation("S_Fast"), skel, 0.0)
+	for b: int in arms:
+		skel.set_bone_pose(b, arms[b])
 	var g := UltraPoseSampler.global_pose(skel, skel.find_bone("RightHand")) * grip
 	var dir := -g.basis.z.normalized()
 	var out := Vector2(rad_to_deg(atan2(dir.x, dir.z)), rad_to_deg(asin(dir.y))).snappedf(0.1)

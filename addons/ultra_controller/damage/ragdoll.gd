@@ -193,7 +193,8 @@ func _drive(delta: float) -> void:
 		_airborne = false
 	if not _airborne:
 		_t += delta
-	var dead := character.state.state == MotorState.Id.DEAD
+	# Out cold goes as limp as dead.
+	var dead := character.state.state == MotorState.Id.DEAD or character.state.has(MotorState.F_UNCONSCIOUS)
 	var tone := lerpf(tone_start, tone_down, smoothstep(0.0, 1.2, _t))
 	if dead:
 		tone = lerpf(tone, tone_dead, smoothstep(0.3, 2.0, _t))

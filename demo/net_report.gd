@@ -31,6 +31,8 @@ static func _summ(p: NetPlayer) -> Dictionary:
 
 
 var _shots := 0
+var _melee_hits := 0                ## predicted blows that struck something
+var _remote_ko := {}                ## remote players seen knocked out (name -> true)
 var _hooked := {}
 var _max_y := -INF                  # highest the (predicted) local player got: traversal checks
 var _trav_states := {}
@@ -43,7 +45,12 @@ func _on_snapshot(_tick: int) -> void:
 			_hooked[p.id] = true
 			p.character.item_event.connect(func(kind: StringName, _d: Dictionary) -> void:
 				if kind == &"fire":
-					_shots += 1)
+					_shots += 1
+				elif kind == &"melee_hit" and bool(_d.get("hit", false)):
+					_melee_hits += 1)
+	for p: NetPlayer in UltraNet.players.values():
+		if p.role == NetPlayer.Role.INTERPOLATED and is_instance_valid(p.character) and p.character.state.has(MotorState.F_UNCONSCIOUS):
+			_remote_ko[p.display_name] = true
 	for p: NetPlayer in UltraNet.players.values():
 		if p.role == NetPlayer.Role.INTERPOLATED and not p.snaps.is_empty():
 			var pos: Vector3 = p.snaps[p.snaps.size() - 1].pos
@@ -103,6 +110,12 @@ func _finish() -> void:
 				if p.character.inventory.count_of(&"pistol") != 1:
 					print("NETREPORT FAIL client never received its inventory")
 					ok = false
+		var want_melee := UltraArgs.get_int("expect-melee-hits", 0)
+		if want_melee > 0:
+			print("NETREPORT melee hits=%d" % _melee_hits)
+			if _melee_hits < want_melee:
+				print("NETREPORT FAIL only %d predicted melee hits (want %d)" % [_melee_hits, want_melee])
+				ok = false
 		var climb := UltraArgs.get_float("expect-climb", 0.0)
 		if climb > 0.0:
 			print("NETREPORT climb max_y=%.2f states=%s" % [_max_y, ",".join(_trav_states.keys())])
@@ -116,6 +129,11 @@ func _finish() -> void:
 				if not _states_seen.has(st):
 					print("NETREPORT FAIL never entered %s" % st)
 					ok = false
+		if UltraArgs.has("expect-remote-ko"):
+			print("NETREPORT remote knockouts: %s" % (", ".join(_remote_ko.keys()) if not _remote_ko.is_empty() else "none"))
+			if _remote_ko.is_empty():
+				print("NETREPORT FAIL never saw anyone knocked out")
+				ok = false
 		if UltraArgs.has("expect-remote-injury"):
 			var hurt: Array[String] = []
 			for rp: NetPlayer in UltraNet.players.values():

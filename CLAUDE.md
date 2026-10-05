@@ -292,11 +292,15 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Demo playground has infinite ammo (`UltraActionLayer.infinite_ammo`; `--limited-ammo` off).
 - `teleport()` drops any traversal state (else a scripted move drags you back).
 - FP eye is swept from the capsule axis (`CameraRig._fp_guard`): the head bone dips into ledges.
-- Sprinting with a bladed (rifle) item: the item layer holds one frame of e_sprint_f
-  (`SPRINT_CARRY_T` 0.225 s: port arms, rifle level across the chest; the clip pumps it 50 deg
-  every stride) - `AnimDriver.sprint_carry`; first person follows the body then (no
-  camera-placed gun), so both views carry it the same way. torso_steady at a run: unarmed
-  0.45, one-handed item 0.72 (0.85 looked frozen), bladed 0.85.
+- Sprinting with a bladed (rifle) item = GTA V's arms-only carry filter: the legs, hips and
+  head run the plain upright sprint (the bladed stance blend fades out with `sprint_carry`),
+  Spine..UpperChest hold one frame of it (`carry_chest`: the shoulders' counter-rotation
+  swung the held rifle 44 mm/frame), and only the arms (clavicles out, `carry_arms`) take
+  one held frame of e_sprint_f (`SPRINT_CARRY_T` 0.225 s: port arms, rifle across the chest).
+  The rifle clip's own torso leaned forward / sideways (the user: "unnatural"). First person
+  follows the body then (no camera-placed gun). `build_items._carry_dir` measures the barrel
+  on that composite pose (66 deg left, -8). torso_steady at a run: unarmed 0.45, one-handed
+  item 0.72 (0.85 looked frozen), bladed 0.85.
 - TP aim is closed-loop: `EquipmentVisual._aim_fix` measures the drawn barrel against the gun
   direction and turns the spine by the error (the pistol aim clip pointed ~20 deg left).
   m4 test_gun_points_at_aim covers both guns, both views, hip and ADS.
@@ -344,6 +348,11 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   the head (`sever` event carries the hit kind) bursts it: `spawn_gib(head, dir, 9, 7.0)` splits
   its triangles into chunks round its middle (Fibonacci directions), each with a flesh blob,
   thrown out with a red mist. MAX_GIBS 32.
+- A client's ticks predicted before its first ack ran on a guessed server clock
+  (`server_tick_offset` 0): snapshots for them rebase silently (`NetPlayer.synced_from`), not
+  counted as corrections. The `net platform` case spawns on the elevator at a random phase:
+  those pre-sync predictions made it flaky (0.37 m "corrections" 2 runs in 4); after the sync
+  riding predicts exactly (0 corrections, 10/10).
 - A TickPlatform coming down on someone not riding it shoves them out from under it
   (`UltraMotor._out_from_under_platforms`): the elevator used to press a player standing in its
   shaft through the floor (the flaky `net platform` case: the server spawned the player while
@@ -373,6 +382,45 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   it); its handguard slide (`_within_reach`) is solved exactly and eased, never stepped; the FP
   body's glue to the mouse yaw is eased (`_glue_w`), never switched; interpolated sim values
   keep their pre-tick value on the character (`prev_sway`) so 2-tick frames don't snap.
+- **Knockout** is RAGDOLL + `MotorState.F_UNCONSCIOUS` (1<<6), `ko_t` (s left), `ko_count`
+  (all codec'd; the flag reaches remote players in snapshots). Blunt kinds (`blunt`, `impact`):
+  to the HEAD >= `DamageProfile.ko_head` (18, head mult `blunt_head_mult` 1.2, half limb
+  damage) or any blunt hit >= `ko_heavy` (55) knocks out for clamp(5 + over*0.25, 5, 12) s,
+  x(1 + 0.5*min(ko_count, 3)). RagdollState holds the body down while unconscious (limp tone,
+  no get-up / water exit); HUD `_drive_blackout`; CameraRig concussion wobble on waking.
+- **Melee** = `UltraActionLayer.Action.MELEE` (appended). Gun-butt: `B_MELEE` (`uc_melee`:
+  B / middle mouse / D-pad Up) with a firearm up; melee weapons (`ItemDefinition.Kind.MELEE`) swing
+  on attack. Swings come from item stat `"melee"` (array of {time, hit_from, reach, damage,
+  kind, knockback, impulse}) or gun-butt defaults (`melee_swing`). `melee_combo` bits 0-5 =
+  swing, 0x40 = this swing landed (action_t is quantized: a `t0 < hit_from <= t` crossing
+  test missed), 0x80 = next queued (press after 45 %); `melee_seq` in snapshots.
+  `UltraCombat.melee_sweep`: 5 rays (0, +-14, +-28 deg) to reach from the eye, lag
+  compensated, characters first then the ray nearest the aim. `is_up()` = READY or MELEE.
+  Strike animation (`AnimDriver.play_swing`): a swing names a clip role, a segment `seg`
+  and the clip's `contact` time (hand-speed peak, `tools/measure_melee.gd`); the segment is
+  time-scaled so contact lands on the sim's hit_from. Two layers fed the same seeked segment:
+  `swing` (upper body, 60 % of the hip lean in the spine) and `swing_full` (whole body),
+  full-body weight 1 standing -> 0 by 2.2 m/s (GTA/RDR play standing attacks full-body).
+  `swing_w` fades the procedural aim / TP shouldered gun out meanwhile. Clips (Mixamo):
+  bat = "Two Handed Club Combo Attack" + "Two Handed Weapon Stance" (M_Club2*), machete =
+  "One Handed Sword Combo Attack" (M_SwordCombo) - each combo swing is the next segment of
+  ONE combo clip, so a chained combo plays it straight through; gun-butt TP = "Advancing And
+  Punching With Butt Of A Rifle" (M_RiflePunch, steps in 0.7 m and back) / "Overhand Strike
+  With Pistol". First person firearms stay procedural (`EquipmentVisual.melee_offset`, timed
+  off the sim's action_t; `AnimDriver.fp_gun` skips the clip). Item roles are global: each
+  item names its own (bat_idle, bat_combo, butt_long...). The Mixamo axe pack is ONE-handed
+  and "Smash With Back Of Rifle" holds the rifle like a staff (it twisted ours): unused.
+  Net case `melee` (bot `butt`): stock to Dummy B's head, the client must see the knockout.
+- **Breakables** (`UltraBreakable`, a child named "Breakable" of a RigidBody3D prop or a
+  StaticBody3D pane): health from shots / blows (`UltraCombat.apply` forwards; glass x4,
+  blunt x1.4) and knocks - a prop's own momentum change beyond gravity over `impact_min`
+  (skipped while held / just thrown, armed after 1 s); glass breaks outright on a jolt over
+  `impact_dv` (2.5 m/s); panes get a deep sensor (body > 2.5 m/s and > 6 kg m/s). The server
+  sets `broken` (NetObject `net_state`), spills `drops`; everyone hides the body and throws
+  local debris boxes cut from its mesh AABB (`ultra_debris`, <= 140, 9 s). Playground
+  BREAKABLES (marker `breakables`): crates (health 75), barrels, bottles, a window.
+- Tours run in real time and frame grabs stall them: film fast moves in slow motion
+  (`Engine.time_scale`, see melee_review); a tour "tap" is held for at least one tick.
 
 ## Godot 4.7 facts (probed)
 - All IK nodes exist: TwoBoneIK3D, FABRIK3D, CCDIK3D, JacobianIK3D, SplineIK3D, ChainIK3D,

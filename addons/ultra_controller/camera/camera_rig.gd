@@ -100,6 +100,7 @@ func _on_plunged(speed: float) -> void:
 
 
 ## Camera kick (recoil, hits): radians of pitch/yaw that spring back.
+var _was_out := false               ## knocked out last frame (waking up is groggy)
 var _concuss := 0.0                ## seconds of head-hit wobble left
 var _concuss_amp := 0.0
 
@@ -121,6 +122,13 @@ func kick(pitch: float, yaw: float) -> void:
 ## Recoil: the gun itself kicks in the simulation (free aim, UltraActionLayer._recoil); the
 ## view gets a little: ~30 % stays in the aim (you have to pull down), a short shake on top.
 func _on_item_event(kind: StringName, _data: Dictionary) -> void:
+	if kind == &"melee_hit" and character.input_source != null:
+		# A blow landing jars the view; a miss barely.
+		var landed: bool = _data.get("hit", false)
+		kick(0.03 if landed else 0.008, randf_range(-0.02, 0.02) if landed else 0.0)
+		if landed and character.input_source is LocalInputSource:
+			(character.input_source as LocalInputSource).rumble(0.5, 0.3, 0.1)
+		return
 	if kind != &"fire" or character.input_source == null:
 		return
 	var def := character.held_def()
@@ -187,6 +195,12 @@ func _process(delta: float) -> void:
 	tp_blend = move_toward(tp_blend, want_tp, delta / maxf(cam_profile.view_switch_time, 0.01))
 	var t := smoothstep(0.0, 1.0, tp_blend)
 
+	# Coming round from a knockout: a groggy few seconds.
+	var out := character.state.has(MotorState.F_UNCONSCIOUS)
+	if _was_out and not out:
+		_concuss_amp = 0.9
+		_concuss = 2.5 * _concuss_amp + 1.5
+	_was_out = out
 	var yaw := src.live_yaw
 	var pitch := src.live_pitch
 	_kick.step(delta)

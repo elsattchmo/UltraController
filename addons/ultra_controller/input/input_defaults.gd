@@ -32,6 +32,7 @@ const ACTIONS := {
 	"lean_left": [0.5, ["key:Z"]],
 	"lean_right": [0.5, ["key:X"]],
 	"dodge": [0.5, ["key:F", "joy:9"]],
+	"melee": [0.5, ["key:B", "mouse:3", "joy:11"]],
 	"toggle_view": [0.5, ["key:V", "joy:8"]],
 	"inventory": [0.5, ["key:Tab", "key:I", "joy:4"]],
 	"hotbar_next": [0.5, ["mouse:5", "joy:14"]],
