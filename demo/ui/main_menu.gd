@@ -1,15 +1,21 @@
 extends CanvasLayer
 ## Demo main menu: single-player, split-screen, host, join, host + test client, launcher presets.
+## Mouse, keyboard or pad: "Single player" has focus on open, D-pad / stick / arrows move it,
+## A / Enter presses.
+
+const MenuStyle := preload("res://addons/ultra_controller/ui/menu_style.gd")
 
 var main: Node
 var _ip: LineEdit
 
 
 func _ready() -> void:
+	add_to_group(MenuStyle.MODAL_GROUP)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var bg := ColorRect.new()
 	bg.color = Color(0.06, 0.07, 0.09, 0.82)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.theme = MenuStyle.theme()
 	add_child(bg)
 	# Two columns, centred: playing on the left, launch presets on the right (scrolls if long).
 	var center := CenterContainer.new()
@@ -52,6 +58,7 @@ func _ready() -> void:
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(380, 470)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.follow_focus = true
 	cols.add_child(scroll)
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -62,6 +69,7 @@ func _ready() -> void:
 		var preset := p
 		_button(right, preset.title if preset.title != "" else preset.resource_name, func() -> void: UltraLauncher.launch(preset))
 	_button(right, "Close launched instances", func() -> void: UltraLauncher.kill_all())
+	MenuStyle.focus_first(box)
 
 
 func _header(parent: Control, text: String) -> void:

@@ -55,8 +55,22 @@ const ACTIONS := {
 	"debug_scenarios": [0.5, ["key:F5"]],
 	"debug_slowmo": [0.5, ["key:F6"]],
 	"debug_freecam": [0.5, ["key:F7"]],
-	"companion": [0.5, ["key:F8", "joy:11"]],
+	# Keyboard only: on a pad it sat on D-pad Up, which is also menu / inventory navigation,
+	# so pressing Up summoned a stray helper bot (and in split screen, next to player 1).
+	"companion": [0.5, ["key:F8"]],
 	"respawn": [0.5, ["key:F9", "key:Backspace"]],
+	# Inventory window (menus use Godot's ui_* actions, see UI_PAD_EVENTS).
+	"inv_drop": [0.5, ["key:Delete", "joy:2"]],
+	"inv_move": [0.5, ["key:M", "joy:3"]],
+}
+
+## Gamepad events added to Godot's built-in ui_* actions. Godot 4.7's defaults navigate with
+## the D-pad and left stick but have no pad button for accept / cancel, so A and B did
+## nothing in any menu. Added (never removing anything) to project.godot by
+## install_missing() and to the live Input Map by UltraInput.ensure_ui_pad_events().
+const UI_PAD_EVENTS := {
+	"ui_accept": ["joy:0"],
+	"ui_cancel": ["joy:1"],
 }
 
 
@@ -85,8 +99,21 @@ static func make_event(spec: String) -> InputEvent:
 	return null
 
 
-## Adds every missing uc_* action to ProjectSettings. Returns how many were added.
-## Existing actions are left untouched (the user's bindings win).
+## Does `events` already hold an event equivalent to `ev` (same button / axis direction)?
+static func has_event(events: Array, ev: InputEvent) -> bool:
+	for e: Variant in events:
+		if e is InputEventJoypadButton and ev is InputEventJoypadButton and (e as InputEventJoypadButton).button_index == (ev as InputEventJoypadButton).button_index:
+			return true
+		if e is InputEventJoypadMotion and ev is InputEventJoypadMotion and (e as InputEventJoypadMotion).axis == (ev as InputEventJoypadMotion).axis and signf((e as InputEventJoypadMotion).axis_value) == signf((ev as InputEventJoypadMotion).axis_value):
+			return true
+		if e is InputEventKey and ev is InputEventKey and (e as InputEventKey).physical_keycode == (ev as InputEventKey).physical_keycode:
+			return true
+	return false
+
+
+## Adds every missing uc_* action to ProjectSettings, plus the pad accept / cancel buttons on
+## Godot's ui_* actions. Returns how many actions were added or extended.
+## Existing uc_* actions are left untouched (the user's bindings win).
 static func install_missing(save := true) -> int:
 	var added := 0
 	for suffix: String in ACTIONS:
@@ -101,6 +128,19 @@ static func install_missing(save := true) -> int:
 				events.append(ev)
 		ProjectSettings.set_setting(key, {"deadzone": float(spec[0]), "events": events})
 		added += 1
+	for act: String in UI_PAD_EVENTS:
+		var key := "input/" + act
+		var cur: Dictionary = ProjectSettings.get_setting(key, {"deadzone": 0.5, "events": []})
+		var events: Array = (cur.get("events", []) as Array).duplicate()
+		var changed := false
+		for spec: String in UI_PAD_EVENTS[act]:
+			var ev := make_event(spec)
+			if not has_event(events, ev):
+				events.append(ev)
+				changed = true
+		if changed:
+			ProjectSettings.set_setting(key, {"deadzone": float(cur.get("deadzone", 0.5)), "events": events})
+			added += 1
 	if added > 0 and save:
 		ProjectSettings.save()
 	return added

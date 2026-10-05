@@ -4,10 +4,11 @@ extends Node3D
 ## A hanging rope. Origin = anchor point. Gameplay treats it as a pendulum in the motor
 ## (deterministic, predicted); this node draws a cosmetic verlet rope that follows whoever
 ## holds it and sways when nobody does.
-##   SWING: forward/back pumps the swing, jump lets go carrying the swing's speed
-##   CLIMB: forward/back climbs up/down
+## Every rope swings and climbs: looking level, forward/back pumps the swing; looking up or
+## down (> 25 deg), forward/back climbs toward where you look. Jump lets go carrying the
+## swing's speed; reaching the ground at the bottom puts you on your feet.
 
-enum Kind { SWING, CLIMB }
+enum Kind { SWING, CLIMB }   ## (kept for older scenes; both behave the same)
 
 static var all: Array[UltraRope] = []
 static var _next_id := 1
@@ -68,17 +69,13 @@ static func find(id: int) -> UltraRope:
 	return null
 
 
-## Climbing input on this rope, -1 (down) .. 1 (up). Climb ropes: forward / back. Swing
-## ropes: forward while looking up climbs, forward while looking down slides down (looking
-## level, forward / back pumps the swing).
+## Climbing input on a rope, -1 (down) .. 1 (up): forward / back while looking up or down
+## moves along the rope toward where you look (looking level, forward / back pumps the swing).
+const CLIMB_LOOK := 25.0            ## degrees of look up / down that turn forward into climbing
 static func climb_input(rope: UltraRope, i: InputFrame) -> float:
-	if rope == null:
+	if rope == null or absf(i.move.y) < 0.3 or absf(i.pitch) < deg_to_rad(CLIMB_LOOK):
 		return 0.0
-	if rope.kind == Kind.CLIMB:
-		return clampf(i.move.y, -1.0, 1.0)
-	if i.move.y > 0.3 and absf(i.pitch) > deg_to_rad(28.0):
-		return signf(i.pitch) * i.move.y
-	return 0.0
+	return clampf(signf(i.pitch) * i.move.y, -1.0, 1.0)
 
 
 ## A rope the character's hands can catch (hands ~2 m above the feet).

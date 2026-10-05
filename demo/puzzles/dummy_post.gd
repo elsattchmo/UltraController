@@ -55,6 +55,10 @@ func _physics_process(delta: float) -> void:
 	if not UltraNet.is_server() or UltraNet.mode == UltraNet.Mode.NONE:
 		return
 	var p: NetPlayer = UltraNet.players.get(bot_id)
+	# Ids restart at 1 with every session: after a restart without a scene reload our old id
+	# can belong to a player or another post's dummy. Only our own bot counts.
+	if p and (not p.is_bot or p.display_name != dummy_name):
+		p = null
 	if p == null or not is_instance_valid(p.character):
 		if auto_spawn:
 			_spawn()

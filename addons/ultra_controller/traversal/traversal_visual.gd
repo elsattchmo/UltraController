@@ -41,7 +41,7 @@ func _process(_delta: float) -> void:
 			var up := (rope.anchor() - grip).normalized()
 			var back := vis.basis.z.normalized() * 0.05
 			_rope_legs(ik, grip, up, vis, rope)
-			if rope.kind == UltraRope.Kind.CLIMB or absf(UltraRope.climb_input(rope, character.last_input)) > 0.0:
+			if absf(UltraRope.climb_input(rope, character.last_input)) > 0.0:
 				# Climbing: the hands go hand over hand with the climb cycle, held onto the rope.
 				ik.set_line_goal(R, grip + right * 0.035 + back, up, Vector2(-0.7, 0.7), 1.0, 14.0)
 				ik.set_line_goal(L, grip - right * 0.035 + back, up, Vector2(-0.7, 0.7), 1.0, 14.0)
@@ -123,7 +123,7 @@ func _ladder_limbs(ik: HandIKModifier, vis: Transform3D) -> void:
 ## Rope: on a swing rope the legs kick out with the arc - forward at the front of the swing,
 ## back at the back (angle from the hips follows the rope's angle), the way you pump a swing.
 func _rope_legs(ik: HandIKModifier, grip: Vector3, up: Vector3, vis: Transform3D, rope: UltraRope) -> void:
-	var climbing := rope.kind == UltraRope.Kind.CLIMB or absf(UltraRope.climb_input(rope, character.last_input)) > 0.0
+	var climbing := absf(UltraRope.climb_input(rope, character.last_input)) > 0.0
 	if climbing:
 		_release_feet(ik)
 		return

@@ -4,20 +4,30 @@ extends CanvasLayer
 ## slot, press the new input (Esc cancels). Conflicts are flagged. Changes go into the live
 ## Input Map and user://ultra_input.cfg (UltraInput.save_user_rebind); "Reset" restores the
 ## project defaults from Project Settings. Also exposes the main sensitivity settings.
+## Works with a pad too: focus starts on the first binding, D-pad / stick move it, A picks a
+## binding (then press the new key / button; Esc or 5 s without input cancels), B goes back.
 
 signal closed
+
+const MenuStyle := preload("res://addons/ultra_controller/ui/menu_style.gd")
+const CAPTURE_TIMEOUT := 5.0
 
 var _list: VBoxContainer
 var _capture_action := StringName()
 var _capture_pad := false
+var _capture_t := 0.0
 var _status: Label
+var _back: Button
+var _refocus := Vector2i(-1, -1)      ## (row, column) to focus again after a rebuild
 
 
 func _ready() -> void:
 	layer = 60
+	add_to_group(MenuStyle.MODAL_GROUP)
 	var bg := ColorRect.new()
 	bg.color = Color(0.05, 0.06, 0.08, 0.92)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.theme = MenuStyle.theme()
 	add_child(bg)
 	var panel := VBoxContainer.new()
 	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -32,10 +42,11 @@ func _ready() -> void:
 	panel.add_child(title)
 	panel.add_child(_settings_row())
 	_status = Label.new()
-	_status.text = "Click a binding, then press the new key / button. Esc cancels."
+	_status.text = "Pick a binding (click / A), then press the new key or button. Esc cancels. B goes back."
 	panel.add_child(_status)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.follow_focus = true
 	panel.add_child(scroll)
 	_list = VBoxContainer.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -47,14 +58,34 @@ func _ready() -> void:
 		UltraInput.reset_user_rebinds()
 		_rebuild())
 	row.add_child(reset)
-	var back := Button.new()
-	back.text = "Back"
-	back.pressed.connect(func() -> void:
-		closed.emit()
-		queue_free())
-	row.add_child(back)
+	_back = Button.new()
+	_back.text = "Back"
+	_back.pressed.connect(close)
+	row.add_child(_back)
 	panel.add_child(row)
 	_rebuild()
+	MenuStyle.focus_first(_list)
+
+
+func close() -> void:
+	if is_queued_for_deletion():
+		return
+	closed.emit()
+	queue_free()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _capture_action == &"" and event.is_action_pressed(&"ui_cancel"):
+		close()
+		get_viewport().set_input_as_handled()
+
+
+func _process(delta: float) -> void:
+	if _capture_action != &"":
+		_capture_t += delta
+		if _capture_t > CAPTURE_TIMEOUT:
+			_capture_action = &""
+			_status.text = "Cancelled."
 
 
 func _settings_row() -> Control:
@@ -85,6 +116,7 @@ func _settings_row() -> Control:
 
 func _rebuild() -> void:
 	for c in _list.get_children():
+		_list.remove_child(c)
 		c.queue_free()
 	var used := {}
 	for suffix: String in UltraInputDefaults.ACTIONS:
@@ -121,9 +153,17 @@ func _rebuild() -> void:
 				b.tooltip_text = "Shared with another action"
 			var a := act
 			var p: bool = pad
-			b.pressed.connect(func() -> void: _begin_capture(a, p))
+			var at := Vector2i(_list.get_child_count(), 1 if pad else 0)
+			b.pressed.connect(func() -> void:
+				_refocus = at
+				_begin_capture(a, p))
 			row.add_child(b)
 		_list.add_child(row)
+	# Rebuilt rows are new buttons: put focus back on the binding that was just changed.
+	if _refocus.x >= 0 and _refocus.x < _list.get_child_count():
+		var again := _list.get_child(_refocus.x).get_child(1 + _refocus.y) as Control
+		_refocus = Vector2i(-1, -1)
+		MenuStyle.focus_first(_list, again)
 
 
 static func _event_key(e: InputEvent) -> String:
@@ -156,13 +196,16 @@ static func _describe(e: InputEvent) -> String:
 func _begin_capture(act: StringName, pad: bool) -> void:
 	_capture_action = act
 	_capture_pad = pad
-	_status.text = "Press the new %s for %s…" % ["gamepad button" if pad else "key or mouse button", act]
+	_capture_t = 0.0
+	_status.text = "Press the new %s for %s…  (Esc or wait %d s to cancel)" % ["gamepad button" if pad else "key or mouse button", act, int(CAPTURE_TIMEOUT)]
 
 
 func _input(event: InputEvent) -> void:
 	if _capture_action == &"":
 		return
-	if event is InputEventKey and (event as InputEventKey).physical_keycode == KEY_ESCAPE and event.pressed:
+	var cancel_key := event is InputEventKey and (event as InputEventKey).physical_keycode == KEY_ESCAPE
+	var cancel_pad := not _capture_pad and event is InputEventJoypadButton and event.is_action_pressed(&"ui_cancel")
+	if (cancel_key or cancel_pad) and event.pressed:
 		_capture_action = &""
 		_status.text = "Cancelled."
 		get_viewport().set_input_as_handled()

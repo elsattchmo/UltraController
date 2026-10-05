@@ -42,6 +42,7 @@ func _ready() -> void:
 ## Reserve device claims for the next local players before the session starts.
 ## Empty `devices` = this player accepts every device (single-player default).
 func reserve(devices_per_player: Array) -> void:
+	_drop_all()
 	slots.clear()
 	for i in devices_per_player.size():
 		slots.append({"index": i, "devices": PackedStringArray(devices_per_player[i])})
@@ -73,6 +74,8 @@ func _on_player_added(p: NetPlayer) -> void:
 		p.character.set_view_index(-1)
 		return
 	var s := _slot(p.local_index)
+	if s.has("player") and s.player != p:
+		_drop_slot(s)                 # a previous session's player (restart without reserve())
 	s.player = p
 	var rig := UltraCameraRig.new()
 	rig.name = "CameraRig_%d" % p.local_index
@@ -109,12 +112,39 @@ func _on_player_added(p: NetPlayer) -> void:
 func _on_player_removed(p: NetPlayer) -> void:
 	for s in slots:
 		if s.get("player") == p:
-			for k in ["rig", "hud", "pane", "scanner", "builtin_hud"]:
-				if s.has(k) and is_instance_valid(s[k]):
-					(s[k] as Node).queue_free()
-			for k in ["player", "rig", "hud", "pane", "viewport", "scanner", "builtin_hud"]:
-				s.erase(k)
+			_drop_slot(s)
 	_rebuild.call_deferred()
+
+
+## Free a slot's camera / HUD / pane (its device claim stays).
+func _drop_slot(s: Dictionary) -> void:
+	for k in ["rig", "hud", "pane", "scanner", "builtin_hud"]:
+		if s.has(k) and is_instance_valid(s[k]):
+			(s[k] as Node).queue_free()
+	for k in ["player", "rig", "hud", "pane", "viewport", "scanner", "builtin_hud"]:
+		s.erase(k)
+
+
+## UltraNet.stop() frees every character without player_removed (session over, server
+## closed): without this the old rigs and HUDs stayed alive, bound to freed characters, and
+## a new session stacked a second set on top.
+func _drop_all() -> void:
+	var any := false
+	for s in slots:
+		if s.has("player"):
+			_drop_slot(s)
+			any = true
+	if any:
+		_rebuild.call_deferred()
+
+
+func _prune_stale() -> void:
+	for s in slots:
+		if s.has("player"):
+			var np := s.player as NetPlayer
+			if np == null or not is_instance_valid(np.character) or np.character.is_queued_for_deletion():
+				_drop_slot(s)
+				_rebuild.call_deferred()
 
 
 ## Put each active rig either in the window (1 player) or in its own SubViewport pane.
@@ -131,7 +161,10 @@ func _rebuild() -> void:
 		if split and not s.has("pane"):
 			var pane := SubViewportContainer.new()
 			pane.stretch = true
-			pane.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			# PASS (not IGNORE): the container only forwards mouse events into its viewport
+			# through gui_input, so with IGNORE the keyboard+mouse player could not click
+			# their own inventory in split screen. Unhandled clicks still reach the game.
+			pane.mouse_filter = Control.MOUSE_FILTER_PASS
 			var vp := SubViewport.new()
 			vp.world_3d = get_viewport().world_3d
 			vp.audio_listener_enable_3d = s.index == 0
@@ -190,7 +223,7 @@ func _claimed(device: String) -> bool:
 
 
 func _input(event: InputEvent) -> void:
-	if not join_enabled or not UltraNet.is_active():
+	if not join_enabled or not UltraNet.is_active() or get_tree().get_first_node_in_group(&"ultra_modal"):
 		return
 	var dev := UltraInput.device_of(event)
 	if dev == "":
@@ -213,15 +246,17 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	_prune_stale()
 	if not join_enabled:
 		return
+	var modal := get_tree().get_first_node_in_group(&"ultra_modal") != null
 	for s in slots:
 		if not s.has("player") or s.index == 0:
 			continue
 		var src := (s.player as NetPlayer).character.input_source as LocalInputSource
 		if src == null:
 			continue
-		var held := src.pressed(&"leave") and src.active_device.begins_with("joy")
+		var held := src.pressed(&"leave") and src.active_device.begins_with("joy") and not modal
 		_leave_hold[s.index] = (_leave_hold.get(s.index, 0.0) + delta) if held else 0.0
 		if _leave_hold[s.index] > 1.0:
 			_leave_hold[s.index] = 0.0

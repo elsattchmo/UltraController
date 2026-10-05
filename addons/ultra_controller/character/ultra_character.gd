@@ -435,11 +435,11 @@ func _process(delta: float) -> void:
 		anim.getup_crawl = UltraInjury.must_crawl(state)
 		anim.getup_front = ragdoll != null and ragdoll.getup_front
 		var S := UltraLimbs.Status
-		var ll := UltraLimbs.leg(state, true)
-		var lr := UltraLimbs.leg(state, false)
-		var sev := func(st: int) -> float: return 0.6 if st == S.INJURED else (1.0 if st >= S.CRIPPLED else 0.0)
-		anim.limp = maxf(sev.call(ll), sev.call(lr))
-		anim.limp_left = sev.call(ll) >= sev.call(lr)
+		var dl := UltraInjury.leg_damage(state, true)
+		var dr := UltraInjury.leg_damage(state, false)
+		anim.limp = maxf(dl, dr)
+		anim.limp_left = dl >= dr
+		anim.teeter = state.teeter
 		var torso := UltraLimbs.status(state, UltraLimbs.Region.TORSO)
 		anim.injury_hunch = 0.0 if torso == S.HEALTHY else (0.12 if torso == S.INJURED else 0.25)
 		anim.item_left = UltraInjury.weapon_hand(state) == -1

@@ -137,6 +137,20 @@ func _clip(role: StringName) -> StringName:
 
 
 const BRISK_RATE := 1.75
+## Which leg the injured-walk clips favour (measured: Injured_Walk lingers on the right foot,
+## so its bad leg is the left; Injured_Walk_Back the other way round).
+## Lose_Balance: the stretch where the arms windmill (before the walk-off).
+const TEETER_SEG := Vector2(3.3, 4.4)
+const LIMP_F_BAD_LEG := "l"
+const LIMP_B_BAD_LEG := "r"
+var _has_limp := false
+var _limp_f_speed := 0.7
+var _limp_b_speed := 0.7
+var _limp_hull := PackedVector2Array()
+var _limp_w := 0.0
+## 0..1 while teetering on an edge (MotorState.teeter): arms flail on the upper body.
+var teeter := 0.0
+var _teeter_w := 0.0
 ## Face-down get-up: Death_A from where it lies on its front (3.85 s) back to standing (1.6 s).
 const FRONT_GETUP_FROM := 1.6
 const FRONT_GETUP_LEN := 2.25
@@ -264,6 +278,38 @@ func _build() -> AnimationNodeBlendTree:
 	ground.add_node("move", bs, Vector2(0, 0))
 	ground.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
 	ground.connect_node("rate", 0, "move")
+	# Limping: the same space with Mixamo's injured walks (forward / back), one copy per bad
+	# leg (mirrored where the clip favours the other leg), mixed in by how hurt the legs are.
+	_has_limp = _role_anim(&"limp_f") != null and _role_anim(&"limp_b") != null
+	if _has_limp:
+		_limp_f_speed = anim_set.speed_of(&"limp_f", 0.7)
+		_limp_b_speed = anim_set.speed_of(&"limp_b", 0.7)
+		_limp_hull = PackedVector2Array([Vector2(0, _limp_f_speed), _hull[1] / brisk_side, Vector2(0, -_limp_b_speed), _hull[3] / brisk_side])
+		for side: String in ["l", "r"]:
+			var ls := AnimationNodeBlendSpace2D.new()
+			ls.sync = true
+			ls.sync_mode = 2
+			ls.min_space = bs.min_space
+			ls.max_space = bs.max_space
+			var lf := _anim(&"limp_f")
+			if side != LIMP_F_BAD_LEG:
+				lf.animation = _mirrored(lf.animation)
+			ls.add_blend_point(lf, Vector2(0, _limp_f_speed), -1, &"walk")
+			var lb := _anim(&"limp_b")
+			if side != LIMP_B_BAD_LEG:
+				lb.animation = _mirrored(lb.animation)
+			ls.add_blend_point(lb, Vector2(0, -_limp_b_speed), -1, &"back")
+			ls.add_blend_point(sr.duplicate(), _hull[1] / brisk_side, -1, &"strafe_r")
+			ls.add_blend_point(_anim(&"strafe_l"), _hull[3] / brisk_side, -1, &"strafe_l")
+			ground.add_node("limp_" + side, ls, Vector2(0, 500 + (100 if side == "r" else 0)))
+		ground.add_node("limp_side", AnimationNodeBlend2.new(), Vector2(200, 550))
+		ground.connect_node("limp_side", 0, "limp_l")
+		ground.connect_node("limp_side", 1, "limp_r")
+		ground.add_node("limp_rate", AnimationNodeTimeScale.new(), Vector2(350, 550))
+		ground.connect_node("limp_rate", 0, "limp_side")
+		ground.add_node("limp", AnimationNodeBlend2.new(), Vector2(450, 0))
+		ground.connect_node("limp", 0, "rate")
+		ground.connect_node("limp", 1, "limp_rate")
 	var turn := AnimationNodeBlend3.new()
 	ground.add_node("idle", _anim(&"idle"), Vector2(0, 200))
 	ground.add_node("turn_l", _anim(&"turn_l90"), Vector2(0, 300))
@@ -276,7 +322,7 @@ func _build() -> AnimationNodeBlendTree:
 	ground.connect_node("turn_rate", 0, "turn")
 	ground.add_node("mix", AnimationNodeBlend2.new(), Vector2(600, 100))
 	ground.connect_node("mix", 0, "turn_rate")
-	ground.connect_node("mix", 1, "rate")
+	ground.connect_node("mix", 1, "limp" if _has_limp else "rate")
 	ground.connect_node("output", 0, "mix")
 	loco.add_node("ground", ground, Vector2(0, 0))
 
@@ -468,7 +514,23 @@ func _build() -> AnimationNodeBlendTree:
 	root.add_node("hit_src", _anim(&"hit_chest", false), Vector2(350, 200))
 	root.connect_node("hit", 0, "upper")
 	root.connect_node("hit", 1, "hit_src")
-	root.connect_node("output", 0, "hit")
+	var out_node := "hit"
+	if _role_anim(&"teeter"):
+		var tb := AnimationNodeBlend2.new()
+		tb.filter_enabled = true
+		for b in _upper_body_bones():
+			tb.set_filter_path(NodePath("%GeneralSkeleton:" + b), true)
+		root.add_node("teeter", tb, Vector2(700, 0))
+		var ta := AnimationNodeAnimation.new()
+		ta.animation = _segment(_clip(&"teeter"), TEETER_SEG.x, TEETER_SEG.y)
+		ta.use_custom_timeline = true
+		ta.loop_mode = Animation.LOOP_LINEAR
+		ta.timeline_length = TEETER_SEG.y - TEETER_SEG.x
+		root.add_node("teeter_src", ta, Vector2(550, 200))
+		root.connect_node("teeter", 0, "hit")
+		root.connect_node("teeter", 1, "teeter_src")
+		out_node = "teeter"
+	root.connect_node("output", 0, out_node)
 	return root
 
 
@@ -679,11 +741,24 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 		var ly := skeleton.get_bone_global_pose(_lfoot).origin.y
 		var ry := skeleton.get_bone_global_pose(_rfoot).origin.y
 		_bad_stance = (ly < ry) == limp_left
-		rate *= (1.0 + 0.6 * limp) if _bad_stance else (1.0 - 0.25 * limp)
+		if not _has_limp:
+			rate *= (1.0 + 0.6 * limp) if _bad_stance else (1.0 - 0.25 * limp)
 	else:
 		_bad_stance = false
 	tree.set(LOCO + "ground/move/blend_position", clamped)
 	tree.set(LOCO + "ground/rate/scale", rate)
+	if _has_limp:
+		_limp_w = move_toward(_limp_w, smoothstep(0.0, 0.6, limp), get_process_delta_time() * 1.5)
+		tree.set(LOCO + "ground/limp/blend_amount", _limp_w)
+		tree.set(LOCO + "ground/limp_side/blend_amount", 0.0 if limp_left else 1.0)
+		var lp := _clamp_to_hull(bp, _limp_hull)
+		var lrate := clampf(speed / lp.length(), 0.6, 1.6) if lp.length() > 0.01 else 1.0
+		if side_k > 0.0 and speed < side_r and not backwards:
+			lp = lp.lerp(Vector2(signf(bp.x) * side_r, 0.0), side_k)
+			lrate = lerpf(lrate, maxf(speed / side_r, 0.4), side_k)
+		tree.set(LOCO + "ground/limp_l/blend_position", lp)
+		tree.set(LOCO + "ground/limp_r/blend_position", lp)
+		tree.set(LOCO + "ground/limp_rate/scale", lrate)
 	var idle_w := 1.0 - smoothstep(0.05, 0.45, speed)
 	tree.set(LOCO + "ground/mix/blend_amount", 1.0 - idle_w)
 	# Turn in place: shuffle feet while the motor swings the body round.
@@ -720,15 +795,16 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 		_warp = lerp_angle(_warp, clampf(rel2, -1.2, 1.2), 1.0 - exp(-10.0 * delta))
 
 
-func _clamp_to_hull(p: Vector2) -> Vector2:
-	if Geometry2D.is_point_in_polygon(p, _hull):
+func _clamp_to_hull(p: Vector2, hull := PackedVector2Array()) -> Vector2:
+	var h := _hull if hull.is_empty() else hull
+	if Geometry2D.is_point_in_polygon(p, h):
 		return p
 	var best := p
 	var best_d := INF
 	var dir := p.normalized()
-	for i in _hull.size():
-		var a := _hull[i]
-		var b := _hull[(i + 1) % _hull.size()]
+	for i in h.size():
+		var a := h[i]
+		var b := h[(i + 1) % h.size()]
 		var hit: Variant = Geometry2D.segment_intersects_segment(Vector2.ZERO, dir * 50.0, a, b)
 		if hit != null:
 			var d := (hit as Vector2).length()
@@ -801,6 +877,9 @@ func _drive_body(delta: float) -> void:
 	else:
 		modifier.stabilize_w = 1.0
 	modifier.head_calm = move_toward(modifier.head_calm, 0.8 if state == MotorState.Id.GET_UP else 0.0, delta * 3.0)
+	_teeter_w = move_toward(_teeter_w, 1.0 if teeter > 0.05 else 0.0, delta * (6.0 if teeter > 0.05 else 3.0))
+	if tree.get("parameters/teeter/blend_amount") != null:
+		tree.set("parameters/teeter/blend_amount", smoothstep(0.0, 1.0, _teeter_w))
 
 
 func _drive_item(delta: float) -> void:
@@ -876,7 +955,7 @@ func _build_hang(loco: AnimationNodeStateMachine) -> void:
 	idle.loop_mode = Animation.LOOP_LINEAR
 	idle.timeline_length = 0.55
 	bs.add_blend_point(idle, 0.0, -1, &"idle")
-	for spec: Array in [[&"shimmy_l", 1.0], [&"shimmy_r", -1.0]]:
+	for spec: Array in [[&"shimmy_l", -1.0], [&"shimmy_r", 1.0]]:   # Shimmy_L moves to the character's left
 		var a := _anim(spec[0])
 		a.animation = _refit(a.animation, "hang", hands, Vector3.ONE)
 		bs.add_blend_point(a, spec[1], -1, StringName(spec[0]))

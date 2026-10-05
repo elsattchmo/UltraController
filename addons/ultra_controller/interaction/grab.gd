@@ -10,6 +10,7 @@ extends RefCounted
 const THROW_CHARGE_TIME := 0.8
 const BREAK_DISTANCE := 1.25
 const TEAM_BREAK_STRETCH := 0.8
+const TEAM_REACH := 0.3              ## team lift: grip this far from your hands' place (carrying together peaks ~0.17) = let go
 const OMEGA := 12.0               ## hold stiffness (rad/s)
 const ZETA := 1.0                 ## critically damped
 
@@ -124,7 +125,9 @@ static func _release(c: UltraCharacter, s: MotorState, throw_charge: float, repl
 		rb.remove_meta("held_for")
 	if rb and rb.has_meta("far_for"):
 		rb.remove_meta("far_for")
-	for k in ["hold_pt", "hold_arrived"]:
+	c.set_meta("team_t", 0.0)
+	c.set_meta("team_far", 0.0)
+	for k in ["hold_pt", "hold_arrived", "hold_yaw"]:
 		if rb and rb.has_meta(k):
 			rb.remove_meta(k)
 	c.emit_item_event(&"throw" if throw_charge > 0.0 else &"drop", {"id": s.held_id}, replaying)
@@ -146,10 +149,17 @@ static func _set_exceptions(c: UltraCharacter, rb: RigidBody3D, on: bool) -> voi
 
 
 ## Where a holder wants the prop (or its grip) this tick.
+## The facing a held prop follows: your aim when the body faces it (first person, aiming),
+## otherwise the body's own facing (third person walks wherever the stick points, and the
+## prop stays in front of the chest instead of swinging round with the camera).
+static func hold_yaw(c: UltraCharacter) -> float:
+	return c.last_input.yaw if c.faces_aim() else c.state.body_yaw
+
+
 static func hold_target(c: UltraCharacter, rb: RigidBody3D) -> Vector3:
 	var s := c.state
-	var yaw := c.last_input.yaw
-	var pitch := clampf(c.last_input.pitch, -1.0, 0.9)
+	var yaw := hold_yaw(c)
+	var pitch := clampf(c.last_input.pitch, -1.0, 0.9) if c.faces_aim() else 0.0
 	var eye := s.pos + Vector3.UP * (s.height - 0.16)
 	var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
 	if s.held_grip >= 0:
@@ -360,17 +370,24 @@ static func _hold_single(c: UltraCharacter, rb: RigidBody3D, dt: float) -> void:
 	rb.sleeping = false
 	var m := rb.mass
 	var g := Vector3.DOWN * float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))
-	var f := m * ((target - p) * OMEGA * OMEGA - (rb.linear_velocity - c.state.vel * 0.0) * 2.0 * ZETA * OMEGA) - m * g
+	# Damped against the holder's own velocity (not the world), so a prop carried at a run
+	# rides with you instead of trailing by speed * 2 zeta / omega.
+	var f := m * ((target - p) * OMEGA * OMEGA - (rb.linear_velocity - c.state.vel) * 2.0 * ZETA * OMEGA) - m * g
 	f = f.limit_length(c.profile.strength_n * UltraInjury.strength_mult(c.state))
 	rb.apply_central_force(f)
 	# Keep the orientation it had relative to the holder's facing when grabbed.
+	var yaw := hold_yaw(c)
 	if not rb.has_meta("grab_rel"):
-		rb.set_meta("grab_rel", Basis(Vector3.UP, -c.last_input.yaw) * rb.global_basis)
-	var want: Basis = Basis(Vector3.UP, c.last_input.yaw) * (rb.get_meta("grab_rel") as Basis)
+		rb.set_meta("grab_rel", Basis(Vector3.UP, -yaw) * rb.global_basis)
+	var want: Basis = Basis(Vector3.UP, yaw) * (rb.get_meta("grab_rel") as Basis)
 	var err := (want * rb.global_basis.inverse()).get_rotation_quaternion()
 	var axis_angle := err.get_axis() * err.get_angle() if err.get_angle() > 0.0001 else Vector3.ZERO
 	var inertia := m * pow(_size(rb), 2) * 0.4
-	var t := (axis_angle * OMEGA * OMEGA * 0.5 - rb.angular_velocity * 2.0 * ZETA * OMEGA * 0.7) * inertia
+	# Turning: damp against the holder's turn rate too, so the prop turns with you.
+	var yaw_prev := float(rb.get_meta("hold_yaw", yaw))
+	rb.set_meta("hold_yaw", yaw)
+	var spin := Vector3.UP * angle_difference(yaw_prev, yaw) / maxf(dt, 0.001)
+	var t := (axis_angle * OMEGA * OMEGA * 0.5 - (rb.angular_velocity - spin) * 2.0 * ZETA * OMEGA * 0.7) * inertia
 	rb.apply_torque(t.limit_length(c.profile.strength_n * 0.3))
 
 
@@ -400,7 +417,17 @@ static func _hold_team(carriers: Array, rb: RigidBody3D, dt: float) -> void:
 		var grip := grips[clampi(c.state.held_grip, 0, grips.size() - 1)]
 		var gp := grip.global_position
 		var target := hold_target(c, rb)
-		if gp.distance_to(target) > TEAM_BREAK_STRETCH + 0.6:
+		# Hands can't stretch: past arm's reach of your grip for a moment, you let go (walking
+		# off from the other carrier drops your end rather than dragging your arms along).
+		# (A fresh grab gets a second to bring its end up off the floor.)
+		var held_t := float(c.get_meta("team_t", 0.0)) + dt
+		c.set_meta("team_t", held_t)
+		var far := float(c.get_meta("team_far", 0.0))
+		far = far + dt if gp.distance_to(target) > TEAM_REACH and held_t > 1.0 else 0.0
+		c.set_meta("team_far", far)
+		if far > 0.25 or gp.distance_to(target) > TEAM_BREAK_STRETCH + 0.6:
+			c.set_meta("team_far", 0.0)
+			c.set_meta("team_t", 0.0)
 			_release(c, c.state, 0.0, false)
 			continue
 		var r := gp - rb.global_position

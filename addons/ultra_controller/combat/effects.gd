@@ -42,6 +42,11 @@ func _ready() -> void:
 	UltraNet.world.on_event(&"hit", _on_hit)
 
 
+func _exit_tree() -> void:
+	UltraNet.world.off_event(&"impact", _on_impact)
+	UltraNet.world.off_event(&"hit", _on_hit)
+
+
 static func _unshaded(c: Color, energy: float) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED

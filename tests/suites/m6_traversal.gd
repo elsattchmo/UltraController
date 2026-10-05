@@ -214,3 +214,50 @@ func test_ladder_limbs_on_rungs() -> void:
 	var per := float(near[1]) / maxf(near[0], 1.0)
 	info("ladder: %d frames, %.2f limbs on a rung per frame" % [near[0], per])
 	check(near[0] > 30 and per >= 1.5, "at least two limbs are on rungs on average")
+
+
+## Every rope swings and climbs; climbing down to the ground puts you on your feet (never
+## through the floor). ClimbRope6: anchor 7 m up, 6.5 m long - its end is near the ground.
+func test_all_ropes_swing_climb_and_land() -> void:
+	var c := spawn("parkour_rope", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	var rope: UltraRope = map.find_child("ClimbRope6", true, false)
+	c.teleport(rope.anchor() + Vector3.DOWN * 4.6, 0.0)
+	c.state.state = Id.FALL
+	await drive(c, 60, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2.ZERO), func(ch: UltraCharacter) -> bool: return ch.state.state == Id.ROPE)
+	check(c.state.state == Id.ROPE, "caught the climbing rope")
+	if c.state.state != Id.ROPE:
+		return
+	var amp := [0.0]
+	var a := rope.anchor()
+	await drive(c, 240, func(_k: int, ch: UltraCharacter) -> InputFrame:
+		amp[0] = maxf(amp[0], absf(ch.state.pos.z - a.z))
+		return frame(Vector2(0, 1.0 if ch.state.vel.z < 0.0 else -1.0)), func(_ch: UltraCharacter) -> bool: return false)
+	info("climb rope swing amplitude %.2f m" % amp[0])
+	check(amp[0] > 1.0, "the climbing rope swings too")
+	# Let it settle, climb up a bit, then climb all the way down.
+	await drive(c, 240, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2.ZERO), func(_ch: UltraCharacter) -> bool: return false)
+	var s0 := c.state.trav_s
+	await drive(c, 60, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2(0, 1), 0, 0.0, 0.8), func(_ch: UltraCharacter) -> bool: return false)
+	check(c.state.trav_s < s0 - 0.5, "looking up + forward climbs it (%.2f -> %.2f)" % [s0, c.state.trav_s])
+	var lowest := [INF]
+	var n := await drive(c, 600, func(_k: int, ch: UltraCharacter) -> InputFrame:
+		lowest[0] = minf(lowest[0], ch.state.pos.y)
+		return frame(Vector2(0, 1), 0, 0.0, -0.8),
+		func(ch: UltraCharacter) -> bool: return ch.state.state != Id.ROPE)
+	await ticks(20)
+	info("climbed down: %s; lowest feet y %.2f; now %s at y %.2f" % [" ".join(trace), lowest[0], Id.keys()[c.state.state], c.state.pos.y])
+	check(c.state.state in [Id.IDLE, Id.MOVE, Id.LAND] and c.state.is_grounded(), "climbing down to the ground puts you on your feet")
+	check(lowest[0] > -0.05 and c.state.pos.y > -0.05, "never below the floor")
+
+
+## The climbable wall (accent coloured, 6 m): walk into it to start climbing, hold forward to
+## climb, and you climb out on top.
+func test_climbable_wall() -> void:
+	var c := spawn("climb_wall", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	await drive(c, 900, func(_k: int, _ch: UltraCharacter) -> InputFrame: return frame(Vector2(0, 1)),
+		func(ch: UltraCharacter) -> bool: return ch.state.pos.y > 5.9 and ch.state.is_grounded() and ch.state.state in [Id.IDLE, Id.MOVE])
+	info("climb wall: %s; y %.2f" % [" ".join(trace), c.state.pos.y])
+	check(seen.has(Id.WALL_CLIMB), "walking into the climbable wall climbs it (no jump needed)")
+	check(c.state.pos.y > 5.9 and c.state.is_grounded(), "climbed out on top")

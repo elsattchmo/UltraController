@@ -175,9 +175,74 @@ func test_team_lift() -> void:
 	check(lifted, "two carriers lift the whole beam")
 	check(absf(c.state.team_share + bot.character.state.team_share - 1.0) < 0.05, "load shares add up to 1")
 	var start := beam.global_position
-	await _run([{"ticks": 300, "yaw": -PI * 0.5, "move": Vector2(1, 0)}])
+	var carry_stretch := [0.0, 0.0]
+	(c.input_source as BotInputSource).set_steps([{"ticks": 300, "yaw": -PI * 0.5, "move": Vector2(1, 0)}])
+	for i in 301:
+		await ticks(1)
+		for k in 2:
+			var who: UltraCharacter = c if k == 0 else bot.character
+			if who.state.held_id != 0 and i > 30:
+				carry_stretch[k] = maxf(carry_stretch[k], grips[who.state.held_grip].global_position.distance_to(UltraGrab.hold_target(who, beam)))
+	info("grip stretch while carrying together: %.2f / %.2f m" % carry_stretch)
 	info("carried the beam %.2f m" % beam.global_position.distance_to(start))
 	check(beam.global_position.distance_to(start) > 1.0, "carried it together")
+	# Walking off from the other carrier: you can't drag your hands along - you let go.
+	var stretch := [0.0]
+	# The other carrier stands still (keeps holding, stops following).
+	var hb := bot.character.input_source as BotInputSource
+	var hold_only := func(t: int, _src: BotInputSource) -> InputFrame:
+		var f := InputFrame.new()
+		f.tick = t
+		f.yaw = bot.character.state.body_yaw
+		return f
+	hb.driver = hold_only
+	(c.input_source as BotInputSource).set_steps([{"ticks": 90, "yaw": -PI * 0.5, "move": Vector2(0, -1)}])
+	for i in 91:
+		await ticks(1)
+		if c.state.held_id != 0:
+			stretch[0] = maxf(stretch[0], grips[0].global_position.distance_to(UltraGrab.hold_target(c, beam)))
+	info("max grip stretch while walking away %.2f m" % stretch[0])
+	info("walked away: holding %s, %.2f m from the grip" % [c.state.held_id != 0, c.state.pos.distance_to(grips[0].global_position)])
+	check(c.state.held_id == 0, "walking away from the beam lets go of it")
 	bot.character.teleport(bot.character.state.pos + Vector3(4, 0, 4))
 	await ticks(10)
 	check(bot.character.state.held_id == 0, "pulled too far apart: the grip breaks")
+
+
+## Carried at a run, the prop rides with you (no lag of speed * 2 zeta / omega behind).
+func test_hold_keeps_up_at_a_run() -> void:
+	var rb := _prop("Crate5kg")
+	await _grab(rb)
+	check(c.state.held_id == _id(rb), "grabbed the 5 kg crate")
+	(c.input_source as BotInputSource).set_steps([{"ticks": 200, "yaw": 0.0, "pitch": -0.2, "move": Vector2(0, 1), "buttons": InputFrame.B_SPRINT}])
+	await ticks(100)
+	var lag := 0.0
+	var n := 0
+	var speed := 0.0
+	for i in 90:
+		await ticks(1)
+		var off := rb.global_position - UltraGrab.hold_target(c, rb)
+		lag += off.dot(-c.state.vel.normalized()) if c.state.vel.length() > 0.1 else 0.0
+		speed += Vector2(c.state.vel.x, c.state.vel.z).length()
+		n += 1
+	lag /= n
+	info("carrying at %.1f m/s: crate %.3f m behind its hold point" % [speed / n, lag])
+	check(c.state.held_id == _id(rb), "still holding it")
+	check(absf(lag) < 0.1, "the crate keeps up with you (%.3f m behind)" % lag)
+
+
+## Third person: the body faces where you walk, and the prop stays in front of the body
+## (it used to follow the camera and wrench out of the hands).
+func test_carry_in_third_person() -> void:
+	var rb := _prop("Crate5kg")
+	await _grab(rb)
+	check(c.state.held_id == _id(rb), "grabbed the crate")
+	(c.input_source as BotInputSource).set_steps([{"ticks": 150, "yaw": 0.0, "pitch": -0.2, "move": Vector2(1, 0), "buttons": InputFrame.B_VIEW_TP}])
+	await ticks(150)
+	var fwd := Vector3(-sin(c.state.body_yaw), 0, -cos(c.state.body_yaw))
+	var rel := rb.global_position - c.state.pos
+	rel.y = 0.0
+	info("TP walking right: body yaw %.0f deg, crate %.2f m in front, %.2f m to the side" % [rad_to_deg(c.state.body_yaw), rel.dot(fwd), absf(rel.dot(fwd.cross(Vector3.UP)))])
+	check(c.state.held_id == _id(rb), "still holding it in third person")
+	check(rel.dot(fwd) > 0.2 and absf(rel.dot(fwd.cross(Vector3.UP))) < 0.2, "held in front of the body, not where the camera looks")
+	await _run([{"ticks": 2, "tap": InputFrame.B_DROP}, {"ticks": 20}])

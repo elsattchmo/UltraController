@@ -99,6 +99,15 @@ enum Gait { WALK, JOG }
 ## shove and hurt a little (a 10 kg box thrown at full charge is ~45).
 @export_range(5, 300, 1) var impact_knockdown := 40.0
 
+@export_group("Balance")
+## Standing on an edge with nothing under the middle of you over a drop deeper than this (m):
+## you teeter, and after teeter_time lose your balance and topple off (ragdoll). Walking out
+## over the edge steps off it as normal; stepping back recovers.
+@export_range(0.2, 3, 0.05) var balance_drop := 0.45
+@export_range(0.1, 3, 0.05) var teeter_time := 0.7
+## 0 turns the balance check off.
+@export var enable_balance := true
+
 @export_group("Water")
 @export var enable_swim := true
 ## Water this deep above the feet floats you (about chest height).

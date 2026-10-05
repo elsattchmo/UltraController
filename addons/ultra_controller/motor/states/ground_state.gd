@@ -6,7 +6,11 @@ const Id := MotorState.Id
 
 func next(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 	if not s.is_grounded():
+		s.teeter = 0.0
 		return Id.FALL
+	if s.teeter >= m.profile.teeter_time:
+		s.teeter = 0.0
+		return Id.RAGDOLL           # lost balance on an edge (push set by update_balance)
 	if m.can_jump(s) and s.stance != MotorState.Stance.CRAWL and m.has_headroom(s, m.profile.stand_height):
 		return Id.JUMP
 	if s.state == Id.LAND:
@@ -56,3 +60,4 @@ func tick(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 	m.body.velocity = Vector3(hv.x, minf(m.body.velocity.y, 0.0), hv.z)
 	m.update_body_yaw(s, i, hv.length() > 0.2 or wish.length() > 0.1)
 	m.move(s, true)
+	m.update_balance(s, i)

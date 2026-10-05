@@ -124,12 +124,14 @@ func start_from_args() -> void:
 
 
 ## Split-screen device assignment: one player = any device; more = keyboard for P1 and a
-## pad each for the rest.
+## pad each for the rest (P2 = pad 0 ...). P1 also gets the next pad after those, so with a
+## pad per player nobody's controller is left unclaimed (an unclaimed pad's Start - the
+## pause button - would hot-join a stray extra player).
 func _reserve_devices(n: int) -> void:
 	if n <= 1:
 		locals.reserve([[]])
 		return
-	var claims := [["kbm"]]
+	var claims := [["kbm", "joy%d" % (n - 1)]]
 	for i in range(1, n):
 		claims.append(["joy%d" % (i - 1)])
 	locals.reserve(claims)

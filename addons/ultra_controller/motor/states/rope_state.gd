@@ -1,7 +1,9 @@
 extends MotorStateHandler
 ## ROPE: hanging from a rope = a pendulum around the anchor, length = grip distance + body.
-## SWING ropes: forward/back pumps the swing in the facing direction. CLIMB ropes: forward/
-## back climbs. Jump lets go and keeps the swing's velocity. All in MotorState (trav_from holds
+## Looking level, forward/back pumps the swing in the facing direction; looking up / down,
+## forward/back climbs (UltraRope.climb_input). Jump lets go and keeps the swing's velocity.
+## The body collides on the way round: walls stop the swing, and feet meeting the ground
+## (climbing down, or a low swing) put you on your feet. All in MotorState (trav_from holds
 ## the swing velocity), so it's predicted like everything else.
 
 const Id := MotorState.Id
@@ -12,6 +14,8 @@ func next(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 	var rope := UltraRope.find(s.trav_id)
 	if rope == null:
 		return Id.FALL
+	if s.is_grounded():
+		return Id.MOVE if m.horizontal(s.trav_from).length() > 0.3 or i.move.length() > 0.1 else Id.IDLE
 	if UltraMotor.pressed_edge(s, i, InputFrame.B_JUMP) and s.state_time > 0.15:
 		m.body.velocity = s.trav_from + Vector3.UP * 2.0
 		return Id.FALL
@@ -22,6 +26,9 @@ func next(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 
 
 func exit(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
+	if s.is_grounded():
+		m.body.velocity = m.horizontal(s.trav_from) * 0.5      # stepped off onto the ground
+		return
 	m.body.velocity = s.trav_from + Vector3.UP * 1.5 if m.body.velocity == Vector3.ZERO else m.body.velocity
 
 
@@ -36,7 +43,7 @@ func tick(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 	var L := s.trav_s + BODY
 	var v := s.trav_from
 	v.y -= m.gravity * m.dt
-	if rope.kind == UltraRope.Kind.SWING and climb == 0.0:
+	if climb == 0.0:
 		var fwd := Vector3(-sin(i.yaw), 0, -cos(i.yaw))
 		var right := Vector3(cos(i.yaw), 0, -sin(i.yaw))
 		# Pumping adds energy only on the low part of the arc, so a swing tops out ~65 degrees.
@@ -48,10 +55,21 @@ func tick(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 	var p := prev + v * m.dt
 	var d := p - a
 	p = a + d.normalized() * L if d.length() > 0.001 else a + Vector3.DOWN * L
-	v = (p - prev) / m.dt
+	# The body collides on its way round: walls and props stop it; the ground under the feet
+	# (climbing down to it, or a swing that low) puts you on your feet.
+	var grounded := false
+	var col := KinematicCollision3D.new()
+	m.body.global_position = prev
+	var hit := m.body.test_move(m.body.global_transform, p - prev, col)
+	if hit:
+		p = prev + col.get_travel()
+		grounded = col.get_normal().y > 0.7 and s.state_time > 0.3 and v.y <= 0.5
+	v = (p - prev) / m.dt               # the motion actually made (no radial part, no wall)
+	if hit and not grounded:
+		v -= col.get_normal() * minf(v.dot(col.get_normal()), 0.0)
 	# Body follows the rope; keep the radial part out of the stored velocity.
 	s.trav_from = v
 	m.body.global_position = p
-	m.body.velocity = v
-	s.set_flag(MotorState.F_GROUNDED, false)
+	m.body.velocity = Vector3.ZERO if grounded else v
+	s.set_flag(MotorState.F_GROUNDED, grounded)
 	m.update_body_yaw(s, i, true)

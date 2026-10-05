@@ -49,6 +49,9 @@ roles = {
 &"ladder_idle": "Ladder_Idle",
 &"land_heavy": "Land_Three_Point",
 &"ledge_hang": "Ledge_Hang",
+&"limp_f": "mixamo/Injured_Walk",
+&"limp_b": "mixamo/Injured_Walk_Back",
+&"teeter": "mixamo/Lose_Balance",
 &"hang_idle": "mixamo/Braced_Catch",
 &"shimmy_l": "mixamo/Shimmy_L",
 &"shimmy_r": "mixamo/Shimmy_R",
@@ -86,6 +89,8 @@ roles = {
 &"wall_climb": "Climb_Wall"
 }
 authored_speed = {
+"mixamo/Injured_Walk": 0.7,
+"mixamo/Injured_Walk_Back": 0.7,
 "mixamo/Strafe_Walk_L": 1.62,
 "mixamo/Strafe_Walk_R": 1.61,
 "mixamo/Ladder_Climb": 0.65,

@@ -24,6 +24,7 @@ static func clear_cache() -> void:
 
 ## Called once at boot (UltraController bootstrap). Replays rebinds stored in user://.
 static func apply_user_rebinds() -> void:
+	ensure_ui_pad_events()
 	var cfg := ConfigFile.new()
 	if cfg.load(UltraInputSettings.USER_FILE) != OK or not cfg.has_section("bindings"):
 		return
@@ -51,7 +52,20 @@ static func reset_user_rebinds() -> void:
 		cfg.erase_section("bindings")
 	cfg.save(UltraInputSettings.USER_FILE)
 	InputMap.load_from_project_settings()
+	ensure_ui_pad_events()
 	clear_cache()
+
+
+## Gamepad accept / cancel on Godot's ui_* actions (UltraInputDefaults.UI_PAD_EVENTS), for host
+## projects whose project.godot hasn't been seeded: without them A / B do nothing in menus.
+static func ensure_ui_pad_events() -> void:
+	for act: String in UltraInputDefaults.UI_PAD_EVENTS:
+		if not InputMap.has_action(act):
+			continue
+		for spec: String in UltraInputDefaults.UI_PAD_EVENTS[act]:
+			var ev := UltraInputDefaults.make_event(spec)
+			if not UltraInputDefaults.has_event(InputMap.action_get_events(act), ev):
+				InputMap.action_add_event(act, ev)
 
 
 ## Device id for an event: "kbm" for keyboard & mouse, "joy<N>" for pads, "" for others.

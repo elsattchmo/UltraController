@@ -12,13 +12,22 @@ const TRACKED: Array[StringName] = [
 	&"jump", &"crouch", &"sprint", &"walk", &"interact", &"primary", &"secondary",
 	&"throw", &"drop", &"reload", &"lean_left", &"lean_right", &"toggle_view", &"dodge", &"leave",
 	&"hotbar_1", &"hotbar_2", &"hotbar_3", &"hotbar_4", &"hotbar_5", &"hotbar_6", &"hotbar_7", &"hotbar_8", &"hotbar_9",
-	&"hotbar_next", &"hotbar_prev", &"inventory",
+	&"hotbar_next", &"hotbar_prev", &"inventory", &"respawn",
 ]
 
 ## Empty = accept every device (single local player).
 var claimed_devices: PackedStringArray = []
-## While false (menus open, window unfocused) the player stands still.
-var enabled := true
+## While false (menus open, window unfocused) the player stands still. Turning it back on
+## forgets every held input, so the button that closed a menu (A = jump, B = crouch, Start)
+## doesn't also act in the game: an action counts again once it is pressed afresh.
+var enabled := true:
+	set(v):
+		if v and not enabled:
+			_strength.clear()
+			_prev_pressed.clear()
+			_interact_t = -1.0
+			_interact_pulse = 0
+		enabled = v
 ## Mouse look only while the pointer is captured (the demo captures it on click).
 var require_mouse_capture := true
 ## Multiplier used while aiming down sights.

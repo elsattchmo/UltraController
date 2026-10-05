@@ -221,3 +221,49 @@ func test_roll_hands_back_control() -> void:
 	info("roll handed back control after %.2f s; then moving %.2f m/s" % [left_at / 60.0, v.length()])
 	check(rolled and left_at > 0 and left_at < 110, "control returns within ~1.8 s of the roll")
 	check(v.length() > 0.8 and c.state.state == MotorState.Id.MOVE, "and the player moves on the stick")
+
+
+## Balance on edges (the 1 m ledge block, top x 61..65 at z -32..-28): perched on the lip with
+## nothing under the middle you teeter and topple off; walking off on purpose just falls;
+## stepping back recovers.
+func _perch(c: UltraCharacter, yaw: float) -> void:
+	c.teleport(Vector3(65.17, 1.02, -30.0), yaw)
+	await ticks(1)
+
+
+func test_edge_balance() -> void:
+	var c := spawn("ledge_100", "res://addons/ultra_controller/profiles/fps.tres", false)
+	await ticks(3)
+	# 1. Standing still on the lip.
+	await _perch(c, 0.0)
+	var states := {}
+	var toppled_at := -1
+	bot(c).set_steps([{"ticks": 240, "yaw": 0.0}])
+	for k in 240:
+		await ticks(1)
+		states[MotorState.Id.keys()[c.state.state]] = true
+		if toppled_at < 0 and c.state.state == MotorState.Id.RAGDOLL:
+			toppled_at = k
+	info("perched still: %s; toppled after %.2f s, ends at y %.2f" % [states.keys(), toppled_at / 60.0, c.state.pos.y])
+	check(toppled_at > 20 and toppled_at < 90, "standing on the lip, you lose your balance (%.2f s)" % (toppled_at / 60.0))
+	check(c.state.pos.y < 0.3, "and end up on the ground below")
+	await hold(c, 300, Vector2.ZERO, 0, 0.0)
+	# 2. Walking off on purpose: a normal fall, no ragdoll.
+	c.teleport(Vector3(63.0, 1.02, -30.0), -PI * 0.5)        # facing +X
+	await ticks(5)
+	states.clear()
+	bot(c).set_steps([{"ticks": 150, "move": Vector2(0, 1), "yaw": -PI * 0.5}])
+	for k in 150:
+		await ticks(1)
+		states[MotorState.Id.keys()[c.state.state]] = true
+	info("walk off: %s, pos %s hp %.0f legs %s" % [states.keys(), c.state.pos, c.state.hp, c.state.limb_hp])
+	check(not states.has("RAGDOLL") and states.has("FALL"), "walking off the edge just drops you down (no stumble)")
+	# 3. Perched, then stepping back onto the block: recovers.
+	await _perch(c, 0.0)
+	states.clear()
+	bot(c).set_steps([{"ticks": 10, "yaw": 0.0}, {"ticks": 60, "move": Vector2(-1, 0), "yaw": 0.0}])
+	for k in 70:
+		await ticks(1)
+		states[MotorState.Id.keys()[c.state.state]] = true
+	info("step back: %s, pos %s" % [states.keys(), c.state.pos])
+	check(not states.has("RAGDOLL") and c.state.pos.y > 0.9 and c.state.pos.x < 65.0, "stepping back from the edge keeps you on top")

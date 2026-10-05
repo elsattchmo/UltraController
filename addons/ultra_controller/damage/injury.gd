@@ -9,12 +9,24 @@ const S := UltraLimbs.Status
 ## Ground speed multiplier from the worse leg.
 static func speed_mult(s: MotorState, dp: DamageProfile) -> float:
 	var worst := maxi(UltraLimbs.leg(s, true), UltraLimbs.leg(s, false))
-	match worst:
-		S.INJURED:
-			return dp.injured_leg_speed
-		S.CRIPPLED, S.SEVERED:
-			return dp.crippled_leg_speed
-	return 1.0
+	if worst >= S.CRIPPLED:
+		return dp.crippled_leg_speed
+	# Graded: a grazed leg slows you a little, an injured one (<= 50 %) to injured_leg_speed.
+	var d := maxf(leg_damage(s, true), leg_damage(s, false))
+	return lerpf(1.0, dp.injured_leg_speed, clampf(d / LEG_INJURED_DAMAGE, 0.0, 1.0))
+
+
+## How hurt a leg is, 0 (fine, >= 85 % health) .. 1 (<= 25 %, crippled or gone): drives the
+## limp (and the speed above). Deterministic: from MotorState.
+const LEG_INJURED_DAMAGE := 0.583   ## leg_damage at 50 % health (the INJURED threshold)
+static func leg_damage(s: MotorState, left: bool) -> float:
+	var R := UltraLimbs.Region
+	var worst := 0.0
+	for r: int in ([R.THIGH_L, R.SHIN_L] if left else [R.THIGH_R, R.SHIN_R]):
+		if (s.severed >> r) & 1:
+			return 1.0
+		worst = maxf(worst, clampf((85.0 - float(s.limb_hp[r])) / 60.0, 0.0, 1.0))
+	return worst
 
 
 static func can_sprint(s: MotorState) -> bool:

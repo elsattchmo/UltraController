@@ -110,6 +110,12 @@ static func hook(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 			var lad := UltraLadder.find_enterable(s.pos, dir, i.move.y)
 			if lad:
 				return _enter_ladder(m, s, lad)
+			# A climbable wall: walking into it starts climbing (like a ladder; jumping at it
+			# works too, below).
+			if forward and not jump:
+				var cw := _climbable_ahead(m, s, dir)
+				if cw:
+					return _enter_wall(m, s, cw)
 			if jump and (forward or s.state == Id.IDLE):
 				# Running? Look further ahead so a vault / mantle can start from a stride away.
 				var reach := WALL_PROBE + m.horizontal(s.vel).length() * 0.18
@@ -191,6 +197,22 @@ static func _enter_ladder(m: UltraMotor, s: MotorState, lad: UltraLadder) -> int
 	s.trav_normal = lad.normal()
 	_face(s, lad.normal())
 	return MotorState.Id.LADDER
+
+
+## A CLIMBABLE surface right in front at chest height that we're walking into.
+static func _climbable_ahead(m: UltraMotor, s: MotorState, dir: Vector3) -> Ledge:
+	var from := s.pos + Vector3.UP * 1.2
+	var q := PhysicsRayQueryParameters3D.create(from, from + dir * (m.profile.radius + 0.3), UltraLayers.CLIMBABLE, [m.body.get_rid()])
+	var hit := m.body.get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty():
+		return null
+	var n := Vector3((hit.normal as Vector3).x, 0, (hit.normal as Vector3).z)
+	if n.length() < 0.5 or n.normalized().dot(dir) > -0.6:
+		return null
+	var l := Ledge.new()
+	l.normal = n.normalized()
+	l.climbable = true
+	return l
 
 
 static func _enter_wall(m: UltraMotor, s: MotorState, l: Ledge) -> int:

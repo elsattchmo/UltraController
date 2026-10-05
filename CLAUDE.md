@@ -60,7 +60,9 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   state, so client and server pick the same move. Scripted moves (MANTLE/VAULT/LEDGE_CLIMB) are
   `trav_from -> trav_to` over `trav_dur`; hang/ladder/rope keep their anchor in `trav_*` fields.
   Ropes are a pendulum in MotorState (`trav_from` = swing velocity); the verlet rope is cosmetic.
-  Swing ropes climb too (`UltraRope.climb_input`: forward + look up/down > 28 deg).
+  Every rope swings and climbs (Kind is legacy): looking level, forward/back pumps; looking
+  up/down > 25 deg, forward/back climbs toward the look (`UltraRope.climb_input`). The rope
+  body collides (`test_move`): walls stop the swing, feet meeting the ground stand you up.
   Hands/feet on rope, ledge, ladder are presentation (`UltraTraversalVisual`, IK priority 111 >
   equipment 110). `HandIKModifier` has 4 limbs (hands, then feet); `hand_basis(h, fingers, palm)`
   orients a hand (palm learned from the curled fingers). Ledge: palms over the lip. Ladder: the
@@ -127,7 +129,30 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   centre; never on a TickPlatform - a raycast can see its pose a frame stale during replay);
   the fall clip waits 0.15 s of real air before showing.
 - Hard landings (> hard_land_speed 13.5 m/s, ~9 m) crumple into RAGDOLL and get up.
-- Ledge hang = BlendSpace1D braced idle (Braced_Catch last frame) / Shimmy_L / Shimmy_R;
+- Edge balance (`UltraMotor.update_balance`, after every ground move): nothing under the
+  capsule's middle within a step and a drop > `balance_drop` (0.45 m) below = perched on a
+  lip. Walking out over the drop steps off (normal FALL); stepping back recovers; otherwise
+  `MotorState.teeter` counts up and at `teeter_time` (0.7 s) you topple off (RAGDOLL, push
+  toward the drop). The arms windmill meanwhile (role `teeter`, Lose_Balance 3.3-4.4 s,
+  upper-body Blend2 "teeter" at the end of the root tree).
+- Climbable walls (CLIMBABLE layer): walking into one starts WALL_CLIMB (jumping at it too).
+- Menus work on a pad: ui_accept/ui_cancel get A/B (`UltraInputDefaults.UI_PAD_EVENTS`,
+  merged by install_missing and at runtime by `UltraInput.ensure_ui_pad_events`); shared focus
+  style `ui/menu_style.gd`; open menus join group `ultra_modal` (HUD ignores input). Re-enabling
+  a LocalInputSource drops held inputs (A on Resume used to jump). Companion = F8 only (it was
+  also D-pad Up, which spawned the "extra player" in split screen). Suite `ui` drives menus with
+  simulated pad events.
+- Limp: `UltraInjury.leg_damage` grades each leg 0 (>= 85 %) .. 1 (<= 25 % / crippled /
+  severed); it drives the speed (graded to injured_leg_speed at 50 %) and the animation:
+  a second ground blend space with Mixamo Injured_Walk / Injured_Walk_Back (roles
+  limp_f/limp_b; mirrored per bad leg - the forward clip's bad leg is the left, the back
+  clip's the right) mixed in by the damage.
+- Holding: the prop follows `UltraGrab.hold_yaw` (aim when the body faces the aim, else the
+  body's facing - third person). The hold spring damps against the holder's velocity and turn
+  rate (it used to trail by speed * 2 zeta / omega). Team lift: a grip more than TEAM_REACH
+  (0.3 m) from your hands for 0.25 s (after a 1 s grace) lets go.
+- Ledge hang = BlendSpace1D braced idle (Braced_Catch last frame) / Shimmy_L (-1, moves to the
+  character's left) / Shimmy_R (+1);
   ladder = Mixamo Ladder_Climb. `AnimDriver._refit` shifts a clip's Hips track so the mean hand
   position hits a target, and turns clips authored facing -Z (the ladder clip) round first.
 - Roll (ROOT_MOTION) hands control back once 97% of its travel is done and there's input.

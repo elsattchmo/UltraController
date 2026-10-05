@@ -142,7 +142,7 @@ func _ropes() -> void:
 	r.add_child(cw)
 	b._own(cw)
 	b._block(r, "ClimbWallTop", Vector3(4, 6.0, 3), x + 7, -28.5, 6.0, b.grid)
-	b._label(r, "CLIMBABLE", Vector3(x + 7, 6.5, -25.4), 48)
+	b._label(r, "CLIMBABLE WALL\nwalk into it to climb", Vector3(x + 7, 6.5, -25.4), 48)
 	b._marker("climb_wall", Vector3(x + 7, 0.1, -24.4), 0)
 
 

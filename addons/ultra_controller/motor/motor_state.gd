@@ -70,6 +70,7 @@ var trav_s: float = 0.0            ## ladder height / rope grip distance
 var trav_kind: int = 0             ## UltraTraversal.Move
 ## Water.
 var breath: float = 20.0           ## seconds of air left
+var teeter: float = 0.0            ## seconds perched on an edge over a drop (loses balance)
 
 
 func has(f: int) -> bool:
@@ -108,6 +109,7 @@ func copy_from(o: MotorState) -> void:
 	trav_from = o.trav_from; trav_to = o.trav_to; trav_t = o.trav_t; trav_dur = o.trav_dur
 	trav_id = o.trav_id; trav_s = o.trav_s; trav_kind = o.trav_kind
 	breath = o.breath
+	teeter = o.teeter
 
 
 ## Error metric used by reconciliation (metres, plus a penalty for discrete mismatches).
@@ -169,6 +171,7 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_float(trav_s)
 	buf.put_u8(trav_kind)
 	buf.put_u16(clampi(int(roundf(breath * 100.0)), 0, 65535))
+	buf.put_u8(clampi(int(roundf(teeter * 100.0)), 0, 255))
 
 
 func decode(buf: StreamPeerBuffer) -> void:
@@ -218,6 +221,7 @@ func decode(buf: StreamPeerBuffer) -> void:
 	trav_s = buf.get_float()
 	trav_kind = buf.get_u8()
 	breath = buf.get_u16() / 100.0
+	teeter = buf.get_u8() / 100.0
 
 
 ## Round-trip through the codec, so a predicting client and the server hold the same bits.

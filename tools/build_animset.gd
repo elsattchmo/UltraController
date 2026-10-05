@@ -18,7 +18,7 @@ const ROLES := {
 	&"roll": "Roll_RM", &"dodge_back": "Dodge_back_RM", &"dodge_left": "Dodge_left_RM", &"dodge_right": "Dodge_right_RM",
 	&"knockback": "Hit_Knockback_RM", &"climb_up_1m": "ClimbUp_1m_RM", &"crawl_rm": "Crawl_RM",
 	&"ladder_idle": "Ladder_Idle", &"ladder_climb": "mixamo/Ladder_Climb", &"wall_climb": "Climb_Wall", &"pipe_climb": "Pipe_Climb",
-	&"ledge_hang": "Ledge_Hang", &"hang_idle": "mixamo/Braced_Catch", &"shimmy_l": "mixamo/Shimmy_L", &"shimmy_r": "mixamo/Shimmy_R", &"swim_idle": "Swim_Idle", &"swim_f": "Swim_Fwd",
+	&"ledge_hang": "Ledge_Hang", &"hang_idle": "mixamo/Braced_Catch", &"shimmy_l": "mixamo/Shimmy_L", &"shimmy_r": "mixamo/Shimmy_R", &"limp_f": "mixamo/Injured_Walk", &"limp_b": "mixamo/Injured_Walk_Back", &"teeter": "mixamo/Lose_Balance", &"swim_idle": "Swim_Idle", &"swim_f": "Swim_Fwd",
 	&"interact": "Interact", &"pickup": "PickUp_Table", &"push": "Push", &"throw": "OverhandThrow", &"throw_object": "Throw_Object",
 	&"consume": "Consume", &"open_chest": "Chest_Open", &"kick_door": "Kick_Breach",
 	&"pistol_idle": "Pistol_Idle", &"pistol_aim_up": "Pistol_Aim_Up", &"pistol_aim_neutral": "Pistol_Aim_Neutral",

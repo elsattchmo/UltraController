@@ -395,6 +395,50 @@ func move(s: MotorState, allow_step: bool) -> void:
 		s.air_time += dt
 
 
+## Balance on edges. The capsule's round bottom can rest on a ledge's lip with its middle out
+## over the drop (the engine still calls that floor). Nothing under the middle and a real drop
+## below: walking out over it steps off (normal fall); stepping back recovers; anything else
+## teeters, and after `teeter_time` you topple off toward the drop (RAGDOLL, push in trav_from).
+## Pure physics queries on the state: client and server agree.
+func update_balance(s: MotorState, i: InputFrame) -> void:
+	if not profile.enable_balance or not s.is_grounded() or s.platform_id != 0 or s.stance == MotorState.Stance.CRAWL:
+		s.teeter = 0.0
+		return
+	var p := body.global_position
+	var space := body.get_world_3d().direct_space_state
+	var mask := body.collision_mask & ~UltraLayers.CHARACTER
+	var ray := func(from: Vector3, depth: float) -> Dictionary:
+		var q := PhysicsRayQueryParameters3D.create(from + Vector3.UP * 0.3, from + Vector3.DOWN * depth, mask, [body.get_rid()])
+		return space.intersect_ray(q)
+	if not (ray.call(p, profile.step_height + 0.08) as Dictionary).is_empty():
+		s.teeter = maxf(s.teeter - dt * 2.0, 0.0)
+		return
+	var below: Dictionary = ray.call(p, profile.balance_drop + 0.3)
+	if not below.is_empty() and p.y - (below.position as Vector3).y < profile.balance_drop:
+		s.teeter = maxf(s.teeter - dt * 2.0, 0.0)
+		return
+	# Which way is the drop: the directions around the rim with nothing under them.
+	var void_dir := Vector3.ZERO
+	for k in 8:
+		var d := Vector3(sin(k * TAU / 8.0), 0.0, cos(k * TAU / 8.0))
+		if (ray.call(p + d * profile.radius * 0.9, profile.step_height + 0.08) as Dictionary).is_empty():
+			void_dir += d
+	if void_dir.length() < 0.01:
+		s.teeter = 0.0
+		return
+	void_dir = void_dir.normalized()
+	var wish := horizontal(i.move_world(i.yaw))
+	var toward := wish.dot(void_dir)
+	if wish.length() > 0.2 and toward > 0.35:
+		s.teeter = 0.0            # walking off on purpose
+		return
+	if wish.length() > 0.2 and toward < -0.3:
+		s.teeter = maxf(s.teeter - dt * 2.0, 0.0)
+		return
+	s.teeter += dt
+	s.trav_from = void_dir * 2.4 + Vector3.UP * 0.8     # the push if we go over
+
+
 ## Walking off a step (or just after stepping up onto one): stay on the ground if there's
 ## walkable floor within a step's height below, instead of a few ticks of "falling".
 func _snap_down() -> bool:
