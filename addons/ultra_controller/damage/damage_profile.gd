@@ -18,6 +18,14 @@ enum Gore { OFF, NO_BLOOD, FULL }
 @export var region_mult := PackedFloat32Array([3.0, 1.0, 0.55, 0.45, 0.55, 0.45, 0.7, 0.55, 0.7, 0.55, 0.3, 0.3, 0.35, 0.35])
 ## A single hit that takes a region this far past zero cuts it off (bladed / blast: any overkill).
 @export var sever_overkill := 45.0
+## A blast (buckshot summed / explosion) into the torso this big that kills blows the body in
+## two at the waist (with a cut set: UltraCutBody).
+@export var halve_min := 90.0
+## ... and only from this close (m), and only a load that struck the waist (within
+## `halve_reach` of the cut between Spine and Chest). Further off a blast from the front
+## opens the belly and throws the body.
+@export var halve_range := 3.0
+@export var halve_reach := 0.13
 ## Bitmask of regions that can come off (bit = UltraLimbs.Region); torso never does.
 @export_flags("Head", "Torso", "Upper arm L", "Forearm L", "Upper arm R", "Forearm R", "Thigh L", "Shin L", "Thigh R", "Shin R", "Hand L", "Hand R", "Foot L", "Foot R")
 var severable := 0b11111111111101

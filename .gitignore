@@ -1,3 +1,4 @@
 .godot/
 /override.cfg
 *.tmp
+__pycache__/

@@ -175,15 +175,15 @@ func test_sever_each_region() -> void:
 		hurt(t, r, 200.0, &"blade", Vector3.RIGHT)
 		await ticks(6)
 		var mask := UltraLimbs.sever_mask(r)
-		var sk := t.skeleton
-		var root := sk.find_bone(UltraLimbs.BONES[r][0])
-		var fp: Transform3D = await final_pose(sk, root)
-		var sc := fp.basis.get_scale().length()
-		var cap := t.body_fx._caps.has(r)
 		var gibs := get_tree().get_nodes_in_group(&"ultra_gib")
 		res.append("%s:%s" % [UltraLimbs.NAMES[r], "cut" if (t.state.severed & mask) == mask else "-"])
 		check((t.state.severed & mask) == mask, "%s: severed with what hangs off it" % UltraLimbs.NAMES[r])
-		check(sc < 0.01 and cap, "%s: collapsed on the body with a cap (scale %.3f)" % [UltraLimbs.NAMES[r], sc])
+		# The pre-cut pieces (UltraCutBody): everything that came off hidden, its stump shown.
+		var cuts := t.body_fx.cuts
+		var nm := UltraCutBody.region_name(r)
+		var seg := cuts.part("Seg_" + nm) if cuts else null
+		var stump := cuts.part("Cap_%s_stump" % nm) if cuts else null
+		check(seg != null and not seg.visible and stump != null and stump.visible, "%s: the piece gone, its stump on the body" % UltraLimbs.NAMES[r])
 		check(not gibs.is_empty(), "%s: flew off as a gib" % UltraLimbs.NAMES[r])
 		if r == R.HEAD:
 			check(t.state.state == Id.DEAD, "losing the head is fatal")

@@ -54,7 +54,9 @@ var getup_yaw := NAN                      ## world yaw the get-up clip should st
 var limit_violation := 0.0
 ## Steers the tumbling body toward the knocked-down capsule (so the get-up starts near it).
 var pull_strength := 1.0
-                ## largest joint-limit overshoot this ragdoll (deg)
+## Torso blown in two (UltraBodyFX halve): the Chest body has no joint to the Spine any more.
+var split := false
+var _split_dir := Vector3.INF             ## asked for before the ragdoll started
 
 
 func setup(c: UltraCharacter) -> void:
@@ -70,6 +72,30 @@ func setup(c: UltraCharacter) -> void:
 	var dm := sk.get_node_or_null("Dismember")
 	if dm:
 		sk.move_child(dm, -1)
+	_make_bodies(false)
+
+
+## (Re)build the physical bodies and their muscles. `split`: the Chest body without a joint to
+## the Spine (the torso in two). Bodies are always made fresh: Jolt keeps a PhysicalBone3D's
+## joint as it was first made whatever joint_type is set to later - and a body swapped in by
+## hand came back with no joint at all (every later death split the body at the waist).
+func _make_bodies(split_chest: bool) -> void:
+	var sk := character.skeleton
+	if not bones.is_empty():
+		# A new simulator too, in the old one's place: bodies added to one that has already
+		# run never got their joints back.
+		var at := sim.get_index()
+		var old := sim
+		sim = PhysicalBoneSimulator3D.new()
+		sim.name = "Ragdoll"
+		sim.active = old.active
+		sim.influence = old.influence
+		sk.remove_child(old)
+		old.free()
+		sk.add_child(sim)
+		sk.move_child(sim, at)
+	bones.clear()
+	_ctl.clear()
 	var specs := BODIES.duplicate()
 	specs.append(["RightFoot", "RightToes", 0.045, 1.0, J.CONE, 25.0, 10.0])
 	for spec: Array in specs:
@@ -100,7 +126,7 @@ func setup(c: UltraCharacter) -> void:
 		cap.height = maxf(length + r * 0.6, r * 2.0 + 0.01)
 		cs.shape = cap
 		pb.add_child(cs)
-		if b == sk.find_bone("Hips"):
+		if b == sk.find_bone("Hips") or (split_chest and spec[0] == "Chest"):
 			pb.joint_type = PhysicalBone3D.JOINT_TYPE_NONE
 		elif spec[4] == J.HINGE:
 			pb.joint_type = PhysicalBone3D.JOINT_TYPE_HINGE
@@ -118,6 +144,9 @@ func setup(c: UltraCharacter) -> void:
 		sim.add_child(pb)
 		bones.append(pb)
 	_build_controllers(sk)
+	if split_chest:
+		var chest := _pb_for(sk, sk.find_bone("Chest"))
+		_ctl = _ctl.filter(func(c: Dictionary) -> bool: return c.pb != chest)
 
 
 func _pb_for(sk: Skeleton3D, b: int) -> PhysicalBone3D:
@@ -354,6 +383,67 @@ func _physics_process(delta: float) -> void:
 			stop()
 
 
+## The torso in two at the waist: the Chest body lets go of the Spine (each half its own
+## ragdoll, no muscle across the cut, no pull toward the capsule) and the blast throws the upper
+## half along `dir`. Put back when the ragdoll stops (respawn).
+func split_waist(dir: Vector3) -> void:
+	if split:
+		return
+	if not active:
+		_split_dir = dir
+		return
+	var sk := character.skeleton
+	var cb := sk.find_bone("Chest")
+	var chest := _pb_for(sk, cb)
+	if chest == null:
+		return
+	split = true
+	# Rebuilt with the Chest body free, the simulation restarted round it: every body kept
+	# where it is and moving as it was (the bodies are made in the same order every time).
+	var keep := []
+	for pb in bones:
+		keep.append([pb.global_transform, pb.linear_velocity, pb.angular_velocity])
+	sim.physical_bones_stop_simulation()
+	_make_bodies(true)
+	sim.active = true
+	sim.influence = 1.0
+	sim.physical_bones_start_simulation()
+	for i in mini(bones.size(), keep.size()):
+		var pb := bones[i]
+		pb.global_transform = keep[i][0]
+		pb.linear_velocity = keep[i][1]
+		pb.angular_velocity = keep[i][2]
+	_snapshot_pose()
+	pull_strength = 0.0
+	for pb in bones:
+		var b := sk.find_bone(pb.bone_name)
+		var upper := false
+		while b >= 0:
+			if b == cb:
+				upper = true
+				break
+			b = sk.get_bone_parent(b)
+		# The blast carries the upper half off; the legs and hips mostly drop where they stood.
+		# (The body already carries the death push - up to 10 m/s point blank: the half it
+		# carries off gets a part of it, ~3 m of flight.)
+		if upper:
+			pb.linear_velocity = pb.linear_velocity * 0.45 + dir * 1.0 + Vector3.UP * 1.2
+		else:
+			pb.linear_velocity = pb.linear_velocity * 0.15 + Vector3.UP * 0.3
+
+
+func _rejoin() -> void:
+	var was := split
+	split = false
+	_split_dir = Vector3.INF
+	pull_strength = 1.0
+	if was:
+		sim.physical_bones_stop_simulation()
+		sim.active = false
+		sim.influence = 0.0
+		_make_bodies(false)
+
+
 func start() -> void:
 	active = true
 	_getting_up = false
@@ -371,9 +461,15 @@ func start() -> void:
 	_airborne = not character.state.is_grounded()
 	limit_violation = 0.0
 	_snapshot_pose()
+	if _split_dir != Vector3.INF:
+		var d := _split_dir
+		_split_dir = Vector3.INF
+		split_waist(d)
 
 
 func stop() -> void:
+	if split or _split_dir != Vector3.INF:
+		_rejoin()
 	active = false
 	_getting_up = false
 	sim.physical_bones_stop_simulation()

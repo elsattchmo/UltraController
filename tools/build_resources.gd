@@ -93,6 +93,8 @@ func _profiles() -> void:
 func _body() -> void:
 	var b := BodyProfile.new()
 	b.body_scene = load("res://assets/characters/mannequin/mannequin.glb")
+	if ResourceLoader.exists("res://assets/characters/mannequin/mannequin_cuts.glb"):
+		b.cut_scene = load("res://assets/characters/mannequin/mannequin_cuts.glb")
 	b.anim_set = load("res://assets/characters/mannequin/mannequin_animset.tres")
 	b.library = load("res://assets/characters/mannequin/anims/ual.res")
 	var err := ResourceSaver.save(b, "res://assets/characters/mannequin/mannequin_body_profile.tres")

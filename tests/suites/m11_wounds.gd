@@ -316,14 +316,30 @@ func test_hand_and_foot_come_off() -> void:
 	check((t.state.severed >> R.HAND_R) & 1 == 1, "the right hand came off")
 	check((t.state.severed >> R.FOREARM_R) & 1 == 0, "the forearm stayed on")
 	check(UltraInjury.weapon_hand(t.state) == -1, "the weapon goes to the left hand")
-	var caps := 0
-	for n in t.skeleton.find_children("Stump", "Node3D", true, false):
-		caps += 1
-	check(caps >= 1, "a cut-end on the stump (%d)" % caps)
+	# The pre-cut pieces (UltraCutBody): the hand piece hidden, the wrist's fitted end shown
+	# right where the hand was, the forearm still on.
+	var sk := t.skeleton
+	var stump := sk.get_node_or_null("Cut_Cap_HAND_R_stump") as MeshInstance3D
+	var hand := sk.get_node_or_null("Cut_Seg_HAND_R") as MeshInstance3D
+	var fore := sk.get_node_or_null("Cut_Seg_FOREARM_R") as MeshInstance3D
+	check(stump != null and stump.visible, "the wrist's cut end shows")
+	check(hand != null and not hand.visible and fore != null and fore.visible, "hand piece gone, forearm on")
+	check(not t.body_mesh().visible, "the one-piece body is swapped out")
+	if stump:
+		var tris: Array = []
+		t.body_fx._collect_tris(stump, -1, tris)
+		var mid := Vector3.ZERO
+		for tr: Array in tris:
+			mid += (tr[0] + tr[1] + tr[2]) / 3.0
+		mid /= maxi(tris.size(), 1)
+		var wrist := sk.global_transform * sk.get_bone_global_pose(sk.find_bone("RightHand")).origin
+		check(mid.distance_to(wrist) < 0.05, "the cut end sits on the wrist (%.3f m off)" % mid.distance_to(wrist))
 	var gib_caps := 0
 	for g in get_tree().get_nodes_in_group(&"ultra_gib"):
-		if (g as Node).find_child("Stump", true, false):
-			gib_caps += 1
+		for mi in (g as Node).find_children("*", "MeshInstance3D", true, false):
+			var m := (mi as MeshInstance3D).mesh
+			if m and m.get_surface_count() >= 3:          # skin + fat + meat + bone...
+				gib_caps += 1
 	check(gib_caps >= 1, "the hand that came off has its cut end")
 	blow(t, 60.0, Vector3(0, 0, 1), &"blade", true, R.FOOT_L)
 	await ticks(20)
@@ -341,3 +357,186 @@ func test_heart_shot_with_a_flying_round() -> void:
 	UltraBallistics.instance(get_tree()).fire(c, heart + Vector3(0, 0.0015, -15.0), [Vector3(0, 0, 1)], ItemDB.get_def(&"rifle"))
 	await ticks(10)
 	check(t.state.has(MotorState.F_HEART), "a carbine round through the heart at 15 m")
+
+
+## A point-blank blast through the middle that kills: the body comes apart at the waist - the
+## two halves (pre-cut, sealed) shown, the ragdoll's spine let go so the halves part, guts out.
+func test_blast_through_the_waist_halves_the_body() -> void:
+	var t := dummy(Vector3(-24, 0.05, -70), 0.0)
+	await ticks(30)
+	var aim := t.state.pos + Vector3.UP * 1.05
+	var from := aim + Vector3(0, 0, -0.5)
+	var dirs := []
+	for i in 9:
+		dirs.append((aim - from).normalized())
+	UltraCombat.hitscan_pellets(c, from, dirs, ItemDB.get_def(&"shotgun"))
+	await ticks(5)
+	check(t.state.state == MotorState.Id.DEAD, "killed")
+	var cuts := t.body_fx.cuts
+	check(cuts != null and cuts.torso == UltraCutBody.Torso.HALVED, "blown in two")
+	var shown := []
+	for n: String in cuts.parts:
+		if (cuts.parts[n] as MeshInstance3D).visible:
+			shown.append(n)
+	info("shown: %s" % [shown])
+	check("Seg_WAIST_UP" in shown and "Seg_WAIST_DOWN" in shown and "Cap_WAIST_up" in shown and "Seg_HEAD" in shown, "both halves, sealed, the rest on")
+	check(t.ragdoll.split, "the ragdoll's spine let go")
+	await ticks(90)
+	var rd := t.ragdoll
+	var pbs := {}
+	for pb in rd.bones:
+		pbs[pb.bone_name] = pb
+	# (The physical bodies: the skeleton's posed bones only read right at skeleton_updated.)
+	var gap := (pbs["Spine"] as Node3D).global_position.distance_to((pbs["Chest"] as Node3D).global_position)
+	check(gap > 0.4 and gap < 6.0, "the halves came apart (%.2f m between the bodies, 0.15 joined)" % gap)
+	var neck := (pbs["Chest"] as Node3D).global_position.distance_to((pbs["Head"] as Node3D).global_position)
+	var hip := (pbs["Spine"] as Node3D).global_position.distance_to((pbs["Hips"] as Node3D).global_position)
+	check(neck < 0.5 and hip < 0.3, "each half holds together (chest-head %.2f, spine-hips %.2f)" % [neck, hip])
+
+	var guts := 0
+	for n in get_tree().root.find_children("*", "UltraGuts", true, false):
+		guts += 1
+	check(guts >= 4, "guts out of both halves (%d)" % guts)
+
+
+## A blast into the belly from the front opens it (the pre-cut cavity), guts hang out of it.
+func test_belly_blast_opens_the_cavity() -> void:
+	var t := dummy(Vector3(-20, 0.05, -70), 0.0)
+	await ticks(30)
+	t.body_fx.torso_blast(t.state.pos + Vector3(0, 1.0, -0.14), Vector3(0, 0, 1), 60.0)
+	await ticks(5)
+	var cuts := t.body_fx.cuts
+	check(cuts != null and cuts.torso == UltraCutBody.Torso.OPEN, "the belly is open")
+	var open := cuts.part("Seg_TORSO_OPEN")
+	check(open != null and open.visible and not cuts.part("Seg_TORSO").visible, "the opened torso shown")
+	if open:
+		var mats := []
+		for si in open.mesh.get_surface_count():
+			var m := open.get_active_material(si) as BaseMaterial3D
+			mats.append("%s %s a%.2f" % [open.mesh.surface_get_material(si).resource_name if open.mesh.surface_get_material(si) else "-", m.transparency if m else -1, m.albedo_color.a if m else -1.0])
+		info("surfaces: %s" % [mats])
+	# The guts hang out of it, down the front - not up, not inside the body.
+	await ticks(120)
+	var top := -INF
+	var inside := 0
+	var caps: Array = t.body_fx.body_capsules()
+	for g in get_tree().root.find_children("*", "UltraGuts", true, false):
+		var gu := g as UltraGuts
+		for i in range(gu.free_links, gu._p.size() - (gu.free_links if gu.anchor_b else 0)):
+			var p: Vector3 = gu._p[i]
+			top = maxf(top, p.y - t.state.pos.y)
+			for c: Array in caps:
+				var a: Vector3 = c[0]
+				var ab: Vector3 = (c[1] as Vector3) - a
+				var tt := clampf((p - a).dot(ab) / maxf(ab.length_squared(), 1e-8), 0.0, 1.0)
+				if (p - (a + ab * tt)).length() < (c[2] as float) - 0.01:
+					inside += 1
+	info("guts: highest point %.2f m up, %d points inside the body" % [top, inside])
+	check(top < 1.2, "the guts hang down (highest %.2f m)" % top)
+	check(inside == 0, "no gut inside the body (%d points)" % inside)
+
+
+## Halving is a one-off: after a respawn the body is whole again - a later death by a pistol
+## round leaves it in one piece (the ragdoll's spine joint back, no skin stretched across).
+func test_halved_body_is_whole_after_respawn() -> void:
+	var t := dummy(Vector3(-28, 0.05, -70), 0.0)
+	await ticks(30)
+	var aim := t.state.pos + Vector3.UP * 1.05
+	var dirs := []
+	for i in 9:
+		dirs.append(Vector3(0, 0, 1))
+	UltraCombat.hitscan_pellets(c, aim + Vector3(0, 0, -0.5), dirs, ItemDB.get_def(&"shotgun"))
+	await ticks(40)
+	check(t.ragdoll.split, "halved first")
+	t.respawn(Transform3D(Basis(), Vector3(-28, 0.05, -70)))
+	await ticks(40)
+	check(not t.ragdoll.split and (t.body_fx.cuts == null or not t.body_fx.cuts.active), "whole again after the respawn")
+	for i in 6:
+		UltraCombat.hitscan(c, t.state.pos + Vector3(0, 1.1, -3), Vector3(0, 0, 1), ItemDB.get_def(&"pistol"))
+		await ticks(3)
+	check(t.state.state == MotorState.Id.DEAD, "shot dead with a pistol")
+	await ticks(90)
+	check(not t.ragdoll.split, "not halved by a pistol")
+	var pbs := {}
+	for pb in t.ragdoll.bones:
+		pbs[pb.bone_name] = pb
+	var gap := (pbs["Spine"] as Node3D).global_position.distance_to((pbs["Chest"] as Node3D).global_position)
+	check(gap < 0.25, "the spine holds together (%.2f m)" % gap)
+
+
+## Only a blast at point blank INTO THE WAIST halves: the same load from 6 m opens the belly
+## (from the front) and throws the body; point blank into the head or the chest doesn't halve.
+func test_halving_needs_close_and_the_waist() -> void:
+	var cases := [["far waist", 1.05, 6.0], ["close head", 1.62, 0.6], ["close chest", 1.38, 0.5]]
+	var x := -40.0
+	for cs: Array in cases:
+		var t := dummy(Vector3(x, 0.05, -70), 0.0)
+		x -= 4.0
+		await ticks(30)
+		var aim: Vector3 = t.state.pos + Vector3.UP * float(cs[1])
+		var dirs := []
+		for i in 9:
+			dirs.append(Vector3(0, 0, 1))
+		var start := t.state.pos
+		UltraCombat.hitscan_pellets(c, aim + Vector3(0, 0, -float(cs[2])), dirs, ItemDB.get_def(&"shotgun"))
+		await ticks(45)
+		var cuts := t.body_fx.cuts
+		var halved := cuts != null and cuts.torso == UltraCutBody.Torso.HALVED
+		info("%s: dead %s, halved %s, torso %s, moved %.1f m" % [cs[0], t.state.state == MotorState.Id.DEAD, halved, cuts.torso if cuts else -1, t.state.pos.distance_to(start)])
+		check(not halved and not t.ragdoll.split, "%s: not halved" % cs[0])
+		if cs[0] == "far waist":
+			check(cuts != null and cuts.torso == UltraCutBody.Torso.OPEN, "far waist: the belly opened")
+			check(t.state.pos.distance_to(start) > 0.8, "far waist: thrown back")
+
+
+## Halving mustn't bog the game down: the dozen guts it hangs out cost little while they swing
+## and nothing once they lie still (they sleep). (Whole-frame times in this scene are too noisy
+## to compare.)
+func test_halving_is_cheap() -> void:
+	var t := dummy(Vector3(-56, 0.05, -70), 0.0)
+	await ticks(60)
+	var aim := t.state.pos + Vector3.UP * 1.05
+	var dirs := []
+	for i in 9:
+		dirs.append(Vector3(0, 0, 1))
+	var t0 := Time.get_ticks_usec()
+	UltraCombat.hitscan_pellets(c, aim + Vector3(0, 0, -0.5), dirs, ItemDB.get_def(&"shotgun"))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	info("the halving frames: %.1f ms" % ((Time.get_ticks_usec() - t0) / 1000.0))
+	var mine := func() -> Array:
+		var out := []
+		for g in get_tree().root.find_children("*", "UltraGuts", true, false):
+			var gu := g as UltraGuts
+			if is_instance_valid(gu.anchor) and t.is_ancestor_of(gu.anchor):
+				out.append(gu)
+		return out
+	var cost := func() -> float:
+		var sum := 0.0
+		for gu: UltraGuts in mine.call():
+			sum += gu.cost_us
+			gu.cost_us = 0
+		return sum
+	cost.call()
+	await _frame_cost(60)
+	var moving: float = cost.call() / 60000.0
+	await ticks(110)                     # (the dummy respawns 5 s after dying: gore cleared)
+	cost.call()
+	await _frame_cost(40)
+	var still: float = cost.call() / 40000.0
+	var asleep := 0
+	var all: Array = mine.call()
+	for g: UltraGuts in all:
+		if g._asleep:
+			asleep += 1
+	info("guts: %.2f ms a frame swinging, %.2f ms lying still (%d of %d asleep)" % [moving, still, asleep, all.size()])
+	check(moving < 5.0, "swinging guts cost < 5 ms a frame (%.2f)" % moving)
+	check(still < 0.5, "guts lying still cost next to nothing (%.2f ms)" % still)
+
+
+func _frame_cost(n: int) -> float:
+	var sum := 0.0
+	for i in n:
+		await get_tree().process_frame
+		sum += Performance.get_monitor(Performance.TIME_PROCESS) + Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
+	return sum / n * 1000.0

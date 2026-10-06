@@ -16,6 +16,10 @@ Commands
   make-shotgun     Build the 12-gauge pump-action (the fore-end is its own "Pump" node).
   make-rifle       Build the carbine (two-handed: pistol grip, handguard, stock, iron sights,
                    magazine, markers) and export assets/items/rifle/rifle.glb.
+  make-cuts        Pre-cut the character for dismemberment (tools/blender/make_cuts.py):
+                   body pieces split at every joint, fitted end caps, head chunks, an opened
+                   belly -> assets/characters/mannequin/mannequin_cuts.glb. Re-run after
+                   changing the model (--src, --bone-map, --out).
   mixamo-test      Write intake/mixamo/<name>.fbx: the mannequin renamed to Mixamo bone names
                    with one action — exercises the Mixamo intake without a Mixamo account.
 
@@ -515,6 +519,12 @@ def cmd_make_machete(args):
     k.export(root, args.out or os.path.join(PROJECT, "assets", "items", "machete", "machete.glb"))
 
 
+def cmd_make_cuts(args):
+    sys.path.insert(0, os.path.dirname(__file__))
+    import make_cuts
+    make_cuts.run(args.src, args.bone_map, args.out)
+
+
 def main():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     p = argparse.ArgumentParser(prog="ultra_blender")
@@ -538,12 +548,16 @@ def main():
     mb.add_argument("--out")
     mm = sub.add_parser("make-machete")
     mm.add_argument("--out")
+    mc = sub.add_parser("make-cuts")
+    mc.add_argument("--src", default=os.path.join(PROJECT, "assets", "characters", "mannequin", "mannequin.glb"))
+    mc.add_argument("--bone-map", default=os.path.join(PROJECT, "addons", "ultra_controller", "import", "bone_maps", "ue_mannequin_humanoid.tres"))
+    mc.add_argument("--out", default=os.path.join(PROJECT, "assets", "characters", "mannequin", "mannequin_cuts.glb"))
     mt = sub.add_parser("mixamo-test")
     mt.add_argument("--action")
     mt.add_argument("--name")
     a = p.parse_args(argv)
     {"make-edit": cmd_make_edit, "export-actions": cmd_export_actions, "mirror": cmd_mirror,
-     "make-pistol": cmd_make_pistol, "make-rifle": cmd_make_rifle, "make-shotgun": cmd_make_shotgun, "make-bat": cmd_make_bat, "make-machete": cmd_make_machete, "mixamo-test": cmd_mixamo_test}[a.cmd](a)
+     "make-pistol": cmd_make_pistol, "make-rifle": cmd_make_rifle, "make-shotgun": cmd_make_shotgun, "make-bat": cmd_make_bat, "make-machete": cmd_make_machete, "mixamo-test": cmd_mixamo_test, "make-cuts": cmd_make_cuts}[a.cmd](a)
 
 
 if __name__ == "__main__":

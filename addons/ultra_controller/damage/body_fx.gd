@@ -1,8 +1,11 @@
 class_name UltraBodyFX
 extends Node
 ## A character's injury presentation: hit reactions (clip + per-bone flinch), and what follows a
-## limb coming off - the region collapses (DismemberModifier), a flesh cap covers the joint, the
-## limb flies off as a gib (its triangles skinned on the CPU in the pose it had) and bleeds.
+## limb coming off. With a cut set (BodyProfile.cut_scene, see UltraCutBody) the body switches to
+## its pre-cut pieces: the severed pieces hide, the fitted stump shows, the pieces that came off
+## fly as a gib (skinned on the CPU in the pose they had) with their own fitted end; the belly
+## opens into a cavity, the head bursts into its chunks, the torso comes apart at the waist.
+## Without one: the region collapses (DismemberModifier) under a cap built at runtime.
 ## Reads MotorState; never writes it. Gore follows the character's DamageProfile.
 
 const R := UltraLimbs.Region
@@ -36,7 +39,8 @@ var character: UltraCharacter
 var dismember: DismemberModifier
 var injury: InjuryModifier
 var _shown := 0                            ## severed mask currently presented
-var _caps := {}                            ## region -> Node3D
+var _caps := {}                            ## region -> Node3D (no cut set: runtime caps)
+var cuts: UltraCutBody                     ## the pre-cut pieces (null: the model has none)
 
 
 func setup(c: UltraCharacter) -> void:
@@ -48,13 +52,19 @@ func setup(c: UltraCharacter) -> void:
 	dismember = DismemberModifier.new()
 	dismember.name = "Dismember"
 	sk.add_child(dismember)                 # last: after IK, look and injuries
+	if UltraCutBody.available(c):
+		cuts = UltraCutBody.new(c)
+		UltraCutBody.prewarm(c.body_profile.cut_scene)
+	sk.skeleton_updated.connect(_capture_pose)
 	UltraNet.world.on_event(&"sever", _on_sever)
+	UltraNet.world.on_event(&"halve", _on_halve)
 	UltraNet.world.on_event(&"hit", _on_hit_gore)
 	UltraNet.world.on_event(&"heart", _on_heart)
 
 
 func _exit_tree() -> void:
 	UltraNet.world.off_event(&"sever", _on_sever)
+	UltraNet.world.off_event(&"halve", _on_halve)
 	UltraNet.world.off_event(&"hit", _on_hit_gore)
 	UltraNet.world.off_event(&"heart", _on_heart)
 
@@ -65,6 +75,8 @@ func _process(delta: float) -> void:
 	var s := character.state
 	if s.severed != _shown:
 		_apply_mask(s.severed)
+	if cuts and cuts.active:
+		cuts.sync_layers()
 	var S := UltraLimbs.Status
 	injury.dangle_l = 1.0 if UltraLimbs.status(s, R.ARM_L) == S.CRIPPLED or UltraLimbs.status(s, R.FOREARM_L) == S.CRIPPLED else 0.0
 	injury.dangle_r = 1.0 if UltraLimbs.status(s, R.ARM_R) == S.CRIPPLED or UltraLimbs.status(s, R.FOREARM_R) == S.CRIPPLED else 0.0
@@ -85,6 +97,83 @@ func _process(delta: float) -> void:
 				(n as Node).queue_free()
 		_gore.clear()
 		_guts = 0
+	if respawned and cuts and cuts.torso != UltraCutBody.Torso.WHOLE:
+		cuts.torso = UltraCutBody.Torso.WHOLE
+		_apply_mask(s.severed)
+
+
+# ---------------------------------------------------------------- the posed body
+
+var _world: Array[Transform3D] = []        ## each bone's final pose (world), last skeleton update
+var _caps_frame := -1
+var _caps_list: Array = []
+
+
+## The bones' final poses (after IK, the ragdoll...): only readable at skeleton_updated - read
+## any other time, a ragdolling body's bones are where the animation would have them standing.
+func _capture_pose() -> void:
+	var sk := character.skeleton
+	var n := sk.get_bone_count()
+	if _world.size() != n:
+		_world.resize(n)
+	var g := sk.global_transform
+	for b in n:
+		_world[b] = g * sk.get_bone_global_pose(b)
+
+
+func _bone_world(b: int) -> Transform3D:
+	if b >= 0 and b < _world.size():
+		return _world[b]
+	var sk := character.skeleton
+	return sk.global_transform * sk.get_bone_global_pose(maxi(b, 0))
+
+
+## Capsules [a, b, radius] (world) round the body's pieces still on, for loose gore (guts) to
+## lie against instead of through. A torso in two is two capsules, apart.
+const BODY_CAPS := [
+	[R.TORSO, "Hips", "Spine", 0.13], [R.TORSO, "Spine", "Chest", 0.12], [R.TORSO, "Chest", "Neck", 0.14],
+	[R.HEAD, "Neck", "Head", 0.06], [R.HEAD, "Head", "", 0.1],
+	[R.ARM_L, "LeftUpperArm", "LeftLowerArm", 0.05], [R.FOREARM_L, "LeftLowerArm", "LeftHand", 0.042],
+	[R.ARM_R, "RightUpperArm", "RightLowerArm", 0.05], [R.FOREARM_R, "RightLowerArm", "RightHand", 0.042],
+	[R.THIGH_L, "LeftUpperLeg", "LeftLowerLeg", 0.075], [R.SHIN_L, "LeftLowerLeg", "LeftFoot", 0.052],
+	[R.THIGH_R, "RightUpperLeg", "RightLowerLeg", 0.075], [R.SHIN_R, "RightLowerLeg", "RightFoot", 0.052],
+]
+
+
+func body_capsules() -> Array:
+	var f := Engine.get_physics_frames()
+	if f == _caps_frame:
+		return _caps_list
+	_caps_frame = f
+	_caps_list = []
+	var sk := character.skeleton
+	if sk == null:
+		return _caps_list
+	var halved := cuts != null and cuts.torso == UltraCutBody.Torso.HALVED
+	for c: Array in BODY_CAPS:
+		var r: int = c[0]
+		if r != R.TORSO and ((cuts and cuts.active and cuts.gone(r)) or (cuts == null and (character.state.severed >> r) & 1)):
+			continue
+		var a := sk.find_bone(c[1])
+		if a < 0:
+			continue
+		var pa := _bone_world(a)
+		var pb: Vector3
+		if c[2] == "":
+			pb = pa.origin + pa.basis.y.normalized() * 0.12
+		else:
+			var b := sk.find_bone(c[2])
+			if b < 0:
+				continue
+			pb = _bone_world(b).origin
+		if halved and c[1] == "Spine":
+			var ends := _waist_ends()
+			if ends.size() == 2:
+				_caps_list.append([pa.origin, ends[0][0], c[3]])
+				_caps_list.append([ends[1][0], pb, c[3]])
+				continue
+		_caps_list.append([pa.origin, pb, c[3]])
+	return _caps_list
 
 
 # ---------------------------------------------------------------- bleeding
@@ -117,13 +206,9 @@ func _drive_blood(delta: float) -> void:
 	if _beat <= 0.0:
 		_beat = 0.75 if not dead else 1.4
 		beat = true
-	for r: int in _caps:
-		var att := _caps[r] as Node3D
-		if not is_instance_valid(att) or att.get_child_count() == 0:
-			continue
-		var cap := att.get_child(0) as Node3D
-		var at := cap.global_position
-		var out := cap.global_basis.y.normalized()
+	for st: Array in _stumps():
+		var at: Vector3 = st[0]
+		var out: Vector3 = st[1]
 		if flow <= 0.0:
 			continue
 		if beat:
@@ -140,7 +225,7 @@ func _drive_blood(delta: float) -> void:
 			var sk2 := character.skeleton
 			var ch2 := sk2.find_bone("UpperChest")
 			if ch2 >= 0:
-				var g := sk2.global_transform * sk2.get_bone_global_pose(ch2)
+				var g := _bone_world(ch2)
 				var front := -character.visual_root.global_basis.z
 				if lying:
 					front = Vector3.DOWN
@@ -160,7 +245,7 @@ func _drive_blood(delta: float) -> void:
 			var b := sk.find_bone(bones[0] if r != R.TORSO else "Chest")
 			if b < 0:
 				continue
-			var bp := sk.global_transform * sk.get_bone_global_pose(b).origin
+			var bp := _bone_world(b).origin
 			fx.blood_fx.spray(bp + Vector3(randf_range(-0.04, 0.04), 0.0, randf_range(-0.04, 0.04)), Vector3.DOWN, 1, 0.4, 25.0, 0.006, character)
 	if _drip_t <= 0.0:
 		_drip_t = 0.09
@@ -169,9 +254,53 @@ func _drive_blood(delta: float) -> void:
 		var sk := character.skeleton
 		var ch := sk.find_bone("Chest")
 		if ch >= 0:
-			fx.blood_fx.pool(sk.global_transform * sk.get_bone_global_pose(ch).origin, 0.16)
+			fx.blood_fx.pool(_bone_world(ch).origin, 0.16)
 	if _pool_t <= 0.0:
 		_pool_t = 0.45
+
+
+## Open cut ends on the body: [world point, out of the wound].
+func _stumps() -> Array:
+	var out := []
+	if cuts and cuts.active:
+		var sk := character.skeleton
+		for r: int in PARENT_BONE:
+			if not cuts.gone(r) or cuts.gone(PARENT_REGION[r]):
+				continue
+			var j := sk.find_bone(UltraLimbs.BONES[r][0])
+			var p := sk.find_bone(PARENT_BONE[r])
+			if j < 0 or p < 0:
+				continue
+			var jp := _bone_world(j).origin
+			var pp := _bone_world(p).origin
+			out.append([jp, (jp - pp).normalized() if jp.distance_to(pp) > 0.01 else Vector3.UP])
+		if cuts.torso == UltraCutBody.Torso.HALVED:
+			for w: Array in _waist_ends():
+				out.append(w)
+		return out
+	for r: int in _caps:
+		var att := _caps[r] as Node3D
+		if not is_instance_valid(att) or att.get_child_count() == 0:
+			continue
+		var cap := att.get_child(0) as Node3D
+		out.append([cap.global_position, cap.global_basis.y.normalized()])
+	return out
+
+
+## The two ends of a torso in two (posed): [point, out] for the lower half (on Spine) and the
+## upper half (on Chest) - they part once the ragdoll's halves fly apart.
+func _waist_ends() -> Array:
+	var sk := character.skeleton
+	var sp := sk.find_bone("Spine")
+	var ch := sk.find_bone("Chest")
+	if sp < 0 or ch < 0:
+		return []
+	var half := sk.get_bone_rest(ch).origin.length() * 0.5
+	var a := _bone_world(sp)
+	var b := _bone_world(ch)
+	var ay := a.basis.y.normalized()
+	var by := b.basis.y.normalized()
+	return [[a.origin + ay * half, ay], [b.origin - by * half, -by]]
 
 
 ## Hit reaction: the matching clip on the upper body, and a kick on the bone that was hit.
@@ -189,6 +318,16 @@ func react(region: int, dir: Vector3, amount: float, kind := &"bullet") -> void:
 
 func _apply_mask(mask: int) -> void:
 	_shown = mask
+	if cuts:
+		# The pieces: nothing collapses (the skin round a cut stays exactly where it is).
+		dismember.severed = 0
+		cuts.severed = mask
+		if mask != 0 or cuts.torso != UltraCutBody.Torso.WHOLE:
+			cuts.activate()
+			cuts.update()
+		else:
+			cuts.deactivate()
+		return
 	dismember.severed = mask
 	for r: int in PARENT_BONE:
 		var cut := (mask >> r) & 1 == 1
@@ -216,8 +355,8 @@ func _make_cap(r: int) -> Node3D:
 	# The open end of the limb, fitted to its cross-section at the joint (the posed skin of the
 	# limb it was cut from, within a couple of cm of the cut): fat, meat, bone, torn strands.
 	# (From the bone's posed transform: a new attachment only takes it next update.)
-	var parent_xf := sk.global_transform * sk.get_bone_global_pose(sk.find_bone(PARENT_BONE[r]))
-	var joint := sk.global_transform * sk.get_bone_global_pose(child).origin
+	var parent_xf := _bone_world(sk.find_bone(PARENT_BONE[r]))
+	var joint := _bone_world(child).origin
 	var axis := (joint - parent_xf.origin).normalized() if joint.distance_to(parent_xf.origin) > 0.01 else parent_xf.basis.y.normalized()
 	var ring := PackedVector3Array()
 	var bm := character.body_mesh()
@@ -311,7 +450,15 @@ func _on_hit_gore(target_id: int, pos: Vector3, dir: Vector3, amount: float, _at
 	var dp := character.damage_profile
 	if not dp.gore_on() or amount < GORE_MIN:
 		return
-	torso_blast(pos, dir.normalized(), amount)
+	# (At the end of the frame: the same blast may halve the body - its `halve` event comes
+	# after the hit - and then the halves are the wound: no skin chunks, no crater as well.)
+	_blast_unless_halved.call_deferred(pos, dir.normalized(), amount)
+
+
+func _blast_unless_halved(pos: Vector3, dir: Vector3, amount: float) -> void:
+	if cuts and cuts.torso == UltraCutBody.Torso.HALVED:
+		return
+	torso_blast(pos, dir, amount)
 
 
 ## A torso blown open at `point` (world) by a blast travelling `dir`.
@@ -325,7 +472,7 @@ func torso_blast(point: Vector3, dir: Vector3, amount: float) -> void:
 		var i := sk.find_bone(b)
 		if i < 0:
 			continue
-		var d := (sk.global_transform * sk.get_bone_global_pose(i).origin).distance_to(point)
+		var d := (_bone_world(i).origin).distance_to(point)
 		if d < bd:
 			bd = d
 			best = b
@@ -334,15 +481,23 @@ func torso_blast(point: Vector3, dir: Vector3, amount: float) -> void:
 	sk.add_child(att)
 	_gore.append(att)
 	# (The attachment only takes its bone's pose on the next skeleton update: work from the bone.)
-	var bone_xf := sk.global_transform * sk.get_bone_global_pose(sk.find_bone(best))
+	var bone_xf := _bone_world(sk.find_bone(best))
 	var at_local := bone_xf.affine_inverse() * (point + dir * 0.03)
-	# The wound: a ragged crater blown into the torso (meat, fat, a rib showing), facing out
-	# toward where the blast came from.
-	var r := clampf(0.04 + amount * 0.0008, 0.05, 0.08)
-	var w := UltraWoundMesh.crater(r, randi())
-	var out_l := (bone_xf.basis.inverse() * -dir).normalized()
-	w.transform = Transform3D(Basis(Quaternion(Vector3.UP, out_l)), at_local - out_l * 0.05)
-	att.add_child(w)
+	var front := -character.visual_root.global_basis.z
+	var into_front := dir.dot(front) < -0.2
+	if cuts and into_front:
+		# From the front: the belly blown open (the cut set's cavity).
+		if cuts.torso == UltraCutBody.Torso.WHOLE:
+			cuts.torso = UltraCutBody.Torso.OPEN
+			_apply_mask(character.state.severed)
+	elif cuts == null or cuts.torso != UltraCutBody.Torso.HALVED:
+		# The wound: a ragged crater blown into the torso (meat, fat, a rib showing), facing
+		# out toward where the blast came from.
+		var r := clampf(0.04 + amount * 0.0008, 0.05, 0.08)
+		var w := UltraWoundMesh.crater(r, randi())
+		var out_l := (bone_xf.basis.inverse() * -dir).normalized()
+		w.transform = Transform3D(Basis(Quaternion(Vector3.UP, out_l)), at_local - out_l * 0.05)
+		att.add_child(w)
 	# Chunks of the torso torn off (its own skin round the hit) and some flesh with them.
 	var tris: Array = []
 	var bm := character.body_mesh()
@@ -378,8 +533,7 @@ func torso_blast(point: Vector3, dir: Vector3, amount: float) -> void:
 			fx.blood_fx.splat_body(character, point + Vector3(randf_range(-0.2, 0.2), randf_range(-0.4, 0.1), randf_range(-0.2, 0.2)), randf_range(0.1, 0.2))
 	# Guts: a blast into the front of the torso spills them out of the stomach - a loop of
 	# intestine sagging out of the belly (both ends still inside) and a loose length hanging.
-	var front := -character.visual_root.global_basis.z
-	if dir.dot(front) < -0.2 and _guts < MAX_GUTS:
+	if into_front and _guts < MAX_GUTS:
 		_spill_guts(dir)
 
 
@@ -395,17 +549,23 @@ func _spill_guts(dir: Vector3) -> void:
 	att.bone_name = "Spine"
 	sk.add_child(att)
 	_gore.append(att)
-	var bone_xf := sk.global_transform * sk.get_bone_global_pose(sp)
+	var bone_xf := _bone_world(sp)
 	var front := -character.visual_root.global_basis.z
 	var belly := bone_xf.origin + front * 0.13 + Vector3.DOWN * 0.02
 	var side := character.visual_root.global_basis.x
 	var root := character.get_tree().current_scene if character.get_tree().current_scene else character.get_parent()
 	var inv := bone_xf.affine_inverse()
-	# The belly wound itself.
-	var w := UltraWoundMesh.crater(0.055, randi())
-	var out_l := (bone_xf.basis.inverse() * front).normalized()
-	w.transform = Transform3D(Basis(Quaternion(Vector3.UP, out_l)), inv * belly - out_l * 0.055)    # (sunk: the skin covers its rim)
-	att.add_child(w)
+	if cuts and cuts.active and cuts.torso == UltraCutBody.Torso.OPEN:
+		# Out of the cavity (between Spine and Chest, a little inside the skin).
+		var ch := sk.find_bone("Chest")
+		if ch >= 0:
+			belly = bone_xf.origin.lerp(_bone_world(ch).origin, 0.55) + front * 0.085
+	else:
+		# The belly wound itself.
+		var w := UltraWoundMesh.crater(0.055, randi())
+		var out_l := (bone_xf.basis.inverse() * front).normalized()
+		w.transform = Transform3D(Basis(Quaternion(Vector3.UP, out_l)), inv * belly - out_l * 0.055)    # (sunk: the skin covers its rim)
+		att.add_child(w)
 	# Two loops sagging out of the belly (both ends inside) and a loose length hanging below.
 	var specs := [[side * 0.035, -side * 0.04 + Vector3.UP * 0.025, 13], [-side * 0.01 + Vector3.DOWN * 0.02, side * 0.045 + Vector3.DOWN * 0.01, 9], [-side * 0.03, Vector3.INF, 10]]
 	for spec: Array in specs:
@@ -421,9 +581,84 @@ func _spill_guts(dir: Vector3) -> void:
 			att.add_child(b)
 			guts.anchor_b = b
 		guts.exclude = [character.get_rid()]
+		guts.colliders = body_capsules
 		root.add_child(guts)
 		guts.global_position = belly
 		guts.kick(front * 1.5 - dir * 0.0 + Vector3.DOWN * 0.5)
+		_gore.append(guts)
+
+
+## The torso blown in two at the waist (a close blast through the middle that kills): the
+## pieces switch to the two halves, the ragdoll's spine lets go between them (each half
+## flops on its own), the blast throws the upper half, guts hang out of both, lots of blood.
+func _on_halve(net_id: int, dir := Vector3.ZERO, point := Vector3.ZERO) -> void:
+	if character == null or net_id != character.net_id or cuts == null:
+		return
+	if cuts.torso == UltraCutBody.Torso.HALVED:
+		return
+	cuts.torso = UltraCutBody.Torso.HALVED
+	_apply_mask(character.state.severed)
+	if character.ragdoll:
+		character.ragdoll.split_waist(dir)
+	var fx := UltraEffects.instance()
+	if fx and fx.blood_fx and character.damage_profile.blood_on():
+		fx.blood_fx.spray(point + dir * 0.2, dir + Vector3.UP * 0.2, 140, 7.0, 35.0, 0.009, character)
+		fx.blood_fx.spray(point, Vector3.UP, 60, 3.5, 50.0, 0.008, character)
+		fx.blood_fx.spray(point, -dir + Vector3.UP * 0.4, 40, 2.5, 50.0, 0.008, character)
+		for i in 10:
+			fx.blood_fx.splat_body(character, point + Vector3(randf_range(-0.25, 0.25), randf_range(-0.4, 0.3), randf_range(-0.25, 0.25)), randf_range(0.12, 0.22))
+	for i in 5:
+		_flesh_blob(point, dir * randf_range(2.0, 5.0) + Vector3(randf_range(-1.5, 1.5), randf_range(0.5, 2.5), randf_range(-1.5, 1.5)))
+	# Guts out of both ends: loops and loose lengths, hanging from the halves as they part.
+	var ends := _waist_ends()
+	if ends.size() == 2:
+		var side := character.visual_root.global_basis.x
+		# Lots of it: long loose ropes and sagging loops out of each open end.
+		var fwd := -character.visual_root.global_basis.z
+		var lower := []
+		var upper := []
+		for k in 6:
+			var a := side * randf_range(-0.07, 0.07) + fwd * randf_range(-0.02, 0.06)
+			var loop := k % 3 == 1
+			var e: Vector3 = side * randf_range(-0.07, 0.07) + fwd * 0.03 if loop else Vector3.INF
+			lower.append([a, e, randi_range(16, 24) if not loop else randi_range(12, 18)])
+			var a2 := side * randf_range(-0.07, 0.07) + fwd * randf_range(-0.02, 0.06)
+			var e2: Vector3 = side * randf_range(-0.07, 0.07) + fwd * 0.03 if loop else Vector3.INF
+			upper.append([a2, e2, randi_range(14, 22) if not loop else randi_range(12, 16)])
+		_hang_guts("Spine", ends[0][0], lower, dir * 0.5 + Vector3.UP * 1.2)
+		_hang_guts("Chest", ends[1][0], upper, dir * 2.0 + Vector3.DOWN * 0.5)
+
+
+## Lengths of gut hanging out of `at` (world), riding `bone`: specs [[start offset, end offset
+## (Vector3.INF: loose), segments]], thrown out at `kick` m/s.
+func _hang_guts(bone: String, at: Vector3, specs: Array, kick: Vector3) -> void:
+	var sk := character.skeleton
+	var b := sk.find_bone(bone)
+	if b < 0:
+		return
+	var att := BoneAttachment3D.new()
+	att.bone_name = bone
+	sk.add_child(att)
+	_gore.append(att)
+	var inv := (_bone_world(b)).affine_inverse()
+	var root := character.get_tree().current_scene if character.get_tree().current_scene else character.get_parent()
+	for spec: Array in specs:
+		var a := Node3D.new()
+		a.position = inv * (at + (spec[0] as Vector3))
+		att.add_child(a)
+		var guts := UltraGuts.new()
+		guts.anchor = a
+		guts.segments = int(spec[2])
+		if spec[1] != Vector3.INF:
+			var e := Node3D.new()
+			e.position = inv * (at + (spec[1] as Vector3))
+			att.add_child(e)
+			guts.anchor_b = e
+		guts.exclude = [character.get_rid()]
+		guts.colliders = body_capsules
+		root.add_child(guts)
+		guts.global_position = at
+		guts.kick(kick + Vector3(randf_range(-0.5, 0.5), 0.0, randf_range(-0.5, 0.5)))
 		_gore.append(guts)
 
 
@@ -501,6 +736,9 @@ func _on_sever(net_id: int, cut: int, dir: Vector3, point: Vector3, kind := &"bu
 ## in their current pose. `pieces` > 1 breaks it into that many chunks round its middle, each
 ## with a bit of flesh in it, blown out at `burst` m/s (a head blown off by buckshot).
 func spawn_gib(cut: int, dir: Vector3, pieces := 1, burst := 0.0) -> void:
+	if cuts and cuts.active:
+		_spawn_cut_gib(cut, dir, pieces, burst)
+		return
 	var tris: Array = []            # [Vector3 a, b, c, normals..., uvs..., material]
 	for mi: MeshInstance3D in [character.body_mesh(), character.head_mesh]:
 		if mi != null and mi.mesh != null and mi.skin != null:
@@ -527,7 +765,7 @@ func spawn_gib(cut: int, dir: Vector3, pieces := 1, burst := 0.0) -> void:
 			if top:
 				var b := sk.find_bone(UltraLimbs.BONES[r][0])
 				if b >= 0:
-					_cap_at = sk.global_transform * sk.get_bone_global_pose(b).origin
+					_cap_at = _bone_world(b).origin
 					_cap_r = CAP_RADIUS[r]
 					_cap_bones = BONES_IN[r] if BONES_IN.has(r) else 1
 				break
@@ -566,18 +804,58 @@ func spawn_gib(cut: int, dir: Vector3, pieces := 1, burst := 0.0) -> void:
 		_make_gib(tris, g, gc, vel, pieces > 1)
 
 
-## The cut region's triangles from one skinned mesh, posed (world space).
+## The cut set's pieces of a severed chain as one gib (with the fitted end of its cut), or a head
+## blown apart as its chunks (each closed: skin, skull, meat).
+func _spawn_cut_gib(cut: int, dir: Vector3, pieces: int, burst: float) -> void:
+	var head := 1 << R.HEAD
+	var sources: Array = []
+	if pieces > 1 and cut == head:
+		for mi in cuts.head_chunks():
+			sources.append([mi])
+	else:
+		sources.append(cuts.gib_parts(cut))
+	var all_c := Vector3.ZERO
+	var sets: Array = []
+	for src: Array in sources:
+		var tris: Array = []
+		for mi: MeshInstance3D in src:
+			_collect_tris(mi, -1, tris)
+		if tris.is_empty():
+			continue
+		var c := Vector3.ZERO
+		for t: Array in tris:
+			c += (t[0] + t[1] + t[2]) / 3.0
+		c /= tris.size()
+		all_c += c
+		sets.append([tris, c])
+	if sets.is_empty():
+		return
+	all_c /= sets.size()
+	_cap_r = 0.0                         # (the ends are in the pieces)
+	for st: Array in sets:
+		var tris: Array = st[0]
+		var c: Vector3 = st[1]
+		var group := range(tris.size())
+		var vel := character.state.vel + dir * 3.5 + Vector3.UP * 2.0
+		if burst > 0.0:
+			var out := (c - all_c).normalized() if c.distance_to(all_c) > 0.001 else Vector3.UP
+			vel = character.state.vel + dir * burst * randf_range(0.5, 1.1) + out * burst * randf_range(0.4, 0.8) + Vector3.UP * randf_range(1.0, 3.0)
+		_make_gib(tris, group, c, vel, pieces > 1, true)
+
+
+## The cut region's triangles from one skinned mesh, posed (world space). `cut` -1: all of them.
 ## (`near` / `radius`: only the triangles whose middle is within `radius` of `near`.)
 func _collect_tris(mi: MeshInstance3D, cut: int, out: Array, near := Vector3.INF, radius := 0.0) -> void:
 	var sk := character.skeleton
-	var regions := _regions_for(mi, sk)
+	var every := cut < 0
+	var regions := [] if every else _regions_for(mi, sk)
 	var mesh := mi.mesh as ArrayMesh
 	var bind_xf: Array[Transform3D] = []
 	for i in mi.skin.get_bind_count():
 		var b := mi.skin.get_bind_bone(i)
 		if b < 0:
 			b = sk.find_bone(mi.skin.get_bind_name(i))
-		bind_xf.append(sk.global_transform * sk.get_bone_global_pose(maxi(b, 0)) * mi.skin.get_bind_pose(i))
+		bind_xf.append(_bone_world(maxi(b, 0)) * mi.skin.get_bind_pose(i))
 	for surf in mesh.get_surface_count():
 		var arr := mesh.surface_get_arrays(surf)
 		var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
@@ -586,12 +864,12 @@ func _collect_tris(mi: MeshInstance3D, cut: int, out: Array, near := Vector3.INF
 		var bones: PackedInt32Array = arr[Mesh.ARRAY_BONES]
 		var weights: PackedFloat32Array = arr[Mesh.ARRAY_WEIGHTS]
 		var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
-		var vr: PackedByteArray = regions[surf]
+		var vr: PackedByteArray = PackedByteArray() if every else regions[surf]
 		var per := bones.size() / maxi(verts.size(), 1)
 		var mat := mi.get_active_material(surf)
 		for t in range(0, idx.size(), 3):
 			var tri: Array[int] = [idx[t], idx[t + 1], idx[t + 2]]
-			if not ((cut >> vr[tri[0]]) & 1 and (cut >> vr[tri[1]]) & 1 and (cut >> vr[tri[2]]) & 1):
+			if not every and not ((cut >> vr[tri[0]]) & 1 and (cut >> vr[tri[1]]) & 1 and (cut >> vr[tri[2]]) & 1):
 				continue
 			var p: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, mat]
 			for j in 3:
@@ -613,13 +891,21 @@ func _collect_tris(mi: MeshInstance3D, cut: int, out: Array, near := Vector3.INF
 			out.append(p)
 
 
-func _make_gib(tris: Array, group: Array, center: Vector3, vel: Vector3, chunk: bool) -> void:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+func _make_gib(tris: Array, group: Array, center: Vector3, vel: Vector3, chunk: bool, solid := false) -> void:
+	# One surface per material (skin, fat, meat, bone...).
+	var by_mat := {}
 	var aabb := AABB()
 	var first := true
 	for k: int in group:
 		var t: Array = tris[k]
+		var mat: Variant = t[9]
+		if not by_mat.has(mat):
+			var st0 := SurfaceTool.new()
+			st0.begin(Mesh.PRIMITIVE_TRIANGLES)
+			if mat != null:
+				st0.set_material(mat)
+			by_mat[mat] = st0
+		var st: SurfaceTool = by_mat[mat]
 		for j in 3:
 			st.set_uv(t[6 + j])
 			st.set_normal(t[3 + j])
@@ -629,14 +915,16 @@ func _make_gib(tris: Array, group: Array, center: Vector3, vel: Vector3, chunk: 
 				first = false
 			else:
 				aabb = aabb.expand(t[j] - center)
-	st.set_material((tris[group[0]] as Array)[9])
+	var mesh := ArrayMesh.new()
+	for mat: Variant in by_mat:
+		(by_mat[mat] as SurfaceTool).commit(mesh)
 	var body := RigidBody3D.new()
 	body.collision_layer = 0
 	body.collision_mask = UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC
 	var m := MeshInstance3D.new()
-	m.mesh = st.commit()
+	m.mesh = mesh
 	body.add_child(m)
-	if chunk:
+	if chunk and not solid:
 		# Torn flesh in the broken piece (the skin alone is a hollow shell).
 		var f := MeshInstance3D.new()
 		var sm := SphereMesh.new()

@@ -19,6 +19,8 @@ class DamageInfo:
 	var shove := Vector3.ZERO
 	## A melee blow (a swing, a gun-butt): a held block stops most of it.
 	var melee := false
+	## How far the round flew to get here (m; a load's nearest pellet), -1 unknown.
+	var dist := -1.0
 
 
 const MASK := UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC | UltraLayers.CHARACTER | UltraLayers.HITBOX
@@ -49,6 +51,7 @@ static func resolve_bullet(shooter: UltraCharacter, hit: Dictionary, dir: Vector
 	info.collider = hit.collider
 	info.shape = int(hit.get("shape", 0))
 	info.region = int(hit.get("region", -1))
+	info.dist = dist
 	apply(info, float(def.stat("impulse", 4.0)))
 	var kind := &"flesh" if UltraCharacter.of_collider(hit.collider) else &"surface"
 	var shooter_peer := 0
@@ -139,6 +142,7 @@ static func apply_pellets(shooter: UltraCharacter, origin: Vector3, hits: Array,
 		info.collider = h.collider
 		info.shape = int(h.get("shape", 0))
 		info.region = int(h.get("region", -1))
+		info.dist = dist
 		UltraNet.world.broadcast(&"impact", [info.point, info.normal, &"flesh" if who else &"surface", shooter.net_id], false, shooter_peer)
 		if who:
 			var key := "%d:%d" % [who.get_instance_id(), info.region]
@@ -146,6 +150,8 @@ static func apply_pellets(shooter: UltraCharacter, origin: Vector3, hits: Array,
 				var g: DamageInfo = groups[key]
 				g.amount += per
 				g.dir = (g.dir + info.dir).normalized()
+				g.point = g.point.lerp(info.point, per / maxf(g.amount, 0.001))   # (where the load struck, on average)
+				g.dist = minf(g.dist, dist)
 			else:
 				info.kind = &"buckshot"
 				groups[key] = info

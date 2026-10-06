@@ -20,3 +20,7 @@ extends Resource
 ## Hit regions: capsules {region, a, b, r} in character space (feet origin, -Z forward), baked
 ## from the idle pose by tools/make_hitboxes.gd. Used to tell which limb a shot hit.
 @export var hitboxes: Array[Dictionary] = []
+## The model pre-cut for dismemberment (tools/blender/ultra_blender.py make-cuts; UltraCutBody):
+## each region its own mesh, fitted ends for every cut, head chunks, an opened belly, the torso
+## in two. Null: severed limbs collapse under caps built at runtime.
+@export var cut_scene: PackedScene

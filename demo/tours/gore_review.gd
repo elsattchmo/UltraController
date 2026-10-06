@@ -1,7 +1,8 @@
 extends UltraTour
 ## Review tour: gore on the dummies - a shotgun blast into the belly (guts hanging), a blast
 ## taking an arm off, a hand and a foot cut off, a heart shot - close up on the body (stumps,
-## wounds) and on the parts that came off.
+## wounds) and on the parts that came off; a point-blank blast through the waist (the body in
+## two), one through the head (it bursts into its chunks).
 ##   godot --path . --resolution 1280x720 -- --tour=gore_review --out=C:/Dev/verify/ultra/review/gore_review
 
 var _cam: Camera3D
@@ -32,13 +33,29 @@ func _build() -> void:
 		{"call": _look_gib, "t": 0.5, "slot": 0, "shot": "hand_gib"},
 		{"call": _heart, "t": 0.6, "slot": 0},
 		{"call": _look.bind(3, Vector3(0, 1.3, 0), Vector3(1.4, 0.2, 1.4)), "t": 1.2, "slot": 0, "shot": "heart"},
+		{"call": _halve, "t": 0.12, "slot": 0, "shot": "halve_0"},
+		{"call": _look.bind(4, Vector3(0, 0.7, 0), Vector3(2.6, 0.5, 0.6)), "t": 0.3, "slot": 0, "shot": "halve_1"},
+		{"t": 0.6, "slot": 0, "shot": "halve_2"},
+		{"t": 2.0, "slot": 0, "shot": "halve_3"},
+		{"call": _look_bone.bind(4, "Spine", Vector3(0.6, 0.5, 0.5)), "t": 0.4, "slot": 0, "shot": "halve_lower"},
+		{"call": _look_bone.bind(4, "Chest", Vector3(-0.5, 0.5, 0.6)), "t": 0.4, "slot": 0, "shot": "halve_upper"},
+		{"call": _head, "t": 0.1, "slot": 0, "shot": "head_0"},
+		{"call": _look.bind(5, Vector3(0, 1.2, 0), Vector3(2.2, 0.4, 1.0)), "t": 0.3, "slot": 0, "shot": "head_1"},
+		{"t": 1.5, "slot": 0, "shot": "head_2"},
+		{"call": _look_bone.bind(5, "Neck", Vector3(0.4, 0.4, 0.4)), "t": 0.5, "slot": 0, "shot": "head_stump"},
+		{"call": _look_gib, "t": 0.3, "slot": 0, "shot": "head_gib"},
+		{"call": _halve_back, "t": 0.15, "slot": 0, "shot": "back_0"},
+		{"call": _look.bind(6, Vector3(0, 0.6, 0), Vector3(-2.4, 0.9, -1.4)), "t": 0.6, "slot": 0, "shot": "back_1"},
+		{"t": 2.0, "slot": 0, "shot": "back_2"},
+		{"call": _look_bone.bind(6, "Spine", Vector3(0.5, 0.6, -0.5)), "t": 0.4, "slot": 0, "shot": "back_lower"},
+		{"call": _look_bone.bind(6, "Chest", Vector3(-0.5, 0.6, -0.5)), "t": 0.4, "slot": 0, "shot": "back_upper"},
 		{"t": 0.3, "slot": 0},
 	]
 
 
 func _setup() -> void:
 	var c: UltraCharacter = main.player
-	for k in 4:
+	for k in 7:
 		var at := c.state.pos + Vector3(-6.0 + k * 4.0, 0, -6.0)
 		var p := UltraNet.spawn_bot("Dummy", Transform3D(Basis(Vector3.UP, 0.0), at))
 		(p.character.input_source as BotInputSource).set_steps([{"ticks": 100000}])
@@ -87,6 +104,7 @@ func _blast(t: UltraCharacter, aim: Vector3, from_dist: float) -> void:
 
 
 func _belly() -> void:
+	_frames("belly")
 	var t := _d[0]
 	_blast(t, t.state.pos + Vector3.UP * 1.0, 1.2)
 
@@ -99,6 +117,7 @@ func _belly_fx() -> void:
 
 
 func _arm() -> void:
+	_frames("arm")
 	var t := _d[1]
 	var sk := t.skeleton
 	var p := sk.global_transform * sk.get_bone_global_pose(sk.find_bone("RightLowerArm")).origin
@@ -118,7 +137,50 @@ func _hand_foot() -> void:
 		t.apply_damage(d)
 
 
+var _ft: Array = []                        ## [label, frame times since]
+var _ft_label := ""
+
+
+func _frames(label: String) -> void:
+	if _ft_label != "" and not _ft.is_empty():
+		var sum := 0.0
+		var worst := 0.0
+		for d: float in _ft:
+			sum += d
+			worst = maxf(worst, d)
+		print("FRAMES %s: %d frames, avg %.1f ms, worst %.1f ms" % [_ft_label, _ft.size(), sum / _ft.size() * 1000.0, worst * 1000.0])
+	_ft = []
+	_ft_label = label
+
+
+func _halve() -> void:
+	_frames("halve")
+	var t := _d[4]
+	_blast(t, t.state.pos + Vector3.UP * 1.05, 0.5)
+
+
+## A point-blank blast into the waist from BEHIND.
+func _halve_back() -> void:
+	_frames("halve_back")
+	var t := _d[6]
+	var aim := t.state.pos + Vector3.UP * 1.05
+	var from := aim + Vector3(0, 0, 0.5)
+	var dirs := []
+	for i in 9:
+		dirs.append(((aim - from).normalized() + Vector3(randf_range(-0.015, 0.015), randf_range(-0.015, 0.015), 0)).normalized())
+	UltraCombat.hitscan_pellets(main.player, from, dirs, ItemDB.get_def(&"shotgun"))
+
+
+func _head() -> void:
+	_frames("head")
+	var t := _d[5]
+	var sk := t.skeleton
+	var p := sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Head")).origin + Vector3.UP * 0.06
+	_blast(t, p, 1.0)
+
+
 func _heart() -> void:
+	_frames("heart")
 	var t := _d[3]
 	var h := UltraHitboxes.heart(t, t.state.pos)
 	UltraCombat.hitscan(main.player, h + Vector3(0, 0, -3), Vector3(0, 0, 1), ItemDB.get_def(&"rifle"))
@@ -126,14 +188,18 @@ func _heart() -> void:
 
 func _process(delta: float) -> void:
 	super(delta)
+	if _ft_label != "":
+		_ft.append(delta)
 	if _cam:
 		_cam.current = true
 		if _bone_k >= 0:
 			var sk := _d[_bone_k].skeleton
 			var b := sk.find_bone(_bone)
 			# The end of the bone (where its child was cut off).
-			var gp := sk.global_transform * sk.get_bone_global_pose(b)
+			# (The posed bones - a ragdolling body's - from BodyFX's capture at skeleton_updated.)
+			var fx := _d[_bone_k].body_fx
+			var gp := fx._bone_world(b)
 			var child := sk.get_bone_children(b)
-			_focus = sk.global_transform * sk.get_bone_global_pose(child[0]).origin if child.size() > 0 else gp.origin
+			_focus = fx._bone_world(child[0]).origin if child.size() > 0 else gp.origin
 		_cam.global_position = _focus + _from
 		_cam.look_at(_focus)

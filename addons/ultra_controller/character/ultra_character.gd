@@ -665,6 +665,9 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 			state.trav_from = state.vel
 		motor.change_state(state, last_input, MotorState.Id.DEAD)
 		state.vel = motor.body.velocity
+		# A close blast through the middle blows the body in two (presentation, every machine).
+		if r == R.TORSO and info.kind in [&"buckshot", &"blast"] and info.amount >= dp.halve_min 				and info.dist <= dp.halve_range and _at_waist(info.point) and dp.dismemberment and dp.gore_on():
+			UltraNet.world.broadcast(&"halve", [net_id, info.dir, info.point], true)
 		UltraNet.world.broadcast(&"died", [net_id, info.attacker_id], true)
 		died.emit()
 	elif blocked:
@@ -684,6 +687,22 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 	elif info.shove != Vector3.ZERO and state.state not in [MotorState.Id.RAGDOLL, MotorState.Id.GET_UP]:
 		# A lighter blast: rocked back a step.
 		state.vel += Vector3(info.shove.x, 0.0, info.shove.z) * 0.7
+
+
+## `p` (world) is at the waist: on the lower torso capsule (hips -> chest), within
+## `halve_reach` of where the cut set divides the torso (72 % of the way up it).
+func _at_waist(p: Vector3) -> bool:
+	for c: Dictionary in UltraHitboxes.capsules(self, state.pos):
+		if c.region != UltraLimbs.Region.TORSO:
+			continue
+		var a: Vector3 = c.a
+		var ab: Vector3 = (c.b as Vector3) - a
+		var l := ab.length()
+		if l < 0.01:
+			return false
+		var t := (p - a).dot(ab) / (l * l)
+		return absf(t - 0.72) * l <= damage_profile.halve_reach
+	return false
 
 
 ## Blunt trauma (a club, a gun-butt, a thrown prop) to the head past `ko_head`, or a heavy

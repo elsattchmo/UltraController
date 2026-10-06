@@ -23,6 +23,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
      (only via `--script`: run through tool_runner it wiped mannequin_body_profile.tres' hitboxes
      and extra_libraries - check `git diff` on the body profile after any builder)
   4. `--script res://demo/maps/playground/build_playground.gd`
+  5. after a MODEL change: `blender --background --python tools/blender/ultra_blender.py --
+     make-cuts` (dismemberment pieces, mannequin_cuts.glb), then `--import`
 
 ## Architecture (don't break these)
 - **Input is data.** Actions live in Project Settings > Input Map (`uc_*`, seeded by
@@ -347,9 +349,9 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   Bleeding is taken in whole 0.1 hp steps as `rate * tick / 6` crosses them (exact at any rate;
   hp is quantized to 0.1 every tick).
 - Gibs come from the body AND head meshes (the head is its own mesh). Buckshot / blast through
-  the head (`sever` event carries the hit kind) bursts it: `spawn_gib(head, dir, 9, 7.0)` splits
-  its triangles into chunks round its middle (Fibonacci directions), each with a flesh blob,
-  thrown out with a red mist. MAX_GIBS 32.
+  the head (`sever` event carries the hit kind) bursts it: `spawn_gib(head, dir, 9, 7.0)` - with
+  a cut set the 9 closed Chunk_HEAD pieces, else triangles split round its middle with a flesh
+  blob each - thrown out with a red mist. MAX_GIBS 32.
 - A client's ticks predicted before its first ack ran on a guessed server clock
   (`server_tick_offset` 0): snapshots for them rebase silently (`NetPlayer.synced_from`), not
   counted as corrections. The `net platform` case spawns on the elevator at a random phase:
@@ -561,13 +563,53 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   Attachments: work offsets out from the bone's posed transform - a new BoneAttachment3D only
   takes its pose at the next skeleton update. Cleared on respawn (back from dead or hp jumping
   to full - NOT simply "hp is 100": that wiped gore on an undamaged body).
-- Cut ends are FITTED (UltraWoundMesh.cap(ring, out, bones)): on the body the ring is the posed
-  cross-section of the parent region's skin within 3 cm of the joint (`outline`: per-slice
-  radius held near the median and smoothed - sparse points made a star), sunk 12 mm inside the
-  skin; on the part that flew off it's the mesh's real open edge (`_open_loop`: edges used by one
-  triangle, chained, the loop nearest the joint) - else it showed hollow inside. Cap = thin fat
-  band, a ragged meat dome (cellular noise, clearcoat, double-sided), short broken bone(s) with a
-  shard and marrow (2 for forearm / shin), 1-3 drooping shreds. Craters = the same dished in.
+- **Dismemberment is pre-cut in Blender** (`blender --background --python
+  tools/blender/ultra_blender.py -- make-cuts`, code in tools/blender/make_cuts.py; re-run after
+  changing the model, then `--import`): from the imported glb + its Godot BoneMap (profile ->
+  model bone names) it writes `mannequin_cuts.glb` (BodyProfile.cut_scene, imported with the
+  same retarget settings, no import script / animations): `Seg_<REGION>` per region (planes at
+  the joints - neck cut 45 % up the neck, CUT_AT - cutting only faces weighted to that limb),
+  `Cap_<REGION>_stump` / `_end` (the cut's real boundary: rim = the skin's own vertices with
+  their weights, fat band, meat dome in rings blending to the bone, broken bone(s) + marrow at
+  the joint), `Chunk_HEAD_<k>` (9 Voronoi pieces, each closed: skin, skull, meat),
+  `Seg_TORSO_OPEN` (belly opening between Spine and Chest, a fat/meat bowl inside),
+  `Seg_WAIST_UP/DOWN` + `Cap_WAIST_up/down` (torso in two half way Spine -> Chest; each half
+  re-weighted to its own side of the spine - shared waist weights stretched skin across the
+  gap). Blender traps: weld the glTF's UV-seam split verts first (remove_doubles) or every cut
+  has gaps; caps wind from the skin face next to each rim edge (per-edge guessing flipped half);
+  bmesh v.index is stale after deletes (key by the vert).
+  Runtime `UltraCutBody` (BodyFX.cuts): on the first sever / belly / halve it hides BodyMesh +
+  HeadMesh and puts every piece under the skeleton (skin REBOUND to the body's bind poses by
+  bone name - Blender re-derives arm / leg bone rests); severed pieces hidden, the stump shown;
+  NOTHING is scaled (DismemberModifier stays 0 with a cut set). Seg_* get UltraMeshCap (not
+  TORSO_OPEN: its skin edge round the cavity is a loop - capping sealed it with skin). Seg_HEAD
+  takes head_mesh.layers (FP). Gibs = the chain's pieces + the top's `_end` cap, CPU-posed
+  (`_collect_tris(mi, -1)`), one surface per material. Back to one piece on respawn.
+  Without a cut_scene the old runtime path stays (DismemberModifier collapse, UltraWoundMesh.cap).
+- **Torso in two**: ONLY a killing buckshot / blast to the torso >= `DamageProfile.halve_min`
+  (90), flown <= `halve_range` (3 m, `DamageInfo.dist`: a load's nearest pellet) and striking
+  the waist (`UltraCharacter._at_waist`: within `halve_reach` 13 cm of 72 % up the hips->chest
+  capsule; a load's point = its pellets' average). Further off, a blast from the front opens
+  the belly and the shove throws the body. -> authority event `halve` -> halves shown, 12 guts
+  out of both ends; the hit's torso_blast is deferred to the frame's end and skipped once
+  halved (its skin chunks / crater showed with the halves). `UltraRagdoll.split_waist` /
+  `_rejoin` REBUILD every body and a NEW PhysicalBoneSimulator3D (`_make_bodies`): Jolt keeps
+  a PhysicalBone3D's joint as first made whatever joint_type says, and bodies swapped into a
+  simulator that had already run got NO joints - every later death of that character split
+  it at the waist (m11 test_halved_body_is_whole_after_respawn). Bodies are made in the same
+  order, transforms / velocities carried over; lower half keeps 15 % of the death push,
+  upper 45 %. The cut set is loaded and capped at level load (`UltraCutBody.prewarm`; it was
+  a ~50 ms hitch on the first halve).
+- BodyFX reads bones from `_bone_world` (captured at skeleton_updated): outside it a ragdoll's
+  bones read as the standing animation pose (blood spurted where the body used to stand).
+- Guts collide with the body: `colliders` = `UltraBodyFX.body_capsules()` (posed torso / limb /
+  head capsules, gone regions dropped, a halved torso as two); points but the `free_links` (3)
+  next to an anchor are pushed out, back out the side they were on last tick (a body bending
+  over a gut carried points past the axis and out the top).
+  Guts are cheap: the tube is built as arrays (per-vertex ImmediateMesh calls cost ~0.7 ms a
+  gut a frame), only capsules near the chain's bounding sphere are tested, and a gut that
+  hasn't moved for 20 ticks sleeps until its anchor moves (3 mm; 1 cm after 2 s: a dead
+  ragdoll shivers). m11 test_halving_is_cheap.
 - Guts (UltraGuts): verlet chain drawn as ONE smooth tube (Catmull-Rom, ImmediateMesh in world
   space - its MeshInstance top_level at the origin, else it drew offset by the node's position),
   sections bulging / pinched, ends tapering into the wound; two loops + a hanging length.
