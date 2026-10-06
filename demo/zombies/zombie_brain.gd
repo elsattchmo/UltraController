@@ -67,6 +67,11 @@ var _side_dir := 0.0
 var _back_until := 0.0
 var _looking := false
 var _look_sign := 1.0
+var lod := 0                         ## presentation tier (ZombieDirector's pass): 0 full, 1 mid, 2 far / off screen
+var lod_accum := 0.0
+var lod_idle := false                ## hidden: its presentation nodes are not processing
+var pack := ""                       ## the sandbox pack it belongs to
+var home_spawn := Vector3.ZERO       ## where it started (a reset sends it back)
 var kills := 0
 var strikes := 0                     ## swings that landed (stats, tests)
 
@@ -83,6 +88,41 @@ func setup(p_char: UltraCharacter, p_arch: ZombieArchetype, p_director: ZombieDi
 	src.driver = drive
 	c.damaged.connect(_on_damaged)
 	c.died.connect(func() -> void: _enter(Mode.DEAD))
+
+
+## Back to a fresh zombie in `m` (a respawn): forget everything, optionally already hunting `t`.
+func reset(m: int, t: UltraCharacter = null) -> void:
+	if mode == Mode.BASH_DOOR and _door != null and director != null:
+		director.release_bash(_door, self)
+	_door = null
+	_cleared = null
+	_atk = {}
+	path = PackedVector3Array()
+	goal = Vector3.INF
+	heard = Vector3.INF
+	awareness = 0.0
+	target = null
+	last_seen = Vector3.INF
+	last_seen_t = -1000.0
+	_atk_ready = 0.0
+	_stuck_pos = Vector3.INF
+	_stuck_n = 0
+	_side_until = 0.0
+	_back_until = 0.0
+	_looking = false
+	home = c.state.pos
+	want_yaw = c.state.body_yaw
+	if c.input_source:
+		(c.input_source as BotInputSource).live_yaw = c.state.body_yaw
+	mode = m
+	_halt()
+	if t != null:
+		target = t
+		awareness = 1.2
+		last_seen = t.state.pos
+		last_seen_t = _now
+	if m == Mode.IDLE:
+		_until = _now + rng.randf_range(1.0, 4.0)
 
 
 func mode_name() -> String:
@@ -310,6 +350,8 @@ func _think_chase(now: float) -> void:
 	var visible := now - last_seen_t < 0.4
 	var dest := target.state.pos if visible else last_seen
 	var d := _flat_dist(target.state.pos)
+	if visible and d < 7.0 and d > arch.reach + 1.4:
+		dest = director.ring_dest(self, target)           # (fan out round it instead of queueing on one spot; the last step is straight in)
 	if visible and d <= arch.reach + 0.25 and absf(target.state.pos.y - c.state.pos.y) < 1.5 and now >= _atk_ready and not director.attack_blocked(self):
 		_begin_attack(now)
 		return

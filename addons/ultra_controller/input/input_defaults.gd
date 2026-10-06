@@ -60,8 +60,10 @@ const ACTIONS := {
 	# so pressing Up summoned a stray helper bot (and in split screen, next to player 1).
 	"companion": [0.5, ["key:F8"]],
 	"respawn": [0.5, ["key:F9", "key:Backspace"]],
-	# Zombie AI debug overlay (modes, paths, noises).
-	"zombie_debug": [0.5, ["key:F7"]],
+	# Zombie sandbox (the mansion): AI debug overlay, call a wave, reset the scenario.
+	"zombie_debug": [0.5, ["key:F10"]],
+	"zombie_wave": [0.5, ["key:F11"]],
+	"zombie_reset": [0.5, ["key:F12"]],
 	# Inventory window (menus use Godot's ui_* actions, see UI_PAD_EVENTS).
 	"inv_drop": [0.5, ["key:Delete", "joy:2"]],
 	"inv_move": [0.5, ["key:M", "joy:3"]],

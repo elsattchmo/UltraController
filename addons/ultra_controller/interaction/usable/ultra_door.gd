@@ -197,6 +197,22 @@ func break_open(from := Vector3.INF) -> void:
 		partner.break_open(from)
 
 
+## Server: back to a starting state (a scenario reset): intact, with `new_hp`, shut or open, locked / barricaded as given.
+func reset(open: bool, p_locked: bool, p_barricaded: bool, new_hp: float) -> void:
+	broken = false
+	hp = new_hp
+	locked = p_locked
+	barricaded = p_barricaded
+	is_open = open
+	_angle = deg_to_rad(open_angle_deg) * swing if open else 0.0
+	_wobble = 0.0
+	if _panel:
+		_panel.collision_layer = UltraLayers.WORLD_STATIC | UltraLayers.INTERACTABLE
+		_panel.visible = true
+		_panel.transform = Transform3D(Basis(Vector3.UP, _angle), Vector3.ZERO)
+	_mark()
+
+
 func _set_broken(from := Vector3.INF) -> void:
 	if broken:
 		return

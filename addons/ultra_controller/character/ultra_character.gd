@@ -37,6 +37,9 @@ signal hit_reacted(region: int, dir: Vector3, amount: float)
 @export var damage_profile: DamageProfile
 ## Snap state to its network encoding after each tick (on in sessions; deterministic replays).
 var quantize_state := false
+## Leave this character out of the server's simulation (a far, sleeping NPC): it keeps its state and
+## pose; set by whoever manages the NPCs (the zombie director), cleared to wake it.
+var sim_skip := false
 
 var input_source: InputSource
 ## NetPlayer.Role this character plays on this machine (set by UltraNet).

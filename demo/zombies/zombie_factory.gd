@@ -76,7 +76,10 @@ static func _body_for(arch: ZombieArchetype) -> BodyProfile:
 
 
 ## Once the character is in the tree: the maimed spawn state (the lame leg, no legs), tint and scale.
-static func dress(c: UltraCharacter) -> void:
+static func dress(c: UltraCharacter, force := false) -> void:
+	if c.has_meta(&"dressed") and not force:
+		return
+	c.set_meta(&"dressed", true)
 	var arch := ZombieArchetype.get_arch(c.get_meta("zombie", &"walker"))
 	var R := UltraLimbs.Region
 	if arch.legs_gone:

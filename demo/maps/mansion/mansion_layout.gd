@@ -55,7 +55,7 @@ const ROOMS := [
 const DOORS := [
 	# --- ground: west wing
 	["d_lib_corr", 0, "x", 8, 6.5, 1.1, "single", "closed"], ["d_music_corr", 0, "x", 8, 19, 1.1, "single", "closed"],
-	["d_wstore_corr", 0, "x", 8, 27.5, 0.9, "single", "closed"], ["d_study_corr", 0, "x", 8, 35, 1.1, "single", "locked", "study"],
+	["d_wstore_corr", 0, "x", 8, 27.5, 0.9, "single", "closed"], ["d_study_corr", 0, "x", 8, 35, 1.1, "single", "locked", "red"],
 	["d_parlor_corr", 0, "x", 10, 5, 1.1, "single", "closed"], ["d_salon_corr", 0, "x", 10, 16, 1.1, "single", "closed"],
 	["d_cloak_corr", 0, "x", 10, 25.5, 0.9, "single", "closed"], ["d_lobby_corr", 0, "x", 10, 34.5, 1.1, "single", "closed"],
 	["d_parlor_salon", 0, "z", 10, 13, 1.1, "single", "closed"], ["d_salon_cloak", 0, "z", 22, 13, 0.9, "single", "closed"],
@@ -71,7 +71,7 @@ const DOORS := [
 	["d_foyer_conserv", 0, "x", 40, 31.5, 1.3, "single", "closed"],
 	# --- ground: east wing
 	["d_serv_dining", 0, "z", 14, 41, 1.0, "single", "closed"], ["d_serv_kitchen", 0, "x", 42, 20, 1.0, "single", "closed"],
-	["d_kitchen_pantry", 0, "x", 50, 19, 1.0, "single", "closed"], ["d_kitchen_gun", 0, "x", 50, 26, 0.9, "single", "locked", "gun"],
+	["d_kitchen_pantry", 0, "x", 50, 19, 1.0, "single", "closed"], ["d_kitchen_gun", 0, "x", 50, 26, 0.9, "single", "locked", "green"],
 	["d_serv_conserv", 0, "z", 28, 41, 1.0, "single", "closed"], ["d_garden", 0, "z", 40, 48, 1.3, "single", "closed"],
 	# --- upstairs: west wing
 	["u_br1_corr", 1, "x", 8, 6, 1.0, "single", "closed"], ["u_br2_corr", 1, "x", 8, 19, 1.0, "single", "closed"],

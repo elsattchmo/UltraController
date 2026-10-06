@@ -862,8 +862,31 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   (swipe every 1.3 s, `bash(damage x 1.4)` at the contact). **Doors swing AWAY from whoever opens them** (the sign was
   inverted: a door swung into the zombie and pinned it against the wall). Stuck ladder (moved < 0.25 m in 1.4 s):
   repath, sidestep, back off 1 s, alternate sides.
-- Debug: `ZombieDebug` (F7 / `--zdebug`; new default input action `zombie_debug`, `tools/install_input_defaults.gd`
+- Debug: `ZombieDebug` (F10 / `--zdebug`; new default input action `zombie_debug`, `tools/install_input_defaults.gd`
   adds actions to project.godot headless): label (mode, awareness, archetype), path, goal, facing, a ring per noise.
 - Tests `z3_brain` (10): hearing through walls and floors, goes to look, sight cone / walls, chase + hurt, doors on the
   way, stairs, bashing a locked door, the racket draws company, shot staggers / wakes a dormant one, crawler. Tour
   `zombie_review`.
+
+## Zombie sandbox, director and performance (zombie stages 4-5)
+- **Sandbox** (`MansionSandbox`, demo/scenarios; created by main.gd for the mansion map, started on session start
+  unless `--no-zombies`): `MansionLayout.PACKS` -> ~41 zombies placed at clear navmesh spots in their rooms, spawned
+  2 per tick; "room" packs lie DORMANT and wake (INVESTIGATE the player) when a player enters one of their rooms,
+  "noise" packs stand / wander and rely on senses; wave button in the foyer + F11 (`trigger_wave`: wakes everything
+  within 70 m hunting - `max_awake` 24 holds - and RECYCLES corpses as fresh zombies at the gates, never spawning:
+  player ids are u8 and never reused); reset button + F12 (doors repaired via `UltraDoor.reset`, zombies respawned
+  at their `home_spawn` dormant, player healed, count 0); kills counted from `died`; pickups (ammo, medkits, the red
+  key (study) on the dining table, the green key (gun room) upstairs in the master bedroom); `ZombieHud` top right.
+- **Director**: attack tokens (`max_attackers` 4 swing at one target; the rest crowd round), `ring_dest` (a chaser
+  between reach + 1.4 m and 7 m heads for its own free bearing round the target: the last step is straight in),
+  `wake_near`, `recycle` / `revive` (respawn_character + dress(force) + brain.reset).
+- **Presentation LOD** (windowed only, ZombieDirector `_lod_pass`, 8 brains a frame): tier 0 = in view (frustum + a clear
+  ray to it) and < 16 m: full; tier 1 = in view < 40 m: AnimationTree stepped manually at 15 Hz, no foot IK / injury
+  modifier, no shadow; tier 2 = further or hidden: tree off, and hidden ones aren't drawn and their character / anim /
+  BodyFX `_process` is off. Foot IK only < 9 m. A far SLEEPER is out of the simulation (`UltraCharacter.sim_skip`,
+  honoured by `UltraNet._server_step`) beyond 38 m from every target and viewer. The mansion switches room lights
+  off beyond ~24 m + range / 2 from the camera. Measured (41 zombies standing, windowed): 110 -> 26 ms a frame;
+  41 hunting: headless sim 15 ms (0.3 ms a zombie), windowed presentation of the ~15 near ones is the cost
+  (`demo/tours/perf_review.gd` cumulative switch-offs, `tests/suites/z5_perf.gd` headless breakdown, `--suite=z5`).
+- Tests `z4_pack` (6): the house fills, a pack wakes with its room, a wave recycles corpses without new ids,
+  <= 4 swing at once, 41 hunters for a minute stay sane, reset restores. Tour `horde_review`, `perf_review`.

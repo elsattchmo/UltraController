@@ -25,6 +25,7 @@ var menu: CanvasLayer
 var player: UltraCharacter          ## first local player (tours, single-player tools)
 var effects: UltraEffects
 var bars: UltraWorldBars
+var sandbox: MansionSandbox
 var headless := false
 var _title_t := 0.0
 var _pause: Node
@@ -48,6 +49,10 @@ func _ready() -> void:
 		return
 	map = (load(MAPS.get(UltraArgs.get_str("map", "playground"), MAPS["playground"])) as PackedScene).instantiate()
 	add_child(map)
+	if map is Mansion:
+		sandbox = MansionSandbox.new()
+		sandbox.name = "Sandbox"
+		add_child(sandbox)
 	locals = UltraLocalPlayers.new()
 	locals.name = "LocalPlayers"
 	locals.join_enabled = args.has("join-screen")
@@ -71,7 +76,9 @@ func _ready() -> void:
 			get_tree().quit(2))
 	UltraNet.session_started.connect(func(_m: int) -> void:
 		if UltraNet.is_server():
-			_stock_range())
+			_stock_range()
+			if sandbox and not args.has("no-zombies"):
+				sandbox.start(map as Mansion))
 	if args.has("bot") or args.has("tour"):
 		UltraNet.local_input_factory = _make_bot_input
 	if args.has("quit-after"):

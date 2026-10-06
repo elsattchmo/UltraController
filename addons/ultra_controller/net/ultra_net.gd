@@ -357,6 +357,9 @@ func _server_step(dt: float) -> void:
 		if not is_instance_valid(p.character):
 			continue
 		if p.role == NetPlayer.Role.AUTHORITY_LOCAL:
+			if p.character.sim_skip:
+				p.last_processed_tick = server_tick
+				continue
 			var f := p.character.input_source.sample(server_tick) if p.character.input_source else p.last_input.copy()
 			p.character.platform_tick = server_tick
 			p.character.simulate(f, dt)

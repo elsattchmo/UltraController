@@ -70,6 +70,15 @@ func door(door_name: String) -> UltraDoor:
 	return leaves[0] as UltraDoor if not leaves.is_empty() else null
 
 
+## Every door back as the layout has it (a scenario reset).
+func reset_doors() -> void:
+	for d: Dictionary in built.doors:
+		if d.kind == "arch":
+			continue
+		for leaf: UltraDoor in doors[String(d.name)]:
+			leaf.reset(d.state == "open", d.state == "locked", d.state == "barricaded", 150.0 if d.state == "barricaded" else (90.0 if d.state == "locked" else 60.0))
+
+
 ## Room name at world position `p` ("" outside).
 func room_at(p: Vector3) -> String:
 	return MansionLayout.room_at(Vector2(p.x, p.z), MansionLayout.floor_of(p.y))
@@ -167,6 +176,27 @@ func _make_doors() -> void:
 
 # ------------------------------------------------------------------ lights, sky
 
+## The room lights near a viewer are on, the rest are off (Forward+ pays for every lit light, through walls too).
+const LIGHT_ON_RANGE := 24.0
+var _lights: Array[Light3D] = []
+var _light_t := 0.0
+
+
+func _process(delta: float) -> void:
+	_light_t -= delta
+	if _light_t > 0.0 or DisplayServer.get_name() == "headless":
+		return
+	_light_t = 0.4
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var at := cam.global_position
+	for l in _lights:
+		var near: bool = l.global_position.distance_to(at) < LIGHT_ON_RANGE + (l as OmniLight3D).omni_range * 0.5
+		if l.visible != near:
+			l.visible = near
+
+
 func _make_lights() -> void:
 	var root := Node3D.new()
 	root.name = "Lights"
@@ -184,6 +214,7 @@ func _make_lights() -> void:
 		o.distance_fade_begin = 28.0
 		o.distance_fade_length = 10.0
 		root.add_child(o)
+		_lights.append(o)
 
 
 ## Lamps out on the grounds: the porch and the path to the gate.
