@@ -115,6 +115,7 @@ func reset(m: int, t: UltraCharacter = null) -> void:
 	if c.input_source:
 		(c.input_source as BotInputSource).live_yaw = c.state.body_yaw
 	mode = m
+	c.sim_period = 1
 	_halt()
 	if t != null:
 		target = t
@@ -207,6 +208,7 @@ func _enter(m: int) -> void:
 	if mode == Mode.BASH_DOOR and _door != null:
 		director.release_bash(_door, self)
 	mode = m
+	c.sim_period = 1
 	_until = 0.0
 	if m in [Mode.IDLE, Mode.DORMANT, Mode.DOWNED, Mode.DEAD, Mode.STAGGER]:
 		_halt()

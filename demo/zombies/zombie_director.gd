@@ -71,6 +71,9 @@ const LOD_MID := 40.0
 const FOOT_IK_RANGE := 9.0
 const SLEEP_SKIP := 38.0
 const LOD_STEP := 1.0 / 15.0
+const LOD_BATCH := 3                    ## zombies re-tiered per physics tick (each one ~4-5 times a second)
+## A zombie standing still (dormant / idle) is simulated every IDLE_STRIDE-th tick: it has nothing to do.
+const IDLE_STRIDE := 4
 var lod_enabled := DisplayServer.get_name() != "headless"
 var _lod_i := 0
 var _viewers: Array[Camera3D] = []
@@ -92,18 +95,25 @@ func _viewer_cameras() -> Array[Camera3D]:
 	return _viewers
 
 
+var _dmin := 1e9                        ## nearest camera, left by _tier_of
+
+
 func _tier_of(b: ZombieBrain, cams: Array[Camera3D]) -> int:
 	var p := b.c.state.pos + Vector3.UP * 0.9
 	var dmin := 1e9
-	var in_view := false
-	var space := b.c.get_world_3d().direct_space_state
-	var ex: Array[RID] = [b.c.get_rid()]
 	for cam in cams:
 		dmin = minf(dmin, cam.global_position.distance_to(p))
-		if cam.is_position_in_frustum(p) or cam.is_position_in_frustum(p + Vector3.UP * 0.8):
-			# In the frustum is not seen: a wall in between hides it (one ray to its middle and one to its head).
-			if ZombieSenses.clear_line(space, cam.global_position, p, ex) or ZombieSenses.clear_line(space, cam.global_position, p + Vector3.UP * 0.7, ex):
-				in_view = true
+	_dmin = dmin
+	var in_view := false
+	if dmin < LOD_MID:
+		var space := b.c.get_world_3d().direct_space_state
+		var ex: Array[RID] = [b.c.get_rid()]
+		for cam in cams:
+			if cam.is_position_in_frustum(p) or cam.is_position_in_frustum(p + Vector3.UP * 0.8):
+				# In the frustum is not seen: a wall in between hides it (one ray to its middle and one to its head).
+				if ZombieSenses.clear_line(space, cam.global_position, p, ex) or ZombieSenses.clear_line(space, cam.global_position, p + Vector3.UP * 0.7, ex):
+					in_view = true
+					break
 	if dmin < 3.5:
 		in_view = true                          # (right on top of the camera: the frustum test is shaky)
 	if b.c.state.state in [MotorState.Id.RAGDOLL, MotorState.Id.GET_UP, MotorState.Id.DEAD] and dmin < LOD_MID:
@@ -179,19 +189,17 @@ func _lod_pass() -> void:
 	if cams.is_empty():
 		return
 	var tg := targets()
-	var batch := mini(n, 8)
+	var batch := mini(n, LOD_BATCH)
 	for k in batch:
 		_lod_i = (_lod_i + 1) % n
 		var b := brains[_lod_i]
 		if not is_instance_valid(b.c):
 			continue
 		var tier := _tier_of(b, cams)
-		var p := b.c.state.pos + Vector3.UP * 0.9
-		var dmin := 1e9
-		for cam in cams:
-			dmin = minf(dmin, cam.global_position.distance_to(p))
+		var dmin := _dmin
 		# (Drawn only if it is a tier 0 / 1 zombie, or a far one in plain view: a tier-2 one was found hidden or out of range.)
 		_apply_tier(b, tier, dmin < FOOT_IK_RANGE, tier < 2 or _far_visible(b, cams))
+		b.c.live_hit_capture = tier == 0
 		# A far sleeper isn't simulated at all.
 		var near_target := 1e9
 		for t in tg:
@@ -230,7 +238,21 @@ func _physics_process(delta: float) -> void:
 		budget -= 1
 		thinks += 1
 		b.think(now)
+		b.c.sim_period = _stride_of(b)
 		b.next_think = now + _interval(b, tg)
+
+
+## Standing still with nothing in mind: simulated every IDLE_STRIDE-th tick (anything stirring puts it back
+## to 1: the brain's mode changes, damage, a shove).
+func _stride_of(b: ZombieBrain) -> int:
+	if b.mode != ZombieBrain.Mode.DORMANT and b.mode != ZombieBrain.Mode.IDLE:
+		return 1
+	var s := b.c.state
+	if s.state != MotorState.Id.IDLE or not s.is_grounded() or s.platform_id != 0:
+		return 1
+	if s.vel.length_squared() > 0.01 or absf(s.turn_v) > 0.01 or absf(angle_difference(s.body_yaw, b.want_yaw)) > 0.05:
+		return 1
+	return IDLE_STRIDE
 
 
 ## How soon this brain thinks again: by what it's doing and how close prey is.

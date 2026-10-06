@@ -10,6 +10,7 @@ var _look := Vector3.ZERO
 
 
 func _build() -> void:
+	UltraProf.enabled = UltraArgs.has("prof")
 	out_dir = out_dir.replace("/m1", "/horde_review")
 	var F := InputFrame
 	steps = [
@@ -67,6 +68,8 @@ func _process(delta: float) -> void:
 			worst = maxf(worst, d)
 		var alive: int = main.sandbox.alive() if main.sandbox and main.sandbox.director else 0
 		print("PERF primitives %d draw calls %d objects %d process %.1f ms physics %.1f ms nodes %d phys objects %d" % [int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)), int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)), int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)), Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)), int(Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS))])
+		if UltraProf.enabled:
+			print("PROF\n" + UltraProf.report(_ft.size()))
 		print("FRAMES %d frames, avg %.1f ms (%.0f fps), worst %.1f ms; %d zombies alive, %d hunting" % [_ft.size(), sum / _ft.size() * 1000.0, _ft.size() / sum, worst * 1000.0, alive, main.sandbox.hunting() if main.sandbox and main.sandbox.director else 0])
 		_ft.clear()
 	if main.player:

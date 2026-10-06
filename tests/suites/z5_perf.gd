@@ -166,8 +166,13 @@ func test_awake_horde_cost() -> void:
 	for b in sandbox.director.brains:
 		if Vector2(b.c.state.pos.x - player.state.pos.x, b.c.state.pos.z - player.state.pos.z).length() < 8.0:
 			near += 1
+	UltraProf.enabled = OS.get_cmdline_user_args().has("--prof")
+	UltraProf.report(1)
 	var base: Array = await _frames(180)
 	rows.append("%-40s %6.2f ms per frame (%d within 8 m)" % ["all hunting", base[0], near])
+	if UltraProf.enabled:
+		print("PROF per physics tick (180 ticks):\n", UltraProf.report(180))
+		UltraProf.enabled = false
 	sandbox.director.set_physics_process(false)
 	var m: Array = await _frames(120)
 	rows.append("%-40s %6.2f ms per frame" % ["director off (brains frozen)", m[0]])

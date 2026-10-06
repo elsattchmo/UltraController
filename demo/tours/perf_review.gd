@@ -36,6 +36,8 @@ func _build() -> void:
 
 
 func _setup() -> void:
+	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+	print("PERF adapter: ", RenderingServer.get_video_adapter_name(), " | ", Engine.get_physics_ticks_per_second(), " Hz physics, max steps ", Engine.max_physics_steps_per_frame)
 	_cam = Camera3D.new()
 	main.add_child(_cam)
 	_cam.fov = 70.0
@@ -63,7 +65,8 @@ func _measure(next: String) -> void:
 		for d in _ft:
 			sum += d
 			worst = maxf(worst, d)
-		print("PERF %-44s %5.1f ms avg (%3.0f fps), worst %5.1f ms, %d primitives, %d draw calls" % [_label, sum / _ft.size() * 1000.0, _ft.size() / sum, worst * 1000.0, int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)), int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))])
+		var vp := get_viewport().get_viewport_rid()
+		print("PERF %-44s %5.1f ms avg (%3.0f fps), worst %5.1f ms, %d primitives, %d draw calls | process %.1f physics %.1f ms | render cpu %.1f gpu %.1f ms" % [_label, sum / _ft.size() * 1000.0, _ft.size() / sum, worst * 1000.0, int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)), int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)), Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, RenderingServer.viewport_get_measured_render_time_cpu(vp), RenderingServer.viewport_get_measured_render_time_gpu(vp)])
 	_ft.clear()
 	_label = next
 	match next:

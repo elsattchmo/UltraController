@@ -40,6 +40,12 @@ var quantize_state := false
 ## Leave this character out of the server's simulation (a far, sleeping NPC): it keeps its state and
 ## pose; set by whoever manages the NPCs (the zombie director), cleared to wake it.
 var sim_skip := false
+## Simulate only every Nth server tick, the step covering N ticks (a standing NPC); hurting or
+## shoving it puts it back to 1. Set by whoever manages the NPCs.
+var sim_period := 1
+## Keep the hit capsules following the posed skeleton (else the baked ones are used): a far NPC's
+## capture is cost nobody can tell from the baked pose.
+var live_hit_capture := true
 
 var input_source: InputSource
 ## NetPlayer.Role this character plays on this machine (set by UltraNet).
@@ -267,6 +273,8 @@ func has_live_hitboxes() -> bool:
 
 
 func _capture_hitboxes() -> void:
+	if not live_hit_capture:
+		return
 	if _hit_bones.is_empty():
 		for b: String in UltraHitboxes.BONES:
 			_hit_bones[b] = skeleton.find_bone(b)
@@ -617,6 +625,7 @@ func _swim_visual(p: Vector3, yaw: float) -> Transform3D:
 func apply_damage(info: UltraCombat.DamageInfo) -> void:
 	if not is_authority() or state.state == MotorState.Id.DEAD:
 		return
+	sim_period = 1
 	var dp := damage_profile
 	var R := UltraLimbs.Region
 	var r := info.region if info.region >= 0 else UltraHitboxes.nearest(self, info.point)
@@ -793,6 +802,7 @@ func knock_out(push: Vector3, secs: float) -> void:
 func knock_down(push: Vector3) -> void:
 	if not is_authority() or state.state in [MotorState.Id.DEAD, MotorState.Id.RAGDOLL, MotorState.Id.GET_UP]:
 		return
+	sim_period = 1
 	state.trav_from = push
 	motor.change_state(state, last_input, MotorState.Id.RAGDOLL)
 	state.vel = motor.body.velocity            # (outside a motor step: carry the push over)
