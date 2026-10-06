@@ -2,3 +2,4 @@
 /override.cfg
 *.tmp
 __pycache__/
+art_src/zombie/*.fbx

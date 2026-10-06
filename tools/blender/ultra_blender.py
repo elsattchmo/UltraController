@@ -20,6 +20,9 @@ Commands
                    body pieces split at every joint, fitted end caps, head chunks, an opened
                    belly -> assets/characters/mannequin/mannequin_cuts.glb. Re-run after
                    changing the model (--src, --bone-map, --out).
+  import-mixamo    A Mixamo character FBX -> assets/characters/<name>/<name>.glb (tools/blender/import_mixamo.py):
+                   metres, bones renamed mixamorig_*, textures shrunk, skins, no animation
+                   (--src, --out, --name, --tex-size).
   mixamo-test      Write intake/mixamo/<name>.fbx: the mannequin renamed to Mixamo bone names
                    with one action — exercises the Mixamo intake without a Mixamo account.
 
@@ -525,6 +528,12 @@ def cmd_make_cuts(args):
     make_cuts.run(args.src, args.bone_map, args.out)
 
 
+def cmd_import_mixamo(args):
+    sys.path.insert(0, os.path.dirname(__file__))
+    import import_mixamo
+    import_mixamo.run(args.src, args.out, args.name, args.tex_size)
+
+
 def main():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     p = argparse.ArgumentParser(prog="ultra_blender")
@@ -552,12 +561,17 @@ def main():
     mc.add_argument("--src", default=os.path.join(PROJECT, "assets", "characters", "mannequin", "mannequin.glb"))
     mc.add_argument("--bone-map", default=os.path.join(PROJECT, "addons", "ultra_controller", "import", "bone_maps", "ue_mannequin_humanoid.tres"))
     mc.add_argument("--out", default=os.path.join(PROJECT, "assets", "characters", "mannequin", "mannequin_cuts.glb"))
+    im = sub.add_parser("import-mixamo")
+    im.add_argument("--src", default=os.path.join(PROJECT, "art_src", "zombie", "Ch10_nonPBR.fbx"))
+    im.add_argument("--out", default=os.path.join(PROJECT, "assets", "characters", "zombie", "zombie.glb"))
+    im.add_argument("--name", default="Zombie")
+    im.add_argument("--tex-size", type=int, default=2048)
     mt = sub.add_parser("mixamo-test")
     mt.add_argument("--action")
     mt.add_argument("--name")
     a = p.parse_args(argv)
     {"make-edit": cmd_make_edit, "export-actions": cmd_export_actions, "mirror": cmd_mirror,
-     "make-pistol": cmd_make_pistol, "make-rifle": cmd_make_rifle, "make-shotgun": cmd_make_shotgun, "make-bat": cmd_make_bat, "make-machete": cmd_make_machete, "mixamo-test": cmd_mixamo_test, "make-cuts": cmd_make_cuts}[a.cmd](a)
+     "make-pistol": cmd_make_pistol, "make-rifle": cmd_make_rifle, "make-shotgun": cmd_make_shotgun, "make-bat": cmd_make_bat, "make-machete": cmd_make_machete, "mixamo-test": cmd_mixamo_test, "make-cuts": cmd_make_cuts, "import-mixamo": cmd_import_mixamo}[a.cmd](a)
 
 
 if __name__ == "__main__":

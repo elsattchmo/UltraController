@@ -6,12 +6,11 @@
 [ext_resource type="AnimationLibrary" path="res://assets/characters/mannequin/anims/ual.res" id="3_rmh8l"]
 [ext_resource type="Script" path="res://addons/ultra_controller/core/body_profile.gd" id="4_axlxm"]
 [ext_resource type="AnimationLibrary" path="res://assets/characters/mannequin/anims/blender.res" id="4_cncxb"]
-[ext_resource type="PackedScene" uid="uid://2qmi0mhjd2qp" path="res://assets/characters/mannequin/mannequin_cuts.glb" id="5_cuts"]
+[ext_resource type="PackedScene" path="res://assets/characters/mannequin/mannequin_cuts.glb" id="5_cuts"]
 
 [resource]
 script = ExtResource("4_axlxm")
 body_scene = ExtResource("2_e5be1")
-cut_scene = ExtResource("5_cuts")
 anim_set = ExtResource("1_xgtje")
 library = ExtResource("3_rmh8l")
 extra_libraries = {
@@ -94,3 +93,4 @@ hitboxes = Array[Dictionary]([{
 "r": 0.05,
 "region": 13
 }])
+cut_scene = ExtResource("5_cuts")
