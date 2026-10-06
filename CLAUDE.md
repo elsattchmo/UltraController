@@ -22,7 +22,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   3. `--script res://tools/build_resources.gd` (input map seed, layer names, profiles, body profile)
      (only via `--script`: run through tool_runner it wiped mannequin_body_profile.tres' hitboxes
      and extra_libraries - check `git diff` on the body profile after any builder)
-  4. `--script res://demo/maps/playground/build_playground.gd`
+  4. `res://tools/tool_runner.tscn -- --tool=res://demo/maps/playground/build_playground.gd` (a Node tool: it needs the
+     autoloads, so not `--script`)
   5. after a MODEL change: `blender --background --python tools/blender/ultra_blender.py --
      make-cuts` (dismemberment pieces, mannequin_cuts.glb), then `--import`
 
@@ -880,13 +881,35 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - **Director**: attack tokens (`max_attackers` 4 swing at one target; the rest crowd round), `ring_dest` (a chaser
   between reach + 1.4 m and 7 m heads for its own free bearing round the target: the last step is straight in),
   `wake_near`, `recycle` / `revive` (respawn_character + dress(force) + brain.reset).
-- **Presentation LOD** (windowed only, ZombieDirector `_lod_pass`, 8 brains a frame): tier 0 = in view (frustum + a clear
-  ray to it) and < 16 m: full; tier 1 = in view < 40 m: AnimationTree stepped manually at 15 Hz, no foot IK / injury
-  modifier, no shadow; tier 2 = further or hidden: tree off, and hidden ones aren't drawn and their character / anim /
-  BodyFX `_process` is off. Foot IK only < 9 m. A far SLEEPER is out of the simulation (`UltraCharacter.sim_skip`,
-  honoured by `UltraNet._server_step`) beyond 38 m from every target and viewer. The mansion switches room lights
-  off beyond ~24 m + range / 2 from the camera. Measured (41 zombies standing, windowed): 110 -> 26 ms a frame;
-  41 hunting: headless sim 15 ms (0.3 ms a zombie), windowed presentation of the ~15 near ones is the cost
-  (`demo/tours/perf_review.gd` cumulative switch-offs, `tests/suites/z5_perf.gd` headless breakdown, `--suite=z5`).
+- **What a hunting horde costs** (the lesson of stage 5): the physics tick, not the drawing. One zombie's step
+  (`UltraCharacter.simulate`) is ~0.25 ms (GDScript spread over ~15 motor calls: slide, floor ray, step-up test,
+  separation query, transitions...), so 41 awake = ~10 ms a TICK; once a tick costs more than the 16.7 ms frame
+  budget with the draw, Godot runs several ticks per frame and the frame time snowballs (131 ms with 24 hunters).
+  `Engine.max_physics_steps_per_frame = 1` takes the snowball away for measuring: then frame times compare
+  step by step (`demo/tours/perf_review.gd` does; 25 standing zombies in view with every effect on = 60 fps,
+  the monitors `TIME_PROCESS` / `TIME_PHYSICS_PROCESS` include the wait for the swap and mean nothing here).
+  `UltraProf` (`--prof`, scope timers: `var t := UltraProf.tick()` ... `UltraProf.add("name", t)`) found it; the
+  horde / z5 tours print `UltraProf.report`. Never `git checkout` files that carry your real edits to drop
+  temporary instrumentation: commit first.
+- **Sim stride** (`UltraCharacter.sim_period`, set by the director when a brain thinks; `UltraNet._server_step` skips
+  the ticks in between and the step's dt covers them): idle / dormant standing zombies every 4th tick; walking ones
+  every 2nd from 3 m of every target, 3rd from 8 m, 4th from 20 m (`ZombieDirector.STRIDE_*`). Doors, attacks, falls,
+  ragdoll, platforms and anything not grounded step every tick; damage / knock-down / a brain mode change put it
+  back to 1. `UltraMotor.move` scales the slide velocity by dt x tick rate (move_and_slide covers one engine tick);
+  the visual draws a stride over its own ticks (`UltraCharacter.stride_wait`, alpha = (waited + fraction) / stride),
+  so strided zombies stay smooth, one stride late. `ZombieBrain.drive` turns by `sim_period` ticks of rate.
+  NPC-only shortcuts (never for predicted players, whose motor must be a pure function of the state):
+  `motor.cache_floor` (floor ray re-asked every 6 ticks / 0.5 m), `quantize_state` off (set in `ZombieFactory.dress`),
+  `_update_platform` skips its test_move when no TickPlatform exists.
+- **Presentation LOD** (windowed only, ZombieDirector `_lod_pass`, 3 brains a tick): tier 0 = in view (frustum + a clear
+  ray to it) and < 16 m: injury modifier + shadow, hit capsules from the live skeleton (`live_hit_capture`; else the
+  baked ones), foot IK < 7 m, animation every frame < 6 m and at 30 Hz beyond (tree on manual advance in
+  `Director._process`); tier 1 = in view < 40 m: 15 Hz, no foot IK / injury modifier / shadow / live capsules;
+  tier 2 = further or hidden: tree off, and hidden ones aren't drawn and their character / anim / BodyFX `_process`
+  is off. A far SLEEPER is out of the simulation (`UltraCharacter.sim_skip`, honoured by `UltraNet._server_step`)
+  beyond 38 m from every target and viewer. The mansion switches room lights off beyond ~24 m + range / 2 from the
+  camera. Measured, windowed (RTX 3070 laptop, 1280x720, everything on): 41 zombies standing 110 -> 26 ms a frame;
+  `horde_review` hunters 10-12: 83-99 -> 25-27 ms, 22 hunters round the player 131 -> 48 ms (21 fps; the stress
+  case is a wave of 41 in the hall). Headless `--suite=z5`: 41 awake = 14.6 ms a frame.
 - Tests `z4_pack` (6): the house fills, a pack wakes with its room, a wave recycles corpses without new ids,
   <= 4 swing at once, 41 hunters for a minute stay sane, reset restores. Tour `horde_review`, `perf_review`.
