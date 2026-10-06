@@ -916,3 +916,19 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   case is a wave of 41 in the hall). Headless `--suite=z5`: 41 awake = 14.6 ms a frame.
 - Tests `z4_pack` (6): the house fills, a pack wakes with its room, a wave recycles corpses without new ids,
   <= 4 swing at once, 41 hunters for a minute stay sane, reset restores. Tour `horde_review`, `perf_review`.
+
+## Levels and the main menu
+- `main.gd` `LEVELS` (key, title, blurb, scene): playground, mansion. The main menu's Level section (toggle buttons, pad-linked
+  above "Single player") calls `main.set_level(key)`, which swaps the map behind the menu (`_load_level`: the old map and the
+  mansion's sandbox leave the tree FIRST - `remove_child` then `queue_free` - because a mansion tears its navigation down on
+  exit and that must not land after the next level's setup). Not while a session runs. `--map=<key>` picks the start level; the
+  last one is kept in `Engine` meta `ultra_level` so Pause > Main menu (scene reload) reopens on it.
+- Every way to play starts in the picked level: single, split 2 / 4, host, join, host + test client (`--map=<level>` added to the
+  launched client), and launcher presets (`UltraLauncher.launch(preset, "", extra)`: `extra` goes to every instance that doesn't
+  set that option). Joining: the host's `UltraNet.session_info_provider` (main: `{level}`) is sent with the hello reply, ahead of the
+  spawns; a client on another level gets `session_info_received`, loads the host's level and joins again once (`_rejoin_on`).
+  verify.sh net case `level` (client without `--map` joins a `--map=mansion` server; `--expect-level`, `--allow-dropped` for the
+  server's probe connection).
+- Tests: `ui_menus.test_main_menu_level_select_with_pad`, `test_every_way_to_play_starts_in_the_zombie_mansion` (single / split 2 / 4:
+  everyone at the gate, zombies in, a HUD each, level kept after Main menu).
+- `--suite=a,b` runs several suites in ONE process (as `all` does): order effects only show that way.

@@ -143,6 +143,13 @@ func _finish() -> void:
 			if hurt.is_empty():
 				print("NETREPORT FAIL no injury reached this client")
 				ok = false
+		var want_level := UltraArgs.get_str("expect-level", "")
+		if want_level != "":
+			var lv := String(get_parent().get("level"))
+			print("NETREPORT level=%s" % lv)
+			if lv != want_level:
+				print("NETREPORT FAIL on level '%s', expected the host's '%s'" % [lv, want_level])
+				ok = false
 		var want_remotes := UltraArgs.get_int("expect-remotes", 0)
 		var seen := 0
 		for id: int in _path:
@@ -154,7 +161,9 @@ func _finish() -> void:
 			print("NETREPORT FAIL saw %d moving remote players, expected %d" % [seen, want_remotes])
 			ok = false
 	else:
-		var everyone: Array[Dictionary] = _gone.duplicate()
+		var everyone: Array[Dictionary] = []
+		for g in _gone:
+			everyone.append(g.merged({"gone": true}))
 		for p: NetPlayer in UltraNet.players.values():
 			everyone.append(_summ(p))
 		if everyone.is_empty() and UltraNet.mode != UltraNet.Mode.OFFLINE:
@@ -162,7 +171,8 @@ func _finish() -> void:
 			ok = false
 		for e in everyone:
 			print("NETREPORT player=%d role=%s processed=%d misses=%d pos=%s %s (%s)" % [e.id, NetPlayer.Role.keys()[e.role], e.processed, e.misses, (e.pos as Vector3).snappedf(0.001), e.get("name", ""), e.get("limbs", "")])
-			if e.role == NetPlayer.Role.AUTHORITY_REMOTE and int(e.processed) < 300:
+			var dropped_ok: bool = UltraArgs.has("allow-dropped") and bool(e.get("gone", false))      # (a client that went away to join again elsewhere)
+			if e.role == NetPlayer.Role.AUTHORITY_REMOTE and int(e.processed) < 300 and not dropped_ok:
 				print("NETREPORT FAIL server processed too few frames for player %d" % e.id)
 				ok = false
 	print("NETREPORT %s" % ("PASS" if ok else "FAIL"))

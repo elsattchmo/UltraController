@@ -8,8 +8,13 @@ extends Node
 ##   -- --server                            dedicated server (works with --headless)
 ##   -- --launch=host_client                start a preset of instances and exit
 ##   -- --tour=m1                           scripted capture tour (single-player bot)
+##   -- --map=mansion                       the level (also picked in the main menu)
 
-const MAPS := {"playground": "res://demo/maps/playground.tscn", "mansion": "res://demo/maps/mansion.tscn"}
+## The levels the main menu offers (and `--map=<key>`): key, title, one line about it, scene.
+const LEVELS := [
+	{"key": "playground", "title": "Playground", "blurb": "movement, parkour, water, shooting range, props", "path": "res://demo/maps/playground.tscn"},
+	{"key": "mansion", "title": "Zombie Mansion", "blurb": "packs of zombies, doors, stairs, three floors", "path": "res://demo/maps/mansion.tscn"},
+]
 const PROFILES := {
 	"fps": "res://addons/ultra_controller/profiles/fps.tres",
 	"adventure": "res://addons/ultra_controller/profiles/adventure.tres",
@@ -20,6 +25,7 @@ const BODY := "res://assets/characters/mannequin/mannequin_body_profile.tres"
 
 var args := {}
 var map: Node3D
+var level := ""                     ## key of the loaded level
 var locals: UltraLocalPlayers
 var menu: CanvasLayer
 var player: UltraCharacter          ## first local player (tours, single-player tools)
@@ -31,6 +37,10 @@ var _title_t := 0.0
 var _pause: Node
 var _companion: NetPlayer
 var _companion_brain: UltraCompanion
+var _join_to := {}                  ## where we joined ({address, port, count}), to join again on the host's level
+var _rejoined := false
+
+signal level_changed(key: String)
 
 
 func _ready() -> void:
@@ -47,12 +57,8 @@ func _ready() -> void:
 			push_error("no launch preset '%s'" % args["launch"])
 		get_tree().quit()
 		return
-	map = (load(MAPS.get(UltraArgs.get_str("map", "playground"), MAPS["playground"])) as PackedScene).instantiate()
-	add_child(map)
-	if map is Mansion:
-		sandbox = MansionSandbox.new()
-		sandbox.name = "Sandbox"
-		add_child(sandbox)
+	var back_to_menu := Engine.has_meta("ultra_to_menu") and Engine.has_meta("ultra_level")
+	_load_level(String(Engine.get_meta("ultra_level")) if back_to_menu else UltraArgs.get_str("map", "playground"))
 	locals = UltraLocalPlayers.new()
 	locals.name = "LocalPlayers"
 	locals.join_enabled = args.has("join-screen")
@@ -61,6 +67,8 @@ func _ready() -> void:
 	UltraNet.world_root = self
 	UltraNet.character_factory = _make_character
 	UltraNet.spawn_transform = _spawn_transform
+	UltraNet.session_info_provider = func() -> Dictionary: return {"level": level}
+	UltraNet.session_info_received.connect(_on_session_info)
 	UltraNet.verbose = args.has("verbose-net")
 	UltraNet.lag.configure(UltraArgs.get_float("lag"), UltraArgs.get_float("jitter"), UltraArgs.get_float("loss"))
 	UltraNet.player_added.connect(_on_player_added)
@@ -114,6 +122,7 @@ func _wants_session() -> bool:
 
 
 func start_from_args() -> void:
+	_rejoined = false
 	var n := maxi(UltraArgs.get_int("players", 1), 0)
 	_reserve_devices(n)
 	var port := UltraArgs.get_int("port", UltraNet.DEFAULT_PORT)
@@ -125,6 +134,7 @@ func start_from_args() -> void:
 	elif args.has("connect"):
 		var addr := UltraArgs.get_str("connect", "127.0.0.1")
 		var parts := addr.split(":")
+		_join_to = {"address": parts[0], "port": int(parts[1]) if parts.size() > 1 else port, "count": n, "names": names}
 		UltraNet.join(parts[0], int(parts[1]) if parts.size() > 1 else port, n, names)
 	else:
 		UltraNet.start_offline(n, names)
@@ -295,6 +305,7 @@ func _show_menu() -> void:
 
 
 func menu_start(kind: String, value := "") -> void:
+	_rejoined = false
 	match kind:
 		"single":
 			_reserve_devices(1)
@@ -310,12 +321,75 @@ func menu_start(kind: String, value := "") -> void:
 		"join":
 			_reserve_devices(1)
 			var parts := value.split(":")
+			_join_to = {"address": parts[0], "port": int(parts[1]) if parts.size() > 1 else UltraNet.DEFAULT_PORT, "count": 1, "names": PackedStringArray()}
 			UltraNet.join(parts[0], int(parts[1]) if parts.size() > 1 else UltraNet.DEFAULT_PORT, 1)
 		"host_and_client":
 			_reserve_devices(1)
 			UltraNet.host(UltraNet.DEFAULT_PORT, 1)
 			var p := UltraLaunchPreset.new()
-			p.instances = PackedStringArray(["right|--connect=127.0.0.1"])
+			p.instances = PackedStringArray(["right|--connect=127.0.0.1 --map=" + level])
 			UltraLauncher.launch(p)
 			UltraArgs.all()["window"] = "left"
 			UltraArgs.apply_window()
+
+
+# ------------------------------------------------------------------ levels
+
+func level_list() -> Array:
+	return LEVELS
+
+
+func level_def(key: String) -> Dictionary:
+	for d: Dictionary in LEVELS:
+		if d.key == key:
+			return d
+	return {}
+
+
+## Swap the level behind the main menu (not while a session runs: players are standing in the old one).
+func set_level(key: String) -> void:
+	if (key == level and map != null) or UltraNet.is_active() or level_def(key).is_empty():
+		return
+	_load_level(key)
+
+
+func _load_level(key: String) -> void:
+	var def := level_def(key)
+	if def.is_empty():
+		def = LEVELS[0]
+	# Out of the tree at once (not queue_free alone): a mansion tears its navigation down on exit, which
+	# must not land after the next level's setup.
+	if sandbox:
+		remove_child(sandbox)
+		sandbox.queue_free()
+		sandbox = null
+	if map:
+		remove_child(map)
+		map.queue_free()
+		map = null
+	map = (load(def.path) as PackedScene).instantiate()
+	add_child(map)
+	move_child(map, 0)
+	level = def.key
+	Engine.set_meta("ultra_level", level)
+	if map is Mansion:
+		sandbox = MansionSandbox.new()
+		sandbox.name = "Sandbox"
+		add_child(sandbox)
+	level_changed.emit(level)
+
+
+## A client learns which level the host runs: if it isn't ours, load it and join again.
+func _on_session_info(info: Dictionary) -> void:
+	var key := String(info.get("level", ""))
+	if key == "" or key == level or level_def(key).is_empty() or _rejoined or _join_to.is_empty():
+		return
+	_rejoined = true
+	_rejoin_on.call_deferred(key)
+
+
+func _rejoin_on(key: String) -> void:
+	UltraNet.stop()
+	_load_level(key)
+	_reserve_devices(int(_join_to.count))
+	UltraNet.join(String(_join_to.address), int(_join_to.port), int(_join_to.count), _join_to.names)

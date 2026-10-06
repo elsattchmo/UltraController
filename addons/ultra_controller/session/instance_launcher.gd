@@ -31,8 +31,9 @@ static func find(name: String) -> UltraLaunchPreset:
 	return null
 
 
-## Launch every instance of a preset. Returns the PIDs.
-static func launch(preset: UltraLaunchPreset, exe := "") -> PackedInt32Array:
+## Launch every instance of a preset. Returns the PIDs. `extra` ("--map=mansion") goes to every instance
+## that doesn't set that option itself.
+static func launch(preset: UltraLaunchPreset, exe := "", extra := PackedStringArray()) -> PackedInt32Array:
 	var pids := PackedInt32Array()
 	if exe == "":
 		exe = OS.get_executable_path()
@@ -42,6 +43,13 @@ static func launch(preset: UltraLaunchPreset, exe := "") -> PackedInt32Array:
 		var parts := entry.split("|", true, 1)
 		var window := parts[0].strip_edges()
 		var user_args := parts[1].strip_edges().split(" ", false) if parts.size() > 1 else PackedStringArray()
+		for e in extra:
+			var key := e.split("=", true, 1)[0] + "="
+			var has := false
+			for u in user_args:
+				has = has or u.begins_with(key)
+			if not has:
+				user_args.append(e)
 		var args := PackedStringArray(["--path", project])
 		if window == "headless":
 			args.append("--headless")

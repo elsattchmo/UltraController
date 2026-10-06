@@ -19,6 +19,8 @@ signal session_ended(reason: String)
 signal player_added(p: NetPlayer)
 signal player_removed(p: NetPlayer)
 signal snapshot_received(server_tick: int)
+## A client was told what the host is running (the game's `session_info_provider`, e.g. its level).
+signal session_info_received(info: Dictionary)
 
 const SNAPSHOT_EVERY := 2
 const INTERP_DELAY_TICKS := 6.0
@@ -40,6 +42,7 @@ var local_players: Array[NetPlayer] = []
 ## Game hooks.
 var character_factory: Callable           ## (NetPlayer) -> UltraCharacter (not in tree yet)
 var spawn_transform: Callable             ## (NetPlayer) -> Transform3D
+var session_info_provider: Callable       ## () -> Dictionary: what a joining client should know first (sent with the hello reply)
 var local_input_factory: Callable         ## (local_index: int) -> InputSource
 var world_root: Node
 ## Client clock / dilation.
@@ -245,6 +248,8 @@ func _c2s_hello(local_count: int, names: PackedStringArray) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if verbose:
 		print("[net] hello from ", peer, " players ", local_count)
+	if session_info_provider.is_valid():
+		_send_reliable(peer, _s2c_session_info, [session_info_provider.call()])      # (first: reliable calls arrive in order)
 	# Late join: tell the newcomer about everyone already here.
 	for p: NetPlayer in players.values():
 		_send_reliable(peer, _s2c_spawn, [p.id, p.peer_id, p.local_index, p.display_name, _state_bytes(p.character.state)])
@@ -459,6 +464,11 @@ func _on_connected() -> void:
 	_no_throttle(1)
 	_send_reliable(1, _c2s_hello, [_local_count, _local_names])
 	session_started.emit(mode)
+
+
+@rpc("authority", "reliable", "call_remote", 0)
+func _s2c_session_info(info: Dictionary) -> void:
+	session_info_received.emit(info)
 
 
 @rpc("authority", "reliable", "call_remote", 0)

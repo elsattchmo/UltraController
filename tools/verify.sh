@@ -116,6 +116,10 @@ net_case() {   # net_case <name> <client-count> <client net args...>
 		echo "verify: net $name ok  $(grep -h 'NETREPORT player=' "$LOGS"/net_${name}_client0.log | head -1 | cut -c11-)"
 	fi
 }
+if [ "$SUITE" = "m2" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "ui" ] || [ "$SUITE" = "all" ]; then
+	# a client that starts in the playground is sent to the host's level (here the mansion) and joins again
+	SERVER_ARGS="--map=mansion --no-zombies --allow-dropped" CLIENT_BOT="walk_short" net_case level 1 --lag=120 --jitter=20 --loss=2 --expect-level=mansion
+fi
 if [ "$SUITE" = "m2" ] || [ "$SUITE" = "net" ] || [ "$SUITE" = "all" ]; then
 	net_case clean 1 --expect-no-corrections
 	net_case lag120 1 --lag=120 --jitter=20 --loss=2

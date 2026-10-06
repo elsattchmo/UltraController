@@ -25,8 +25,8 @@ func _ready() -> void:
 	_hint = Label.new()
 	_hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	_hint.offset_left = 16.0
-	_hint.offset_top = -108.0
-	_hint.offset_bottom = -84.0
+	_hint.offset_top = -140.0
+	_hint.offset_bottom = -116.0
 	_hint.text = "F11 wave  ·  F12 reset  ·  F10 AI debug   (buttons in the foyer)"
 	_hint.add_theme_font_size_override("font_size", 14)
 	_hint.add_theme_color_override("font_color", Color(0.75, 0.72, 0.65, 0.8))

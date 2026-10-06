@@ -197,6 +197,97 @@ func test_main_menu_with_pad() -> void:
 	await _frames(2)
 
 
+func test_main_menu_level_select_with_pad() -> void:
+	var fake := FakeLevelMain.new()
+	add_child(fake)
+	var m: CanvasLayer = (load("res://demo/ui/main_menu.gd") as Script).new()
+	m.set("main", fake)
+	add_child(m)
+	await _frames(3)
+	var buttons: Dictionary = m.get("_level_buttons")
+	check(buttons.size() == 2 and buttons.has("playground") and buttons.has("mansion"), "a button per level (%s)" % [buttons.keys()])
+	check((buttons["playground"] as Button).button_pressed and not (buttons["mansion"] as Button).button_pressed, "the current level is the pressed one")
+	check(_focus_text() == "Single player", "focus still opens on Single player (got %s)" % _focus_text())
+	await _pad(PAD_UP)
+	check(get_viewport().gui_get_focus_owner() == buttons["mansion"], "D-pad up from Single player reaches the levels (got %s)" % _focus_text())
+	await _pad(PAD_A)
+	check(fake.level == "mansion" and fake.set_calls == ["mansion"], "A on Zombie Mansion picks it (level %s, calls %s)" % [fake.level, fake.set_calls])
+	check((buttons["mansion"] as Button).button_pressed and not (buttons["playground"] as Button).button_pressed, "and it shows as the pressed one")
+	await _pad(PAD_A)
+	check(fake.set_calls == ["mansion"], "pressing the picked level again changes nothing")
+	await _pad(PAD_DOWN)
+	check(_focus_text() == "Single player", "D-pad down goes back to Play (got %s)" % _focus_text())
+	await _shot("01b_main_menu_levels")
+	check((m.call("_launch_args") as PackedStringArray) == PackedStringArray(["--map=mansion"]), "launched windows get the picked level")
+	m.queue_free()
+	fake.queue_free()
+	await _frames(2)
+
+
+## The real main: pick a level behind the menu, then every way to play starts in it.
+func test_every_way_to_play_starts_in_the_zombie_mansion() -> void:
+	main = (load("res://demo/main.tscn") as PackedScene).instantiate()
+	add_child(main)
+	await ticks(5)
+	UltraNet.stop()                                   # (headless boots straight into a session)
+	await ticks(3)
+	check(main.get("level") == "playground" and not (main.get("map") is Mansion), "starts in the playground")
+	main.call("set_level", "mansion")
+	check(main.get("level") == "mansion" and main.get("map") is Mansion and main.get("sandbox") != null, "the Zombie Mansion loads behind the menu, with its sandbox")
+	await ticks(3)
+	check(UltraNav.exists(), "its navigation is up")
+	main.call("set_level", "playground")
+	check(main.get("level") == "playground" and not (main.get("map") is Mansion) and main.get("sandbox") == null, "and the playground comes back")
+	check(not UltraNav.exists(), "the mansion's navigation went with it")
+	main.call("set_level", "nowhere")
+	check(main.get("level") == "playground", "an unknown level is refused")
+	main.call("set_level", "mansion")
+	await ticks(3)
+	var info: Dictionary = UltraNet.session_info_provider.call()
+	check(info.get("level") == "mansion", "a joiner is told the level (%s)" % [info])
+	UltraNet.stop()
+	main.queue_free()
+	main = null
+	await ticks(3)
+	# Each way to play, as a fresh start of the game (leaving a game reloads the scene).
+	for way in [["single", "", 1], ["split", "2", 2], ["split", "4", 4]]:
+		main = (load("res://demo/main.tscn") as PackedScene).instantiate()
+		add_child(main)
+		await ticks(3)
+		UltraNet.stop()
+		await ticks(2)
+		main.call("set_level", "mansion")
+		await ticks(2)
+		main.call("menu_start", way[0], way[1])
+		await ticks(5)
+		var n: int = way[2]
+		check(UltraNet.local_players.size() == n, "%s %s: %d local player(s) (got %d)" % [way[0], way[1], n, UltraNet.local_players.size()])
+		var spawn := (main.get("map") as Mansion).marker("spawn").global_position
+		var near := 0
+		for p: NetPlayer in UltraNet.local_players:
+			if Vector2(p.character.state.pos.x - spawn.x, p.character.state.pos.z - spawn.z).length() < 8.0:
+				near += 1
+		check(near == n, "%s %s: everyone spawns at the mansion's gate (%d of %d)" % [way[0], way[1], near, n])
+		var sb: MansionSandbox = main.get("sandbox")
+		var t := 0
+		while not sb.ready_to_play and t < 900:
+			await get_tree().physics_frame
+			t += 1
+		check(sb.ready_to_play and sb.alive() > 30, "%s %s: the zombies are in (%d alive)" % [way[0], way[1], sb.alive()])
+		check(_huds().size() == n, "%s %s: a HUD each (%d)" % [way[0], way[1], _huds().size()])
+		UltraNet.stop()
+		main.queue_free()
+		main = null
+		await ticks(3)
+	# Back to the menu from the pause menu: the level stays.
+	Engine.set_meta("ultra_to_menu", true)
+	main = (load("res://demo/main.tscn") as PackedScene).instantiate()
+	add_child(main)
+	await ticks(3)
+	check(main.get("level") == "mansion", "the main menu after a game opens on the level just played (%s)" % main.get("level"))
+	Engine.remove_meta("ultra_level")
+
+
 func test_pause_menu_with_pad() -> void:
 	await _start()
 	var c: UltraCharacter = main.player
@@ -455,3 +546,20 @@ class FakeMain:
 
 	func menu_start(kind: String, value := "") -> void:
 		calls.append([kind, value])
+
+
+class FakeLevelMain:
+	extends FakeMain
+	const LEVELS := [
+		{"key": "playground", "title": "Playground", "blurb": "movement", "path": ""},
+		{"key": "mansion", "title": "Zombie Mansion", "blurb": "zombies", "path": ""},
+	]
+	var level := "playground"
+	var set_calls: Array = []
+
+	func level_list() -> Array:
+		return LEVELS
+
+	func set_level(key: String) -> void:
+		set_calls.append(key)
+		level = key
