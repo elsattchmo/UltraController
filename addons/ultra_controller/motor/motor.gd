@@ -49,6 +49,8 @@ var dt: float = 1.0 / 60.0
 var platform_tick: int = 0
 ## Per-step outputs for presentation (not part of the simulated state).
 var last_step_up: float = 0.0
+## How far the last tick's stair snap pulled the capsule down (presentation glides it).
+var last_step_down: float = 0.0
 var last_landing: float = 0.0
 var floor_friction: float = 1.0
 var floor_normal := Vector3.UP
@@ -111,6 +113,7 @@ func register_state(id: int, scr: Script) -> void:
 func step(s: MotorState, input: InputFrame, p_dt: float) -> void:
 	dt = p_dt
 	last_step_up = 0.0
+	last_step_down = 0.0
 	last_landing = 0.0
 	_apply_capsule(s.height)
 	body.global_position = s.pos
@@ -596,6 +599,7 @@ func _snap_down() -> bool:
 		if body.test_move(body.global_transform, mv, col):
 			mv = col.get_travel()
 		body.global_position += mv
+		last_step_down += -mv.y
 	body.velocity.y = minf(body.velocity.y, 0.0)
 	return true
 

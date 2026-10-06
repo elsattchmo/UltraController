@@ -17,6 +17,8 @@ class DamageInfo:
 	## Knock-back (m/s, world): a shotgun blast's shove on the whole body - past
 	## UltraCharacter.SHOVE_KNOCKDOWN it knocks you over, a lighter one rocks you back.
 	var shove := Vector3.ZERO
+	## A melee blow (a swing, a gun-butt): a held block stops most of it.
+	var melee := false
 
 
 const MASK := UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC | UltraLayers.CHARACTER | UltraLayers.HITBOX
@@ -164,6 +166,7 @@ static func melee_sweep(c: UltraCharacter, s: MotorState, i: InputFrame, sw: Dic
 		var info := DamageInfo.new()
 		info.amount = float(sw.damage)
 		info.kind = StringName(sw.kind)
+		info.melee = true
 		info.dir = dir
 		info.point = hit.position
 		info.normal = hit.normal

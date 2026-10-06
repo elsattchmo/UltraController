@@ -38,6 +38,7 @@ var aim_yaw: float = 0.0
 var aim_pitch: float = 0.0
 var turning := false
 var rm_clip: int = -1
+var rm_mirror := false               ## the root-motion move runs mirrored (rm_scale.x < 0)
 var hard_landing := false
 var land_impact := 0.0
 var on_platform := false
@@ -412,11 +413,14 @@ func _build() -> AnimationNodeBlendTree:
 		pbs.add_blend_point(_anim(&"prone_idle"), Vector2.ZERO, -1, &"idle")
 		pbs.add_blend_point(_anim(&"prone_fwd"), Vector2(0, 1), -1, &"fwd")
 		pbs.add_blend_point(_anim(&"prone_back"), Vector2(0, -1), -1, &"back")
-		var roll := _anim(&"prone_roll_r")
-		pbs.add_blend_point(roll, Vector2(1, 0), -1, &"right")
-		var roll_l := _anim(&"prone_roll_r")
-		roll_l.animation = _mirrored(_clip(&"prone_roll_r"))
-		pbs.add_blend_point(roll_l, Vector2(-1, 0), -1, &"left")
+		# Sideways: no prone side-crawl exists on Mixamo, so the pivot clip's elbow / knee
+		# shuffle with its turn taken out, looped (the roll is the roll button now).
+		var side_l := AnimationNodeAnimation.new()
+		side_l.animation = _prone_side_clip()
+		pbs.add_blend_point(side_l, Vector2(-1, 0), -1, &"left")
+		var side_r := AnimationNodeAnimation.new()
+		side_r.animation = _mirrored(side_l.animation)
+		pbs.add_blend_point(side_r, Vector2(1, 0), -1, &"right")
 		pr.add_node("dirs", pbs, Vector2(0, 0))
 		pr.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
 		pr.connect_node("rate", 0, "dirs")
@@ -796,7 +800,8 @@ static func _xfade(a: String, b: String) -> float:
 	if b == "air_run":
 		return 0.1
 	if b == "drop_hang":
-		return 0.12                       # (it starts from a standing pose)
+		return 0.0                        # (the capsule jumps to the bottom as it starts: a crossfade
+		                                  # drew the old pose 2 m down; the inertial blend smooths it)
 	if b.begins_with("land"):
 		return 0.12
 	if a.begins_with("land") or b == "air":
@@ -951,7 +956,15 @@ func _drive_state(speed: float) -> void:
 			var slot := "rm_b" if _cur_loco == "rm_a" else "rm_a"
 			var node := (tree.tree_root as AnimationNodeBlendTree).get_node("loco").get_node(slot) as AnimationNodeAnimation
 			var clip := String(curve.clip) if curve else ""
-			node.animation = StringName(library_name + "/" + clip) if library_name != &"" else StringName(clip)
+			var full := StringName(library_name + "/" + clip) if library_name != &"" else StringName(clip)
+			if not player.has_animation(full) and player.has_animation("mixamo/" + clip):
+				full = StringName("mixamo/" + clip)            # (a Mixamo root-motion clip)
+			node.animation = _mirrored(full) if rm_mirror else full
+			# (A curve played faster than authored: the clip stretched to match.)
+			node.use_custom_timeline = curve != null and curve.rate != 1.0
+			if node.use_custom_timeline:
+				node.timeline_length = curve.length / curve.rate
+				node.stretch_time_scale = true
 			_cur_rm = rm_clip
 			_loco.travel(slot)
 			_cur_loco = slot
@@ -1171,8 +1184,10 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 
 
 ## Prone with a firearm in hand: the directional crawl / roll set and the prone item roles.
+## (A melee weapon lying down is just held at your side on the plain crawl - the rifle prone
+## pose looked wrong with it.)
 func prone_armed() -> bool:
-	return state == MotorState.Id.CRAWL and UltraActionLayer.prone_holdable(held_def) and _role_anim(&"prone_idle") != null
+	return state == MotorState.Id.CRAWL and held_def != null and held_def.kind == ItemDefinition.Kind.FIREARM 		and _role_anim(&"prone_idle") != null
 
 
 const PRONE_TRANSITION_TIME := 0.8      ## = UltraMotor.PRONE_TRANSITION
@@ -1289,7 +1304,9 @@ func _add_turn(bt: AnimationNodeBlendTree, prefix: String, key: String, idle_nod
 
 ## The role's clip with the Hips' yaw taken out (in place, facing ahead throughout), and its
 ## progress table (how far it has turned at each 1/60 s, never decreasing).
-func _turn_clip(role: StringName) -> StringName:
+## (`lying`: the body is face down - its yaw is read off the spine (the Hips' up axis); the
+## pelvis' forward axis points into the ground.)
+func _turn_clip(role: StringName, lying := false) -> StringName:
 	var clip := _clip(role)
 	var src := _lib_anim(clip)
 	var s := String(clip)
@@ -1301,8 +1318,8 @@ func _turn_clip(role: StringName) -> StringName:
 	var rt := src.find_track(NodePath("%GeneralSkeleton:Hips"), Animation.TYPE_ROTATION_3D)
 	if rt < 0:
 		return clip
-	var y0 := _yaw_of(src.rotation_track_interpolate(rt, 0.0))
-	var yaw_at := func(t: float) -> float: return angle_difference(y0, _yaw_of(src.rotation_track_interpolate(rt, t)))
+	var y0 := _yaw_of(src.rotation_track_interpolate(rt, 0.0), lying)
+	var yaw_at := func(t: float) -> float: return angle_difference(y0, _yaw_of(src.rotation_track_interpolate(rt, t), lying))
 	var tab := PackedFloat32Array()
 	var best := 0.0
 	for i in int(ceil(src.length * 60.0)) + 1:
@@ -1336,8 +1353,24 @@ func _turn_clip(role: StringName) -> StringName:
 	return out
 
 
-static func _yaw_of(q: Quaternion) -> float:
-	var z := Basis(q).z
+## The prone pivot clip (turning left) in place and looped: a sideways shuffle to the left.
+func _prone_side_clip() -> StringName:
+	var inplace := _turn_clip(&"prone_turn_l", true)
+	var s := String(inplace)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var nm := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	if l == null or not l.has_animation(nm):
+		return inplace
+	if not l.has_animation(nm + "_side"):
+		var a := (l.get_animation(nm) as Animation).duplicate(true) as Animation
+		a.loop_mode = Animation.LOOP_LINEAR
+		l.add_animation(nm + "_side", a)
+	return StringName((lib + "/" if lib != "" else "") + nm + "_side")
+
+
+static func _yaw_of(q: Quaternion, lying := false) -> float:
+	var z := Basis(q).y if lying else Basis(q).z
 	return atan2(z.x, z.z)
 
 
@@ -1893,11 +1926,12 @@ func _set_item_clips(roles: Dictionary) -> void:
 			var clip := _clip(role)
 			# A weapon stance authored side-on (the two-handed club stance: 58 deg) is turned
 			# back toward the front by the item's stat "stance_yaw" (degrees).
-			var sy := float(held_def.stat("stance_yaw", 0.0)) if held_def and node_name in ["low", "aim"] else 0.0
+			var idle_role := role == StringName(roles.get("idle", ""))       # (not a melee block clip)
+			var sy := float(held_def.stat("stance_yaw", 0.0)) if held_def and node_name in ["low", "aim"] and idle_role else 0.0
 			if sy != 0.0:
 				clip = _yawed(clip, sy)
 			# ... and one whose chest twists away inside the clip by "chest_yaw" (UpperChest).
-			var cy := float(held_def.stat("chest_yaw", 0.0)) if held_def and node_name in ["low", "aim"] else 0.0
+			var cy := float(held_def.stat("chest_yaw", 0.0)) if held_def and node_name in ["low", "aim"] and idle_role else 0.0
 			if cy != 0.0:
 				clip = _twisted(clip, "UpperChest", cy)
 			(item.get_node(node_name) as AnimationNodeAnimation).animation = _mirrored(clip) if item_left else clip
@@ -2182,12 +2216,17 @@ func _mirrored(clip: StringName) -> StringName:
 
 ## Item events from the action layer (predicted locally, from snapshots remotely).
 ## Hit reaction on the upper body: a head snap or a body jolt.
-func play_hit(head: bool) -> void:
+func play_hit(head: bool, blocked := false) -> void:
 	if tree == null:
 		return
 	var root := tree.tree_root as AnimationNodeBlendTree
 	var src := root.get_node("hit_src") as AnimationNodeAnimation
 	var want := _clip(&"hit_head" if head else &"hit_chest")
+	if blocked:
+		# A blow taken on the block: the block's own jolt (two-handed / one-handed weapon).
+		var role := &"block_two_hit" if held_def and float(held_def.stat("two_hand_grip", 0.0)) > 0.0 else &"block_one_hit"
+		if _role_anim(role):
+			want = _mirrored(_clip(role)) if item_left else _clip(role)
 	if state == MotorState.Id.CRAWL and _role_anim(&"prone_hit"):
 		want = _clip(&"prone_hit")            # (lying down: the prone flinch)
 	if src.animation != want:
@@ -2241,6 +2280,16 @@ var arm_out: UltraArmClear              ## the post-IK arm clearing (EquipmentVi
 var fp_gun := false
 ## 0..1: how much a strike is showing (EquipmentVisual lets the procedural aim / gun pose go).
 var swing_w := 0.0
+## The root jumped (skeleton space, `d` = where the old root is from the new one) with the clip
+## making up for it: the inertial blend's history moves with it.
+func root_jumped(d: Vector3) -> void:
+	if inertial:
+		inertial.shift(d)
+
+
+## Holding a melee block (set by UltraCharacter from the sim).
+var blocking := false
+var _free_side := ""
 var _stand_w := 0.0
 var _swing_speed := 0.0
 const SWING_IN := 0.07
@@ -2268,6 +2317,18 @@ func _drive_swing(speed: float, delta: float) -> void:
 	tree.set("parameters/swing/blend_amount", w * (1.0 - lying))
 	tree.set("parameters/swing_full/blend_amount", w * smoothstep(0.0, 1.0, _stand_w) * (1.0 - lying))
 	tree.set("parameters/swing_arms/blend_amount", w * lying)
+	# One-handed melee weapon (not blocking): the empty arm is left out of the item layer, so it
+	# hangs / swings with the legs (the clip's guard arm was held up in front all the time).
+	# A strike's own layers bring it in; the switch is smoothed by the inertial blend.
+	var one_hand := held_def != null and held_def.kind == ItemDefinition.Kind.MELEE 		and float(held_def.stat("two_hand_grip", 0.0)) <= 0.0 and not blocking
+	var free_side := "" if not one_hand else ("Right" if item_left else "Left")
+	if free_side != _free_side:
+		_free_side = free_side
+		var up := (tree.tree_root as AnimationNodeBlendTree).get_node("upper") as AnimationNodeBlend2
+		for b in _arm_bones():
+			var arm := b.begins_with("Left") or b.begins_with("Right")
+			up.set_filter_path(NodePath("%GeneralSkeleton:" + b), arm and not b.begins_with(free_side) or (arm and free_side == ""))
+		inertial.trigger()
 
 
 func item_event(kind: StringName, data := {}) -> void:

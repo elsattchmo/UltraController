@@ -45,6 +45,14 @@ var severable := 0b1111111101
 @export var ko_heavy := 55.0
 ## Blunt to the head counts this much against overall health (a bullet: region_mult, 3x).
 @export var blunt_head_mult := 1.2
+## A held melee block (UltraActionLayer, MotorState.F_BLOCKING) facing the blow (within
+## `block_arc_deg` either side) takes this much of a melee hit; no knockout, cut or knock-down.
+@export_range(0, 1, 0.05) var block_mult := 0.2
+@export var block_arc_deg := 55.0
+## A shot through the heart (a ball `heart_radius` m in the chest, on the shot's line): bleeds
+## `heart_bleed_rate` hp/s on top of everything else.
+@export var heart_radius := 0.045
+@export var heart_bleed_rate := 12.0
 
 
 func gore_on() -> bool:

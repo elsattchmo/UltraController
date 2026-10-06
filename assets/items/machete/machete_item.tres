@@ -18,10 +18,11 @@ grip_offset = Transform3D(-0.024715513, 0.9996868, -0.003909141, 0.93723285, 0.0
 holster_offset = Transform3D(0.886815, -0.40083727, -0.22997542, -0.45094135, -0.8594078, -0.24097757, -0.10104983, 0.31740797, -0.94288975, 0.04391706, 0.15809143, -0.2208066)
 holster_bone = &"UpperChest"
 anim_roles = {
-"aim": "machete_idle",
+"aim": "machete_block",
 "idle": "machete_idle"
 }
 anim_clips = {
+"machete_block": ["mixamo/B_Axe", "Idle_Sword"],
 "machete_combo": ["mixamo/M_SwordCombo"],
 "machete_idle": ["Idle_Sword"]
 }

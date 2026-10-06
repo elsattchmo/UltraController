@@ -39,10 +39,14 @@ func setup(c: UltraCharacter) -> void:
 	dismember.name = "Dismember"
 	sk.add_child(dismember)                 # last: after IK, look and injuries
 	UltraNet.world.on_event(&"sever", _on_sever)
+	UltraNet.world.on_event(&"hit", _on_hit_gore)
+	UltraNet.world.on_event(&"heart", _on_heart)
 
 
 func _exit_tree() -> void:
 	UltraNet.world.off_event(&"sever", _on_sever)
+	UltraNet.world.off_event(&"hit", _on_hit_gore)
+	UltraNet.world.off_event(&"heart", _on_heart)
 
 
 func _process(delta: float) -> void:
@@ -60,11 +64,18 @@ func _process(delta: float) -> void:
 	var vb := character.visual_root.global_basis
 	injury.accel = (vb.inverse() * character.get_accel()) * Vector3(-1, 1, -1)   # world -> skeleton space
 	_drive_blood(delta)
+	# Respawned (whole again): the torso wounds and guts go.
+	if not _gore.is_empty() and s.hp >= 100.0 and s.state != MotorState.Id.DEAD:
+		for n in _gore:
+			if is_instance_valid(n):
+				(n as Node).queue_free()
+		_gore.clear()
 
 
 # ---------------------------------------------------------------- bleeding
 
 var _beat := 0.0
+var _heart_t := 0.0
 var _drip_t := 0.0
 var _seep_t := 0.0
 var _pool_t := 0.0
@@ -106,6 +117,22 @@ func _drive_blood(delta: float) -> void:
 			fx.blood_fx.spray(at, Vector3.DOWN, 1, 0.3, 30.0, 0.006, character)
 		if lying and _pool_t <= 0.0:
 			fx.blood_fx.pool(at, 0.12 + 0.1 * flow)
+	# Through the heart: the chest pumps hard and fast (and runs out fast).
+	if s.has(MotorState.F_HEART) and flow > 0.0 and character.skeleton:
+		_heart_t -= delta
+		if _heart_t <= 0.0:
+			_heart_t = 0.42 if not dead else 1.1
+			var sk2 := character.skeleton
+			var ch2 := sk2.find_bone("UpperChest")
+			if ch2 >= 0:
+				var g := sk2.global_transform * sk2.get_bone_global_pose(ch2)
+				var front := -character.visual_root.global_basis.z
+				if lying:
+					front = Vector3.DOWN
+				var at2 := g.origin + front * 0.12 + Vector3.UP * -0.05
+				fx.blood_fx.spray(at2, front + Vector3.UP * 0.25, int(10 + 14 * flow), 1.6 + 2.6 * flow, 20.0, 0.008, character)
+				if lying:
+					fx.blood_fx.pool(at2, 0.2 + 0.15 * flow)
 	# Crippled limbs seep: a drop now and then off the wound.
 	_seep_t -= delta
 	if _seep_t <= 0.0 and not dead and character.skeleton:
@@ -133,10 +160,10 @@ func _drive_blood(delta: float) -> void:
 
 
 ## Hit reaction: the matching clip on the upper body, and a kick on the bone that was hit.
-func react(region: int, dir: Vector3, amount: float) -> void:
+func react(region: int, dir: Vector3, amount: float, kind := &"bullet") -> void:
 	if character.anim:
-		character.anim.play_hit(region == R.HEAD)
-	if region < 0 or injury == null:
+		character.anim.play_hit(region == R.HEAD, kind == &"blocked")
+	if region < 0 or injury == null or kind == &"blocked":
 		return
 	var bone: String = UltraLimbs.BONES[region][0]
 	if region == R.TORSO:
@@ -207,6 +234,164 @@ func _bleed(on: Node3D) -> void:
 	tm.autostart = true
 	tm.timeout.connect(func() -> void: p.emitting = false)
 	p.add_child(tm)
+
+
+# ---------------------------------------------------------------- torso gore
+
+## Buckshot this heavy into the torso tears it open: chunks of it fly, a raw wound stays, and
+## (heavier, or a kill) guts spill out and hang.
+const GORE_MIN := 30.0
+const GUTS_MIN := 45.0
+const MAX_GUTS := 2
+var _gore: Array[Node] = []
+var _guts := 0
+
+
+func _on_heart(net_id: int, point := Vector3.ZERO, dir := Vector3.ZERO) -> void:
+	if character == null or net_id != character.net_id or not character.damage_profile.blood_on():
+		return
+	var fx := UltraEffects.instance()
+	if fx and fx.blood_fx:
+		# Through the heart: a burst out of the exit and the entry both.
+		fx.blood_fx.spray(point + dir * 0.25, dir + Vector3.UP * 0.2, 70, 5.5, 30.0, 0.009, character)
+		fx.blood_fx.spray(point, -dir + Vector3.UP * 0.3, 35, 2.5, 40.0, 0.008, character)
+		for i in 5:
+			fx.blood_fx.splat_body(character, point + Vector3(randf_range(-0.12, 0.12), randf_range(-0.3, 0.05), randf_range(-0.12, 0.12)), randf_range(0.1, 0.18))
+	_heart_t = 0.15
+
+
+func _on_hit_gore(target_id: int, pos: Vector3, dir: Vector3, amount: float, _attacker_id: int, region := -1, kind := &"bullet") -> void:
+	if character == null or target_id != character.net_id or region != R.TORSO:
+		return
+	if kind != &"buckshot" and kind != &"blast":
+		return
+	var dp := character.damage_profile
+	if not dp.gore_on() or amount < GORE_MIN:
+		return
+	torso_blast(pos, dir.normalized(), amount)
+
+
+## A torso blown open at `point` (world) by a blast travelling `dir`.
+func torso_blast(point: Vector3, dir: Vector3, amount: float) -> void:
+	var sk := character.skeleton
+	var fx := UltraEffects.instance()
+	# Which torso bone it's on (the wound rides it).
+	var best := ""
+	var bd := INF
+	for b in ["Hips", "Spine", "Chest", "UpperChest"]:
+		var i := sk.find_bone(b)
+		if i < 0:
+			continue
+		var d := (sk.global_transform * sk.get_bone_global_pose(i).origin).distance_to(point)
+		if d < bd:
+			bd = d
+			best = b
+	var att := BoneAttachment3D.new()
+	att.bone_name = best
+	sk.add_child(att)
+	_gore.append(att)
+	att.force_update_transform()
+	var at_local := att.global_transform.affine_inverse() * (point + dir * 0.03)
+	# The wound: a raw crater sunk into the torso where it was hit.
+	var w := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	var r := clampf(0.05 + amount * 0.0012, 0.06, 0.11)
+	sm.radius = r
+	sm.height = r * 1.2
+	sm.radial_segments = 10
+	sm.rings = 5
+	w.mesh = sm
+	w.material_override = _flesh_mat()
+	w.position = at_local
+	w.scale = Vector3(1.0, 1.0, 0.55)
+	w.look_at_from_position(at_local, at_local - att.global_basis.inverse() * dir, Vector3.UP if absf(dir.y) < 0.9 else Vector3.FORWARD)
+	att.add_child(w)
+	# Chunks of the torso torn off (its own skin round the hit) and some flesh with them.
+	var tris: Array = []
+	var bm := character.body_mesh()
+	if bm and bm.mesh and bm.skin:
+		_collect_tris(bm, 1 << R.TORSO, tris, point, 0.11)
+	if not tris.is_empty():
+		var dirs := _sphere_dirs(3)
+		var groups: Array = [[], [], []]
+		for k in tris.size():
+			var t: Array = tris[k]
+			var v: Vector3 = ((t[0] + t[1] + t[2]) / 3.0 - point).normalized()
+			var bi := 0
+			for q in 3:
+				if dirs[q].dot(v) > dirs[bi].dot(v):
+					bi = q
+			(groups[bi] as Array).append(k)
+		for g: Array in groups:
+			if g.is_empty():
+				continue
+			var gc := Vector3.ZERO
+			for k: int in g:
+				var t2: Array = tris[k]
+				gc += (t2[0] + t2[1] + t2[2]) / 3.0
+			gc /= g.size()
+			_make_gib(tris, g, gc, character.state.vel + dir * randf_range(3.0, 6.0) + Vector3.UP * randf_range(0.5, 2.0), true)
+	for i in 3:
+		_flesh_blob(point, dir * randf_range(2.0, 5.0) + Vector3(randf_range(-1, 1), randf_range(0.5, 2.0), randf_range(-1, 1)))
+	# Lots of blood: out the back with the shot, a spray off the front, the body splashed.
+	if fx and fx.blood_fx and character.damage_profile.blood_on():
+		fx.blood_fx.spray(point + dir * 0.2, dir + Vector3.UP * 0.15, 110, 6.5, 32.0, 0.009, character)
+		fx.blood_fx.spray(point, -dir + Vector3.UP * 0.4, 45, 2.8, 50.0, 0.008, character)
+		for i in 8:
+			fx.blood_fx.splat_body(character, point + Vector3(randf_range(-0.2, 0.2), randf_range(-0.4, 0.1), randf_range(-0.2, 0.2)), randf_range(0.1, 0.2))
+	# Guts: out of the wound, hanging.
+	var dead := character.state.state == MotorState.Id.DEAD or character.state.hp <= 0.0
+	if (amount >= GUTS_MIN or dead) and _guts < MAX_GUTS:
+		_guts += 1
+		var a := Node3D.new()
+		a.position = at_local
+		att.add_child(a)
+		var guts := UltraGuts.new()
+		guts.anchor = a
+		guts.exclude = [character.get_rid()]
+		var root := character.get_tree().current_scene if character.get_tree().current_scene else character.get_parent()
+		root.add_child(guts)
+		guts.global_position = point
+		guts.kick(-dir * 0.5 + dir * 2.0 + Vector3.UP * 0.5)
+		_gore.append(guts)
+
+
+## A loose lump of flesh / gut thrown out of a wound (a small rigid body that lies where it lands).
+func _flesh_blob(at: Vector3, vel: Vector3) -> void:
+	var body := RigidBody3D.new()
+	body.collision_layer = 0
+	body.collision_mask = UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC
+	body.mass = 0.15
+	var m := MeshInstance3D.new()
+	var cm := CapsuleMesh.new()
+	cm.radius = randf_range(0.018, 0.03)
+	cm.height = randf_range(0.07, 0.14)
+	cm.radial_segments = 8
+	cm.rings = 2
+	m.mesh = cm
+	m.material_override = UltraGuts.gut_mat() if randf() < 0.6 else _flesh_mat()
+	body.add_child(m)
+	var cs := CollisionShape3D.new()
+	var cap := CapsuleShape3D.new()
+	cap.radius = cm.radius
+	cap.height = cm.height
+	cs.shape = cap
+	body.add_child(cs)
+	var root := character.get_tree().current_scene if character.get_tree().current_scene else character.get_parent()
+	root.add_child(body)
+	body.global_position = at
+	body.linear_velocity = vel
+	body.angular_velocity = Vector3(randf_range(-8, 8), randf_range(-8, 8), randf_range(-8, 8))
+	body.add_to_group(&"ultra_gib")
+	for k in range(_gibs.size() - 1, -1, -1):
+		if not is_instance_valid(_gibs[k]):
+			_gibs.remove_at(k)
+	_gibs.append(body)
+	while _gibs.size() > MAX_GIBS:
+		var old: Variant = _gibs.pop_front()
+		if is_instance_valid(old):
+			(old as Node).queue_free()
+	character.get_tree().create_timer(30.0).timeout.connect(body.queue_free)
 
 
 # ---------------------------------------------------------------- severing
@@ -291,7 +476,8 @@ func spawn_gib(cut: int, dir: Vector3, pieces := 1, burst := 0.0) -> void:
 
 
 ## The cut region's triangles from one skinned mesh, posed (world space).
-func _collect_tris(mi: MeshInstance3D, cut: int, out: Array) -> void:
+## (`near` / `radius`: only the triangles whose middle is within `radius` of `near`.)
+func _collect_tris(mi: MeshInstance3D, cut: int, out: Array, near := Vector3.INF, radius := 0.0) -> void:
 	var sk := character.skeleton
 	var regions := _regions_for(mi, sk)
 	var mesh := mi.mesh as ArrayMesh
@@ -331,6 +517,8 @@ func _collect_tris(mi: MeshInstance3D, cut: int, out: Array) -> void:
 				p[j] = acc
 				p[3 + j] = nacc.normalized()
 				p[6 + j] = uvs[v] if uvs.size() > v else Vector2.ZERO
+			if near != Vector3.INF and ((p[0] + p[1] + p[2]) / 3.0).distance_to(near) > radius:
+				continue
 			out.append(p)
 
 

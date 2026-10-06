@@ -1,0 +1,24 @@
+[remap]
+
+importer="wav"
+type="AudioStreamWAV"
+uid="uid://b0admi1o2le28"
+path="res://.godot/imported/handgun fire.wav-5cda2b990c3167e8196106ec19419aba.sample"
+
+[deps]
+
+source_file="res://assets/audio/source/handgun fire.wav"
+dest_files=["res://.godot/imported/handgun fire.wav-5cda2b990c3167e8196106ec19419aba.sample"]
+
+[params]
+
+force/8_bit=false
+force/mono=false
+force/max_rate=false
+force/max_rate_hz=44100
+edit/trim=false
+edit/normalize=false
+edit/loop_mode=0
+edit/loop_begin=0
+edit/loop_end=-1
+compress/mode=2

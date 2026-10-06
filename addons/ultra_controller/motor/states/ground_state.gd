@@ -17,6 +17,16 @@ func next(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 		var recover := m.profile.hard_land_recover_time if s.has(MotorState.F_HARD_LANDING) else m.profile.land_recover_time
 		if s.state_time < recover:
 			return -1
+	# Prone: the roll button rolls sideways (right, or left pushing left) - Mixamo "Rifle Prone
+	# Rolling Right" with its root motion, mirrored for the left.
+	if UltraMotor.pressed_edge(s, i, InputFrame.B_DODGE) and m.profile.enable_roll and s.state == Id.CRAWL 			and not m.prone_transitioning(s) and m.anim_set:
+		var pidx := m.anim_set.rm_index(&"PR_RollR_RM")
+		if pidx >= 0:
+			s.rm_clip = pidx
+			s.rm_t = 0.0
+			s.rm_yaw0 = s.body_yaw
+			s.rm_scale = Vector3(-1.0 if i.move.x < -0.3 else 1.0, 1.0, 1.0)
+			return Id.ROOT_MOTION
 	if UltraMotor.pressed_edge(s, i, InputFrame.B_DODGE) and m.profile.enable_roll and s.stance == MotorState.Stance.STAND:
 		var idx := m.anim_set.rm_index(_dodge_role(i)) if m.anim_set else -1
 		if idx >= 0:

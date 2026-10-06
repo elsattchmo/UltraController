@@ -85,7 +85,10 @@ func _process_modification_with_delta(delta: float) -> void:
 		_ray.exclude = exclude
 		var hit := space.intersect_ray(_ray)
 		if hit.is_empty():
-			ground_h.append(-max_pelvis_drop)
+			# Nothing under the foot within reach (over a drop / a ledge's lip): leave it as
+			# animated. (Counting it as ground at -max_pelvis_drop sank the hips 45 cm walking
+			# up to every edge, then they popped back up as the climb-down started.)
+			ground_h.append(0.0)
 			ground_n.append(Vector3.UP)
 		else:
 			var hp: Vector3 = inv * (hit.position as Vector3)

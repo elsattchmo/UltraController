@@ -9,6 +9,8 @@ extends Resource
 @export var clip: StringName
 @export var length: float = 0.0
 @export var sample_rate: float = 60.0
+## Playback speed (the motor's clock and the clip together; the prone roll is played at 1.6).
+@export var rate: float = 1.0
 @export var positions: PackedVector3Array = []
 @export var yaws: PackedFloat32Array = []
 

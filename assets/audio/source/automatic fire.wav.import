@@ -1,0 +1,24 @@
+[remap]
+
+importer="wav"
+type="AudioStreamWAV"
+uid="uid://bgvvg8wjn7sth"
+path="res://.godot/imported/automatic fire.wav-3d6f4247150d6372e5f7268798b043de.sample"
+
+[deps]
+
+source_file="res://assets/audio/source/automatic fire.wav"
+dest_files=["res://.godot/imported/automatic fire.wav-3d6f4247150d6372e5f7268798b043de.sample"]
+
+[params]
+
+force/8_bit=false
+force/mono=false
+force/max_rate=false
+force/max_rate_hz=44100
+edit/trim=false
+edit/normalize=false
+edit/loop_mode=0
+edit/loop_begin=0
+edit/loop_end=-1
+compress/mode=2

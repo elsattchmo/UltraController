@@ -70,6 +70,28 @@ static func build(p: Callable, head_up := Vector3.ZERO) -> Array[Dictionary]:
 	return boxes
 
 
+## The heart (world) of `c` standing at `pos`: in the upper torso capsule, 30 % up from the
+## chest, 6 cm in front of its axis and 3.5 cm to the left. Vector3.INF without a torso.
+static func heart(c: UltraCharacter, pos: Vector3) -> Vector3:
+	var torso: Array[Dictionary] = []
+	for h in capsules(c, pos):
+		if int(h.region) == UltraLimbs.Region.TORSO:
+			torso.append(h)
+	if torso.size() < 2:
+		return Vector3.INF
+	var chest: Vector3 = torso[1].a
+	var neck: Vector3 = torso[1].b
+	var up := (neck - chest).normalized()
+	var yaw := c.state.body_yaw
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	fwd = fwd - up * fwd.dot(up)
+	if fwd.length() < 0.2:
+		fwd = Vector3.DOWN - up * Vector3.DOWN.dot(up)          # (lying: the chest faces the ground)
+	fwd = fwd.normalized()
+	var left := fwd.cross(up).normalized()
+	return chest + (neck - chest) * 0.3 + fwd * 0.06 + left * 0.035
+
+
 ## Bones `build` reads.
 const BONES := ["Head", "Neck", "Hips", "Chest", "LeftHand", "LeftLowerArm", "LeftUpperArm",
 	"LeftLowerLeg", "LeftFoot", "LeftToes", "LeftUpperLeg", "RightHand", "RightLowerArm",

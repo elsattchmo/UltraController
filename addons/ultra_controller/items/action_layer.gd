@@ -14,6 +14,12 @@ const TWO_HANDED: Array[int] = [MotorState.Id.MANTLE, MotorState.Id.VAULT, Motor
 	MotorState.Id.RAGDOLL, MotorState.Id.DEAD, MotorState.Id.GET_UP]
 
 
+## True while a two-handed state stows the item in hand. (A prone roll keeps the weapon: the
+## Mixamo prone roll is authored holding a rifle.)
+static func stows(s: MotorState) -> bool:
+	return s.state in TWO_HANDED and not (s.state == MotorState.Id.ROOT_MOTION and s.stance == MotorState.Stance.CRAWL)
+
+
 
 static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, replaying: bool) -> void:
 	s.fire_cd = maxf(s.fire_cd - dt, 0.0)
@@ -38,7 +44,7 @@ static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, rep
 		if wd == null or not prone_holdable(wd):
 			want_uid = 0
 	var prone_stow := s.state == MotorState.Id.CRAWL and s.held_uid != 0 and not prone_holdable(ItemDB.by_index(s.equipped))
-	if s.state in TWO_HANDED or prone_stow:
+	if stows(s) or prone_stow:
 		want_uid = 0
 		if s.held_uid != 0:
 			_store_mag(c, s, replaying)
@@ -47,6 +53,10 @@ static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, rep
 			s.mag = 0
 			_set_action(s, Action.NONE)
 	var def := ItemDB.by_index(s.equipped)
+	# Blocking: a melee weapon held up with the secondary button, standing / walking.
+	var can_block := def != null and def.kind == ItemDefinition.Kind.MELEE and s.action == Action.READY
+	can_block = can_block and i.has(InputFrame.B_SECONDARY) and s.state in [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.CROUCH, MotorState.Id.LAND]
+	s.set_flag(MotorState.F_BLOCKING, can_block)
 	_free_aim(c, s, i, def, dt)
 	match s.action:
 		Action.NONE:
@@ -407,8 +417,8 @@ const COMBO_LANDED := 0x40
 ## swing (the attack button). Starts Action.MELEE; true if it did.
 static func _melee_start(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDefinition, replaying: bool) -> bool:
 	var go := false
-	if s.state == MotorState.Id.CRAWL and (def.kind != ItemDefinition.Kind.MELEE or Vector2(s.vel.x, s.vel.z).length() > 0.25):
-		return false                               # (lying down: a blade or club, lying still)
+	if s.state == MotorState.Id.CRAWL:
+		return false                               # (no strikes lying down: it looked terrible)
 	if def.kind == ItemDefinition.Kind.FIREARM:
 		go = UltraMotor.pressed_edge(s, i, InputFrame.B_MELEE)
 	elif def.kind == ItemDefinition.Kind.MELEE:

@@ -387,6 +387,10 @@ func _melee(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 		var wpath := "res://assets/items/%s/%s_world.tscn" % [spec[0], spec[0]]
 		d.world_scene = load(wpath) if ResourceLoader.exists(wpath) else null
 		d.equip_slots = ItemDefinition.EquipSlot.MAIN_HAND | ItemDefinition.EquipSlot.BACK
+		if spec[0] == "bat":
+			# Slid 9 cm down through the hand: the clip's other fist sits 13 cm under this one,
+			# which was past the knob (both hands now on the tape).
+			grip = grip * Transform3D(Basis(), Vector3(0.0, -0.09, 0.0))
 		d.grip_offset = grip
 		d.two_handed = false
 		# Slung on the back, handle up over the right shoulder.
@@ -400,9 +404,12 @@ func _melee(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 		d.holster_offset = chest.affine_inverse() * Transform3D(b, chest.origin + Vector3(-0.02, -0.02, -0.16) - b * Vector3(0, 0.25, 0))
 		# Roles are shared by every character: each weapon names its own.
 		var r := String(spec[0])
-		d.anim_roles = {"idle": r + "_idle", "aim": r + "_idle"}
+		# "aim" is the block (held with the secondary button): a two-handed club the Great Sword
+		# block, a one-handed blade the axe block.
+		var block_clip := "mixamo/B_Great" if spec[0] == "bat" else "mixamo/B_Axe"
+		d.anim_roles = {"idle": r + "_idle", "aim": r + "_block"}
 		d.anim_clips = {r + "_idle": ["mixamo/" + idle_clip, "Idle_Sword"] if have_idle else ["Idle_Sword"],
-			r + "_combo": ["mixamo/" + combo]}
+			r + "_combo": ["mixamo/" + combo], r + "_block": [block_clip, "Idle_Sword"]}
 		var swings := []
 		for w: Array in spec[8]:
 			var rate: float = w[7] if w.size() > 7 else spec[7]

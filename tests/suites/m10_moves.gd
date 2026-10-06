@@ -86,15 +86,28 @@ func test_prone_rifle() -> void:
 			fired_moving = true
 	check(crawl_v > 0.3 and not fired_moving, "crawls (%.2f m/s) without firing" % crawl_v)
 	await ticks(50)
-	# Sideways: the roll; turning in place: the turn clip.
+	# Sideways: the side shuffle; turning in place: the turn clip.
 	_bot().set_steps([{"ticks": 60, "slot": sl, "yaw": 0.0, "move": Vector2(1, 0), "buttons": InputFrame.B_CRAWL | InputFrame.B_CROUCH}])
 	await ticks(50)
 	var dir: Vector2 = c.anim._prone_dir
-	check(dir.x > 0.6, "moving right rolls right (%s)" % dir)
+	check(dir.x > 0.6, "moving right shuffles right (%s)" % dir)
 	_bot().set_steps([{"ticks": 60, "slot": sl, "yaw": 1.2, "buttons": InputFrame.B_CRAWL | InputFrame.B_CROUCH}])
 	await ticks(20)
 	check(c.anim._prone_turn > 0.5, "pivoting plays the turn clip (%.2f)" % c.anim._prone_turn)
-	# A bat stays in hand lying down, and strikes lying still (only the arms swing).
+	# The roll button rolls (keeping the rifle), to the left when pushing left.
+	var x0 := c.state.pos
+	_bot().set_steps([{"ticks": 2, "slot": sl, "move": Vector2(-1, 0), "buttons": InputFrame.B_CRAWL | InputFrame.B_CROUCH, "tap": InputFrame.B_DODGE}, {"ticks": 240, "slot": sl, "buttons": InputFrame.B_CRAWL | InputFrame.B_CROUCH}])
+	var rolled := false
+	for k in 240:
+		await ticks(1)
+		rolled = rolled or c.state.state == Id.ROOT_MOTION
+		if rolled and c.state.state == Id.CRAWL:
+			break
+	var moved := c.state.pos - x0
+	var right := Vector3(cos(c.state.body_yaw), 0, -sin(c.state.body_yaw))
+	info("prone roll: moved %.2f m sideways, still holding %s, back to %s" % [moved.dot(right), c.state.held_uid != 0, Id.keys()[c.state.state]])
+	check(rolled and moved.dot(right) < -0.4 and c.state.held_uid != 0 and c.state.state == Id.CRAWL, "rolls left with the rifle and lies prone again")
+	# A bat stays in hand lying down (at the side, on the plain crawl), but doesn't strike.
 	_bot().set_steps([{"ticks": 120, "slot": _slot(&"bat"), "buttons": InputFrame.B_CRAWL | InputFrame.B_CROUCH}])
 	await ticks(120)
 	check(c.state.held_uid != 0 and c.inventory.get_slot(c.inventory.find_uid(c.state.held_uid)).def_id == &"bat", "a bat stays in hand prone")
@@ -104,7 +117,7 @@ func test_prone_rifle() -> void:
 	for k in 40:
 		await ticks(1)
 		arms = maxf(arms, float(c.anim.tree.get("parameters/swing_arms/blend_amount")))
-	check(c.state.melee_seq != seq and arms > 0.5, "strikes lying down, arms only (%.2f)" % arms)
+	check(c.state.melee_seq == seq and not c.anim.prone_armed(), "no strikes lying down, no rifle pose with a bat")
 
 
 ## Dropping the gun in hand: it leaves the hand at once and falls at the feet, a physics body.
@@ -340,3 +353,60 @@ func test_melee_free_hand_and_lost_arm() -> void:
 		sw = maxf(sw, c.anim.swing_w)
 	check(c.state.melee_seq != seq and sw > 0.5 and c.anim.item_left, "still strikes, left-handed")
 	check(eq._free_w < 0.05, "no guard with one arm (%.2f)" % eq._free_w)
+
+
+
+## Walking off the cliff into a climb-down: the body doesn't dip toward the drop on the way to
+## the edge (foot IK used to sink the hips 40 cm for a foot over nothing) and doesn't pop as the
+## move starts (the capsule jumps to the bottom; a crossfade drew the old pose 2 m down).
+func test_edge_no_dip_or_pop() -> void:
+	c.teleport(Vector3(128.5, 8.05, -24.6), PI)
+	await ticks(5)
+	var sk := c.skeleton
+	var hb := sk.find_bone("Hips")
+	var hips: Array[float] = []
+	var states: Array[int] = []
+	var cb := func() -> void:
+		hips.append((sk.global_transform * sk.get_bone_global_pose(hb)).origin.y)
+		states.append(c.state.state)
+	sk.skeleton_updated.connect(cb)
+	_bot().set_steps([{"ticks": 200, "yaw": PI, "move": Vector2(0, 1)}])
+	for k in 200:
+		await get_tree().process_frame
+		if c.state.state == Id.LEDGE_CLIMB and c.state.state_time > 0.3:
+			break
+	sk.skeleton_updated.disconnect(cb)
+	var start := states.find(Id.LEDGE_CLIMB)
+	var before := 10.0
+	for i in range(maxi(start - 20, 0), start):
+		before = minf(before, hips[i])
+	var jump := 0.0
+	for i in range(start, mini(start + 12, hips.size())):
+		jump = maxf(jump, absf(hips[i] - hips[i - 1]))
+	info("walking to the edge: lowest hips %.2f (standing ~8.9); first frames of the move: biggest step %.3f m" % [before, jump])
+	check(start > 0 and before > 8.75, "no dip toward the drop (hips %.2f)" % before)
+	check(jump < 0.08, "no pop as the climb-down starts (%.3f m in a frame)" % jump)
+
+
+## Stairs (20 cm risers): the drawn body glides over steps - up (the step-up offset used to be
+## applied a tick before the interpolated position took the step: a 14 cm dip every step) and
+## down (stair snaps weren't smoothed at all).
+func test_stairs_smooth() -> void:
+	for run: Array in [["down walk", Vector3(30.0, 2.05, -24.4), PI, 0, 0.045], ["down sprint", Vector3(30.0, 2.05, -24.4), PI, InputFrame.B_SPRINT, 0.06], ["up walk", Vector3(30.0, 0.05, -17.0), 0.0, 0, 0.025]]:
+		c.teleport(run[1], run[2])
+		await ticks(20)
+		var sk := c.skeleton
+		var hd := sk.find_bone("Head")
+		var ys: Array[float] = []
+		var cb := func() -> void:
+			ys.append((sk.global_transform * sk.get_bone_global_pose(hd)).origin.y)
+		sk.skeleton_updated.connect(cb)
+		_bot().set_steps([{"ticks": 150, "yaw": run[2], "move": Vector2(0, 1), "buttons": run[3]}])
+		for k in 150:
+			await get_tree().process_frame
+		sk.skeleton_updated.disconnect(cb)
+		var worst := 0.0
+		for i in range(2, ys.size()):
+			worst = maxf(worst, absf(ys[i] - 2.0 * ys[i - 1] + ys[i - 2]))
+		info("%s: head jerk max %.1f mm/frame^2" % [run[0], worst * 1000.0])
+		check(worst < float(run[4]), "%s: head steady over the steps (%.1f mm)" % [run[0], worst * 1000.0])

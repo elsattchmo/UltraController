@@ -101,7 +101,7 @@ static func strength_mult(s: MotorState) -> float:
 static func bleed_rate(s: MotorState, dp: DamageProfile) -> float:
 	if dp == null or not dp.limb_damage:
 		return 0.0
-	var total := 0.0
+	var total := dp.heart_bleed_rate if s.has(MotorState.F_HEART) else 0.0
 	for r in UltraLimbs.COUNT:
 		if not (s.severed >> r) & 1:
 			# Crippled (not cut off): a slow seep.

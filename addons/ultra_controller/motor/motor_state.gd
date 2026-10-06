@@ -18,6 +18,9 @@ const F_ON_PLATFORM := 1 << 4
 const F_HARD_LANDING := 1 << 5
 const F_UNCONSCIOUS := 1 << 6      ## knocked out: limp on the ground until `ko_t` runs out
 const F_AWAIT_NEUTRAL := 1 << 7    ## lowered onto a hang / ladder / wall: the stick is ignored until let go
+## (1 << 8 is UltraMotor.F_TURNING.)
+const F_BLOCKING := 1 << 10        ## holding a melee weapon up to block (secondary held)
+const F_HEART := 1 << 11           ## shot through the heart: bleeds out fast
 
 var pos := Vector3.ZERO
 var vel := Vector3.ZERO

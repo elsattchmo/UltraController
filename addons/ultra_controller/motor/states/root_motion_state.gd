@@ -7,7 +7,7 @@ const Id := MotorState.Id
 
 func next(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 	var c := m.anim_set.rm_curve(s.rm_clip) if m.anim_set else null
-	if c == null or s.rm_t >= c.length - 0.0001:
+	if c == null or s.rm_t >= c.length - 0.002:          # (rm_t is quantized to 1 ms: it stopped short)
 		if not s.is_grounded():
 			return Id.FALL
 		return Id.MOVE if i.move.length() > 0.1 else Id.IDLE
@@ -43,7 +43,7 @@ func tick(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 	var c := m.anim_set.rm_curve(s.rm_clip)
 	if c == null:
 		return
-	var t1 := minf(s.rm_t + m.dt, c.length)
+	var t1 := minf(s.rm_t + m.dt * c.rate, c.length)
 	var d := (c.sample_pos(t1) - c.sample_pos(s.rm_t)) * s.rm_scale
 	var v := Basis(Vector3.UP, s.rm_yaw0) * d / m.dt
 	var vertical_clip := absf(c.extent().size.y) > 0.15
@@ -53,6 +53,6 @@ func tick(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 		else:
 			v.y = m.body.velocity.y - m.gravity * m.dt
 	m.body.velocity = v
-	s.body_yaw = s.rm_yaw0 + c.sample_yaw(t1)
+	s.body_yaw = s.rm_yaw0 + c.sample_yaw(t1) * signf(s.rm_scale.x)      # (mirrored: turns the other way)
 	s.rm_t = t1
 	m.move(s, not vertical_clip)

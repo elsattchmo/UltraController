@@ -14,14 +14,15 @@ mass = 1.0
 world_scene = ExtResource("3_ytx51")
 equip_scene = ExtResource("1_r3fd0")
 equip_slots = 9
-grip_offset = Transform3D(-0.02334356, 0.9996872, 0.009007126, 0.9853429, 0.024529539, -0.16881287, -0.16898087, 0.0049344897, -0.985607, 0.03639853, 0.10410625, 0.024899453)
+grip_offset = Transform3D(-0.02334356, 0.9996872, 0.00900713, 0.9853429, 0.02452954, -0.16881287, -0.16898087, 0.00493449, -0.985607, -0.05228233, 0.10189859, 0.04009261)
 holster_offset = Transform3D(0.886815, -0.40083727, -0.22997542, -0.45094135, -0.8594078, -0.24097757, -0.10104983, 0.31740797, -0.94288975, 0.04391706, 0.15809143, -0.2208066)
 holster_bone = &"UpperChest"
 anim_roles = {
-"aim": "bat_idle",
+"aim": "bat_block",
 "idle": "bat_idle"
 }
 anim_clips = {
+"bat_block": ["mixamo/B_Great", "Idle_Sword"],
 "bat_combo": ["mixamo/M_Club2Combo"],
 "bat_idle": ["mixamo/M_Club2Idle", "Idle_Sword"]
 }

@@ -23,7 +23,6 @@ var _stowed := {}
 var _stow_attach := {}
 ## Free-aim offset of the last two ticks (MotorState.sway), for smooth presentation.
 var _slide_kick := 0.0
-var _mag_hidden := false
 var _recoil := UltraSpring.new(Vector3.ZERO, 6.0, 0.55)
 var _fp_w := 0.0
 var _owns := [false, false]          ## hand IK goals we set (never release someone else's)
@@ -121,6 +120,9 @@ func _process(delta: float) -> void:
 			if mag_reload() and _mag_hand != Transform3D():
 				mag.global_transform = _mag_hand      # (in the left hand while it's out)
 				mag.visible = true
+			elif mag_reload():
+				mag.transform = mag.get_meta("rest")
+				mag.visible = not _mag_hidden         # (dropped; the fresh one's still in the pouch)
 			else:
 				mag.transform = mag.get_meta("rest")
 				var hide := s.action == UltraActionLayer.Action.RELOADING and s.action_t > 0.35 and s.action_t < float(held_def.stat("reload_commit", 1.5)) - 0.2
@@ -420,7 +422,7 @@ func _drive_hands(delta: float) -> void:
 	var rise := smoothstep(0.15, 1.0, UltraActionLayer.raised(s))
 	if mag_reload():
 		rise = 1.0                            # (the gun stays where it's held: the left hand reloads)
-	var fp_drive := has_view() and held_node != null and rise > 0.0 and held_def.kind == ItemDefinition.Kind.FIREARM 		and anim.sprint_carry < 0.5          # (sprinting with a rifle the body carries it, as others see it)
+	var fp_drive := has_view() and held_node != null and rise > 0.0 and held_def.kind == ItemDefinition.Kind.FIREARM 		and anim.sprint_carry < 0.5 and s.state != MotorState.Id.ROOT_MOTION     # (sprinting / a prone roll: the body carries it)
 	fp_drive = fp_drive or shell_fp
 	anim.fp_gun = fp_drive
 	var fp_target := (1.0 if shell_fp else rise) if fp_drive else 0.0
@@ -444,10 +446,11 @@ func _drive_hands(delta: float) -> void:
 		var e := smoothstep(0.0, 1.0, ads)
 		var target_gun := hip_gun.interpolate_with(ads_gun, e)
 		if _shell_fp_w > 0.0:
-			var tilt := Basis(right, deg_to_rad(14.0)) * aim_basis
-			var lb := Basis((tilt * Vector3.FORWARD).normalized(), deg_to_rad(SHELL_ROLL) * _side) * tilt
-			var load_gun := Transform3D(lb, cam.origin + fwd * 0.40 + right * 0.05 * _side - cup * 0.16)
-			target_gun = target_gun.interpolate_with(load_gun, smoothstep(0.0, 1.0, _shell_fp_w))
+			# Loading a tube: the gun stays shouldered (brought down in front of the eye, it
+			# went through the body), rolled toward the loading hand so the port faces it.
+			var sw := smoothstep(0.0, 1.0, _shell_fp_w)
+			var roll := Basis(Vector3.BACK, deg_to_rad(-SHELL_ROLL) * sw * float(_side)) * Basis(Vector3.RIGHT, deg_to_rad(6.0) * sw)
+			target_gun = target_gun * Transform3D(roll, Vector3(0.0, -0.03 * sw, 0.04 * sw))
 		target_gun = _gun_motion(target_gun, cam, delta, e)
 		target_gun.origin += target_gun.basis * (_recoil.value as Vector3) * lerpf(1.0, 0.5, e)
 		# Racking the pump jolts the gun back and down a touch.
@@ -476,7 +479,7 @@ func _drive_hands(delta: float) -> void:
 			_owns[other] = false
 		gun = gun.interpolate_with(target_gun, w)
 		var body_gun := target_gun * Transform3D.IDENTITY.interpolate_with(strike_off, 0.75).affine_inverse()
-		_shoulder_gun(body_gun, w * (1.0 - smoothstep(0.0, 1.0, _shell_fp_w)))      # (not shouldered while loading)
+		_shoulder_gun(body_gun, w)
 	else:
 		_shoulder_gun(Transform3D(), 0.0)
 		for h in [HandIKModifier.Hand.RIGHT, HandIKModifier.Hand.LEFT]:
@@ -730,27 +733,40 @@ func _drive_free_hand(delta: float) -> void:
 	var target := Transform3D()
 	var rotate := false
 	var ok := held_node != null and held_def != null and UltraInjury.two_hands(s) and has_view() \
-		and s.state not in UltraActionLayer.TWO_HANDED and UltraActionLayer.raised(s) > 0.0
+		and not UltraActionLayer.stows(s) and UltraActionLayer.raised(s) > 0.0
 	var vr := character.visual_root.global_transform if character.visual_root else Transform3D()
 	var fwd := -vr.basis.z
 	var side := vr.basis.x * float(-_side)          # (toward the free hand's side)
 	if ok and held_def.kind == ItemDefinition.Kind.MELEE and s.state != MotorState.Id.CRAWL:
 		var grip2 := float(held_def.stat("two_hand_grip", 0.0))
 		if grip2 > 0.0:
-			# Both hands on the club: the free hand just below the gun hand on the handle,
-			# wrapped round it from the other side, fingers closed - and locked to the gun
-			# hand's final pose (a spring on its own trailed a fast swing off the handle).
-			var tip := UltraPoseSampler.marker(held_node, "M_Tip")
+			# Both hands on the club, as the clip holds them: the free hand where the clip has it
+			# relative to the gun hand this frame (read before the modifiers = the clip pose; the
+			# stance and combo clips are authored two-handed), locked to the gun hand's final
+			# pose (a spring on its own trailed a fast swing off the handle). Building the grip
+			# (mirroring the gun hand, palm opposite...) never got the fist round the handle.
+			var sk := character.skeleton
+			var gh := HandIKModifier.Hand.RIGHT if _side == 1 else HandIKModifier.Hand.LEFT
+			var hand_r := held_node.global_transform * grip().affine_inverse()      # the gun hand, as the club implies
+			var rc := sk.get_bone_global_pose(anim.hand_ik.hand_bone(gh))
+			var lc := sk.get_bone_global_pose(anim.hand_ik.hand_bone(free))
+			var rel_c := rc.orthonormalized().affine_inverse() * lc.orthonormalized()
+			rel_c.origin *= sk.global_basis.get_scale().x
+			target = hand_r.orthonormalized() * rel_c
+			# ... then onto the handle: the clip's hands don't always line up with our club
+			# through a swing, so the knuckles are pulled onto the handle (as far off its axis as
+			# the gun hand's, within the taped length below it).
 			var g := held_node.global_transform
-			var axis := (g * tip.origin - g.origin).normalized() if tip != Transform3D.IDENTITY else g.basis.y.normalized()
-			var hand_r := g * grip().affine_inverse()          # the gun hand, as the club implies
-			var fr := hand_r.basis.y.normalized()               # its fingers
-			var pr := (hand_r.basis.orthonormalized() * _palm_dir(HandIKModifier.Hand.RIGHT if _side == 1 else HandIKModifier.Hand.LEFT)).normalized()
-			var fl := (fr - axis * fr.dot(axis)).normalized()
-			var b := anim.hand_ik.hand_basis(free, fl, -pr)
-			var on := g.origin - axis * grip2
-			target = Transform3D(b if b != Basis() else hand_r.basis, on - fl * 0.065 + pr * 0.03)
-			rotate = b != Basis()
+			var tip := UltraPoseSampler.marker(held_node, "M_Tip")
+			var axis := (g.basis * tip.origin).normalized() if tip != Transform3D.IDENTITY else g.basis.y.normalized()
+			var k_r := hand_r.origin + hand_r.basis.orthonormalized() * _knuckle_local(gh) - g.origin
+			var k_l := target.origin + target.basis.orthonormalized() * _knuckle_local(free) - g.origin
+			var off_r := (k_r - axis * k_r.dot(axis)).length()
+			var along := clampf(k_l.dot(axis), -0.1, k_r.dot(axis) - 0.07)
+			var radial := k_l - axis * k_l.dot(axis)
+			var want_k := axis * along + (radial.normalized() * off_r if radial.length() > 0.001 else Vector3.ZERO)
+			target.origin += want_k - k_l
+			rotate = true
 			want = 2
 		else:
 			# Guard, swung against the weapon hand's travel (chest space).
@@ -767,7 +783,7 @@ func _drive_free_hand(delta: float) -> void:
 		want = 1
 	var guard_w := 1.0 if want > 0 else 0.0
 	if held_def and held_def.kind == ItemDefinition.Kind.MELEE and float(held_def.stat("two_hand_grip", 0.0)) <= 0.0:
-		guard_w *= lerpf(0.55, 1.0, anim.swing_w)       # (a looser guard between strikes)
+		guard_w *= anim.swing_w             # (at rest the empty hand hangs at the side: AnimDriver free arm)
 	_free_w = move_toward(_free_w, guard_w, delta * 4.0)
 	if want == 2:
 		_free_w = 1.0                      # (on the handle at once: no easing on and off it)
@@ -777,7 +793,13 @@ func _drive_free_hand(delta: float) -> void:
 			var gun_hand := HandIKModifier.Hand.RIGHT if _side == 1 else HandIKModifier.Hand.LEFT
 			anim.hand_ik.follow_hand(free, gun_hand, held_node.global_transform * grip().affine_inverse())
 			anim.hand_ik.set_curl(free, 1.0)
-			_wrap_on(free, target.origin + target.basis.y.normalized() * 0.065)
+			# Round the handle (stat "handle_radius", the 20 cm about the club's origin), not the
+			# whole club's box.
+			var tip2 := UltraPoseSampler.marker(held_node, "M_Tip")
+			var ax_l := tip2.origin.normalized() if tip2 != Transform3D.IDENTITY else Vector3.UP
+			var hr := float(held_def.stat("handle_radius", 0.016))
+			var bx := ax_l.cross(Vector3.FORWARD if absf(ax_l.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT).normalized()
+			anim.hand_ik.set_wrap(free, held_node, Transform3D(Basis(bx, ax_l.cross(bx), ax_l), Vector3.ZERO), Vector3(hr, hr, 0.1))
 		_owns[free] = true
 		_free_owned = true
 	elif _free_owned:
@@ -789,6 +811,18 @@ func _drive_free_hand(delta: float) -> void:
 
 var _free_w := 0.0
 var _free_owned := false
+
+
+## The middle knuckle in the hand bone's frame (rest pose, metres).
+func _knuckle_local(h: int) -> Vector3:
+	var sk := character.skeleton
+	var side := "Left" if h == HandIKModifier.Hand.LEFT else "Right"
+	var hb := sk.find_bone(side + "Hand")
+	var kb := sk.find_bone(side + "MiddleProximal")
+	if hb < 0 or kb < 0:
+		return Vector3(0, 0.09, 0)
+	var rel := sk.get_bone_global_rest(hb).affine_inverse() * sk.get_bone_global_rest(kb)
+	return rel.origin * sk.global_basis.get_scale().x
 
 
 ## The palm's direction in the hand bone's frame (HandIK learns it from the curled fingers).
@@ -822,7 +856,7 @@ func mag_reload() -> bool:
 	var s := character.state
 	return s.action == UltraActionLayer.Action.RELOADING and held_node != null and held_def != null \
 		and held_def.kind == ItemDefinition.Kind.FIREARM and String(held_def.stat("reload_mode", "")) != "shell" \
-		and has_view() and _side == 1 and UltraInjury.two_hands(s) and s.state != MotorState.Id.CRAWL \
+		and has_view() and _side == 1 and UltraInjury.two_hands(s) \
 		and held_node.find_child("Magazine", true, false) != null
 
 
@@ -830,9 +864,17 @@ var _mag_w := 0.0
 var _mag_hand := Transform3D()
 
 
-## The magazine swap, keyed off the sim's reload clock (action_t, reload_commit / reload_time):
-## to the magazine, pull it out and down to a pouch at the belt, a fresh one up, seated in the
-## well, back to the handguard. The magazine rides in the hand meanwhile.
+## The magazine swap, keyed off the sim's reload clock (action_t, reload_commit): the left hand
+## takes the magazine (palm on its left side, fingers round the front - palm up twisted the
+## wrist), pulls it out and lets it drop (a physics copy, UltraEffects.drop_mag), fetches a
+## fresh one from a pouch on the left hip, seats it and goes back to the handguard.
+const MAG_GRAB := 0.22        ## s: hand on the magazine
+const MAG_OUT := 0.40         ## s: pulled out below the well - dropped
+var _mag_dropped := false
+var _mag_snd := 0
+var _mag_hidden := false
+
+
 func _drive_mag_reload(gun: Transform3D, delta: float) -> void:
 	var on := mag_reload()
 	_mag_w = move_toward(_mag_w, 1.0 if on else 0.0, delta * 4.0)
@@ -840,6 +882,9 @@ func _drive_mag_reload(gun: Transform3D, delta: float) -> void:
 		character.anim.arm_out.hand_give = smoothstep(0.0, 1.0, _mag_w)
 	if not on:
 		_mag_hand = Transform3D()
+		_mag_hidden = false
+		_mag_dropped = false
+		_mag_snd = 0
 		return
 	var anim := character.anim
 	var s := character.state
@@ -855,30 +900,85 @@ func _drive_mag_reload(gun: Transform3D, delta: float) -> void:
 	var vr := character.visual_root.global_transform
 	var fwd := -vr.basis.z
 	var left := -vr.basis.x * float(_side)
-	var chest := character.skeleton.global_transform * character.skeleton.get_bone_global_pose(_chest_bone())
-	# (Out in front of the hip, clear of the waist: at the belt itself the hand went through it.)
-	var pouch := Transform3D(g.basis, chest.origin + fwd * 0.26 + left * 0.2 + Vector3.DOWN * 0.34)
-	var below := Transform3D(g.basis, in_well.origin + g.basis.y * -0.18 + left * 0.05)
-	# Key poses of the magazine (world) over the reload; the hand holds it from below.
-	var keys := [[0.0, in_well], [0.3, in_well], [0.5, below], [0.75, pouch], [commit - 0.55, pouch],
-		[commit - 0.3, below], [commit - 0.12, in_well]]
+	var sk := character.skeleton
+	var hips := sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Hips"))
+	# The pouch: on the belt at the left hip, the magazine standing in it.
+	var pouch := Transform3D(vr.basis.orthonormalized() * mag_in_gun.basis, hips.origin + left * 0.19 + fwd * 0.05 + Vector3.UP * 0.02)
+	if s.state == MotorState.Id.CRAWL:
+		# Lying down: a chest pouch, just off the ground under the left shoulder.
+		var chest := sk.global_transform * sk.get_bone_global_pose(_chest_bone())
+		pouch = Transform3D(g.basis, chest.origin + left * 0.16 + Vector3.DOWN * 0.08 - fwd * 0.05)
+	var pouch_up := Transform3D(pouch.basis, pouch.origin + Vector3.UP * 0.12)      # (drawn up out of it)
+	var below := Transform3D(g.basis, in_well.origin + g.basis.y * -0.16 + left * 0.04)
+	var t_pouch := minf(0.8, commit - 0.7)
+	var t_up := commit - 0.3
+	var t_seat := commit - 0.12
+	# The magazine (world) over the reload: out of the well and dropped, a fresh one from the
+	# pouch up into the well.
 	var mag_at := in_well
-	var holding := t > 0.25 and t < commit - 0.1
-	for k in range(keys.size() - 1):
-		var a: Array = keys[k]
-		var b: Array = keys[k + 1]
-		if t >= float(a[0]) and t <= float(b[0]):
-			var u := smoothstep(float(a[0]), float(b[0]), t)
-			mag_at = (a[1] as Transform3D).interpolate_with(b[1], u)
-	_mag_hand = mag_at if holding else Transform3D()
-	# The hand: under the magazine, palm up (back on the handguard outside the swap).
-	var palm_up := anim.hand_ik.hand_basis(HandIKModifier.Hand.LEFT, (g.basis * Vector3.FORWARD).normalized(), Vector3.UP)
-	var grip_mag := Transform3D(palm_up if palm_up != Basis() else g.basis, mag_at.origin + Vector3.DOWN * 0.07 - (g.basis * Vector3.FORWARD) * 0.05)
+	var in_hand := false
+	_mag_hidden = false
+	if t < MAG_GRAB:
+		mag_at = in_well
+	elif t < MAG_OUT:
+		mag_at = in_well.interpolate_with(below, smoothstep(MAG_GRAB, MAG_OUT, t))
+		in_hand = true
+	elif t < t_pouch:
+		_mag_hidden = true                    # (the old one's gone, the new one's still in the pouch)
+		mag_at = pouch
+	elif t < t_pouch + 0.12:
+		mag_at = pouch.interpolate_with(pouch_up, smoothstep(t_pouch, t_pouch + 0.12, t))
+		in_hand = true
+	elif t < t_up:
+		mag_at = pouch_up.interpolate_with(below, smoothstep(t_pouch + 0.12, t_up, t))
+		in_hand = true
+	elif t < t_seat:
+		mag_at = below.interpolate_with(in_well, smoothstep(t_up, t_seat, t))
+		in_hand = true
+	_mag_hand = mag_at if in_hand else Transform3D()
+	# Out of the well: let go of it (once per reload).
+	# Sounds on the reload's clock: out, in, the slide (once each per reload).
+	var fx0 := UltraEffects.instance()
+	if fx0 and fx0.sfx:
+		var pre := UltraEffects.sound_of(held_def) + "_reload_"
+		if t >= MAG_GRAB and _mag_snd < 1:
+			_mag_snd = 1
+			fx0.sfx.play(pre + "mag_out", in_well.origin, -3.0, 2.5, 25.0)
+		if t >= t_up + 0.08 and _mag_snd < 2:
+			_mag_snd = 2
+			fx0.sfx.play(pre + "mag_in", in_well.origin, -2.0, 2.5, 25.0)
+		if t >= t_seat + 0.12 and _mag_snd < 3:
+			_mag_snd = 3
+			if not fx0.sfx.streams(pre + "slide").is_empty():
+				fx0.sfx.play(pre + "slide", in_well.origin, -2.0, 2.5, 25.0)
+	if t >= MAG_OUT and not _mag_dropped:
+		_mag_dropped = true
+		var fx := UltraEffects.instance()
+		if fx and mag is MeshInstance3D:
+			fx.drop_mag(mag as MeshInstance3D, below, character.state.vel * 0.8 + Vector3.DOWN * 0.6 + left * 0.3)
+	# The hand on a magazine at `m`: palm against its left side, fingers forward round the front.
+	var ab := (mag as MeshInstance3D).get_aabb() if mag is MeshInstance3D else AABB(Vector3(-0.012, -0.05, -0.03), Vector3(0.024, 0.1, 0.06))
+	var hand_on := func(m: Transform3D) -> Transform3D:
+		var mb := m.basis.orthonormalized()
+		var f := (mb * Vector3(0.0, -0.35, -1.0)).normalized()
+		var p := (mb * Vector3.RIGHT).normalized()
+		var hb := anim.hand_ik.hand_basis(HandIKModifier.Hand.LEFT, f, p)
+		var contact := m * Vector3(ab.position.x - 0.004, ab.get_center().y - ab.size.y * 0.15, ab.get_center().z)
+		return Transform3D(hb if hb != Basis() else mb, contact - f * 0.065 - p * 0.028)
 	var sup := _support_under(gun) if held_def.support_fingers != Vector3.ZERO else gun * held_def.support_offset
-	var reach := smoothstep(0.0, 0.25, t) * (1.0 - smoothstep(commit - 0.1, commit + 0.15, t))
-	var goal := sup.interpolate_with(grip_mag, reach)
+	var goal: Transform3D
+	if t < MAG_GRAB:
+		goal = sup.interpolate_with(hand_on.call(in_well), smoothstep(0.0, MAG_GRAB, t))
+	elif t < MAG_OUT or (t >= t_pouch and t < t_seat):
+		goal = hand_on.call(mag_at)
+	elif t < t_pouch:
+		goal = (hand_on.call(below) as Transform3D).interpolate_with(hand_on.call(pouch), smoothstep(MAG_OUT, t_pouch, t))
+	else:
+		goal = (hand_on.call(in_well) as Transform3D).interpolate_with(sup, smoothstep(t_seat, commit + 0.15, t))
 	anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, goal, smoothstep(0.0, 1.0, _mag_w), true, 18.0)
-	anim.hand_ik.set_curl(HandIKModifier.Hand.LEFT, 0.7)
+	anim.hand_ik.set_curl(HandIKModifier.Hand.LEFT, 0.8 if in_hand else 0.3)
+	if in_hand and mag is MeshInstance3D:
+		anim.hand_ik.set_wrap(HandIKModifier.Hand.LEFT, mag, Transform3D(Basis(), ab.get_center()), ab.size * 0.5)
 	_owns[HandIKModifier.Hand.LEFT] = true
 
 
@@ -900,6 +1000,7 @@ func _on_item_event(kind: StringName, _data: Dictionary) -> void:
 		if pumps():
 			_pump_t = 0.0
 			_pump_ejected = false
+			_pump_sounded = false
 		_heat = minf(_heat + (float(def.stat("smoke", 0.6)) if def else 0.6) * 0.6, 2.0)
 
 
@@ -938,6 +1039,8 @@ func _drive_barrel_smoke(delta: float) -> void:
 const PUMP_TRAVEL := 0.085             ## m the fore-end racks back
 var _pump_t := -1.0                    ## s since the shot (-1: not racking)
 var _pump_ejected := false
+var _pump_sounded := false
+var _shell_snd := -1
 var _shell_mesh: MeshInstance3D
 
 
@@ -967,6 +1070,11 @@ func _drive_pump(delta: float) -> void:
 	if _pump_t >= 0.0:
 		_pump_t += delta
 		var u := (_pump_t - float(held_def.stat("pump_delay", 0.2))) / float(held_def.stat("pump_time", 0.4))
+		if u >= 0.0 and not _pump_sounded:
+			_pump_sounded = true
+			var fxp := UltraEffects.instance()
+			if fxp and fxp.sfx:
+				fxp.sfx.play("shotgun_pump", held_node.global_position, -2.0, 3.0, 40.0)
 		# The spent shell flies out as the pump hits the back; the rack thumps the gun.
 		if not _pump_ejected and u >= 0.3:
 			_pump_ejected = true
@@ -987,7 +1095,7 @@ func _drive_pump(delta: float) -> void:
 ## _reload_shells): the support hand goes down to the belt for a shell, up to the loading port
 ## under the gun, thumbs it in, and back - riding the gun as the gun hand holds it.
 const POUCH := Vector3(-0.1, 1.0, -0.17)           ## visual-root space: front of the belt, left
-const SHELL_ROLL := 70.0                           ## deg the gun is rolled loading in first person
+const SHELL_ROLL := 35.0                           ## deg the shouldered gun is rolled loading a tube
 var _shell_fp_w := 0.0
 
 
@@ -999,6 +1107,7 @@ func _drive_shells() -> void:
 	if _shell_mesh:
 		_shell_mesh.visible = false
 	if not on:
+		_shell_snd = -1
 		return
 	var slow := UltraInjury.reload_mult(s, character.damage_profile)
 	var start := float(held_def.stat("reload_start", 0.35)) * slow
@@ -1029,6 +1138,12 @@ func _drive_shells() -> void:
 			target = port
 			target.origin += fwd * 0.035 * smoothstep(0.4, 0.7, u)     # thumbing it into the tube
 			carry = u < 0.68
+			var n_shell := int(floor(t / each))
+			if u >= 0.5 and n_shell != _shell_snd:
+				_shell_snd = n_shell
+				var fxs := UltraEffects.instance()
+				if fxs and fxs.sfx:
+					fxs.sfx.play("shotgun_shell", port.origin, -4.0, 2.0, 20.0)
 		else:
 			target = port.interpolate_with(pouch, smoothstep(0.0, 1.0, (u - 0.75) / 0.25))
 	anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, target, 1.0, true, 12.0)
@@ -1094,14 +1209,14 @@ func melee_offset() -> Transform3D:
 	var turn := smoothstep(0.0, h * 0.75, t) * back
 	var thrust := smoothstep(h * 0.45, h, t) * back
 	if _long_gun():
-		# A horizontal butt stroke: cocked back with the muzzle a little left, then the stock
-		# swung forward and across from the shoulder (the muzzle goes out to the right) - the
-		# butt and the side of the stock hit. (Tipping the barrel up over the shoulder threw the
-		# whole body over after the stock.)
-		var wind := smoothstep(0.0, h * 0.6, t) * (1.0 - smoothstep(h * 0.45, h, t))
-		var strike := smoothstep(h * 0.45, h, t) * back
-		var b := Basis(Vector3.UP, 0.3 * wind - 1.35 * strike) * Basis(Vector3.BACK, -0.25 * strike)
-		return Transform3D(b, Vector3(-0.14 * strike, 0.02 * strike, 0.06 * wind - 0.32 * strike))
+		# A butt hook from the right: wound up with the stock swung OUT to the right and back
+		# (the muzzle in across the body), then the butt hooked forward and in across the front
+		# - the butt and the side of the stock hit. (Tipping the barrel up over the shoulder
+		# threw the whole body over after the stock; a small wind-up read as a push inward.)
+		var wind := smoothstep(0.0, h * 0.55, t) * (1.0 - smoothstep(h * 0.5, h, t))
+		var strike := smoothstep(h * 0.5, h, t) * back
+		var b := Basis(Vector3.UP, 0.85 * wind - 1.2 * strike) * Basis(Vector3.BACK, 0.2 * wind - 0.25 * strike)
+		return Transform3D(b, Vector3(0.12 * wind - 0.12 * strike, 0.02 * strike, 0.1 * wind - 0.3 * strike))
 	# A pistol whip: muzzle tipped up so the base of the grip leads, hammered forward and down.
 	return Transform3D(Basis(Vector3.RIGHT, 1.75 * turn), Vector3(0.0, -0.1 * thrust + 0.05 * turn, -0.3 * thrust))
 

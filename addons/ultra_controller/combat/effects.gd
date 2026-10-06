@@ -26,8 +26,20 @@ static func instance() -> UltraEffects:
 	return _current if is_instance_valid(_current) else null
 
 
+## Weapon sounds.
+var sfx: UltraSfx
+
+
+## The sound prefix for a gun (stat "sfx", else its id): pistol_fire, rifle_fire...
+static func sound_of(def: ItemDefinition) -> String:
+	return String(def.stat("sfx", def.id)) if def else "rifle"
+
+
 func _ready() -> void:
 	_current = self
+	sfx = UltraSfx.new()
+	sfx.name = "Sfx"
+	add_child(sfx)
 	_flash_mat = _unshaded(Color(1.0, 0.75, 0.35), 4.0)
 	_tracer_mat = _unshaded(Color(1.0, 0.85, 0.5), 2.0)
 	_spark_mat = _unshaded(Color(1.0, 0.7, 0.3), 3.0)
@@ -79,6 +91,14 @@ func _on_item(c: UltraCharacter, kind: StringName, data: Dictionary) -> void:
 	flash(muzzle)
 	var def := c.held_def()
 	smoke(muzzle, float(def.stat("smoke", 0.6)) if def else 0.6)
+	sfx.shot(muzzle.origin, sound_of(def))
+	var own := c.net_id in local_ids
+	if data.has("dirs"):
+		sfx.whiz(data.origin, (data.dirs as Array)[0], 70.0, own)
+	elif data.has("origin"):
+		sfx.whiz(data.origin, data.dir, 120.0, own)
+	else:
+		sfx.whiz(muzzle.origin, -muzzle.basis.z, 120.0, own)
 	if eq and not eq.pumps():          # (a pump-action throws its shell when it's racked)
 		shell(eq.eject_transform(), eq.eject_side(), String(def.stat("shell", "9mm")) if def else "9mm")
 	# Buckshot: a tracer and a predicted impact per pellet.
@@ -99,6 +119,7 @@ func _on_item(c: UltraCharacter, kind: StringName, data: Dictionary) -> void:
 		tracer(muzzle.origin, end)
 		if not hit.is_empty():
 			var who := UltraCharacter.of_collider(hit.collider)
+			sfx.impact(hit.position, who != null)
 			if who:
 				if who.damage_profile.blood_on():
 					blood(hit.position, hit.normal, who, data.dir, 30.0)
@@ -135,6 +156,8 @@ func _shot_fx(c: UltraCharacter, muzzle: Transform3D, origin: Vector3, dir: Vect
 	tracer(muzzle.origin, hit.position if not hit.is_empty() else to)
 	if not hit.is_empty():
 		var who := UltraCharacter.of_collider(hit.collider)
+		if randf() < 0.4:
+			sfx.impact(hit.position, who != null)            # (a few of the pellets)
 		if who:
 			if who.damage_profile.blood_on():
 				blood(hit.position, hit.normal, who, dir, 14.0)
@@ -145,6 +168,7 @@ func _shot_fx(c: UltraCharacter, muzzle: Transform3D, origin: Vector3, dir: Vect
 func _on_impact(pos: Vector3, normal: Vector3, kind: StringName, shooter_id: int) -> void:
 	if shooter_id in local_ids:
 		return
+	sfx.impact(pos, kind == &"flesh")
 	if kind == &"flesh":
 		blood(pos, normal)
 	else:
@@ -154,7 +178,10 @@ func _on_impact(pos: Vector3, normal: Vector3, kind: StringName, shooter_id: int
 func _on_hit(target_id: int, pos: Vector3, dir: Vector3, amount: float, attacker_id: int, region := -1, kind := &"bullet") -> void:
 	var c := UltraNet.world.character(target_id)
 	if c:
-		c.react_to_hit(region, dir, amount)
+		c.react_to_hit(region, dir, amount, kind)
+	if kind == &"blocked":
+		sparks(pos, -dir)                 # (weapon on weapon)
+		return
 	if attacker_id in local_ids or kind == &"impact" or kind == &"drown" or kind == &"bleed":
 		return
 	if c == null or c.damage_profile.blood_on():
@@ -262,6 +289,47 @@ func shell(at: Transform3D, out: Vector3, kind := "9mm") -> void:
 	rb.linear_velocity = gun_right * randf_range(2.0, 2.8) * (1.15 if big else 1.0) + gun_up * randf_range(1.6, 2.4) + gun_back * randf_range(0.2, 0.6)
 	rb.angular_velocity = gun_up * randf_range(-14, -8) + gun_right * randf_range(-6, 6)
 	get_tree().create_timer(12.0).timeout.connect(rb.queue_free)
+	sfx.shell_drop(at.origin, randf_range(0.4, 0.6))
+
+
+## A spent magazine dropped out of a gun: a copy of the gun's Magazine mesh on a small rigid
+## body (falls, bounces, lies there for MAG_LIFE s; oldest go first past MAX_MAGS).
+const MAX_MAGS := 16
+const MAG_LIFE := 30.0
+var _mags: Array[RigidBody3D] = []
+
+
+func drop_mag(src: MeshInstance3D, at: Transform3D, vel: Vector3) -> void:
+	if src == null or src.mesh == null:
+		return
+	for k in range(_mags.size() - 1, -1, -1):
+		if not is_instance_valid(_mags[k]):
+			_mags.remove_at(k)
+	if _mags.size() >= MAX_MAGS:
+		_mags.pop_front().queue_free()
+	var rb := RigidBody3D.new()
+	rb.collision_layer = 0
+	rb.collision_mask = UltraLayers.WORLD_STATIC
+	rb.mass = 0.25
+	var mi := MeshInstance3D.new()
+	mi.mesh = src.mesh
+	mi.material_override = src.material_override
+	for i in src.get_surface_override_material_count():
+		mi.set_surface_override_material(i, src.get_surface_override_material(i))
+	rb.add_child(mi)
+	var ab := src.get_aabb()
+	var cs := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = ab.size.max(Vector3.ONE * 0.01)
+	cs.shape = box
+	cs.position = ab.get_center()
+	rb.add_child(cs)
+	add_child(rb)
+	_mags.append(rb)
+	rb.global_transform = at.orthonormalized()
+	rb.linear_velocity = vel
+	rb.angular_velocity = Vector3(randf_range(-4, 4), randf_range(-2, 2), randf_range(-4, 4))
+	get_tree().create_timer(MAG_LIFE).timeout.connect(rb.queue_free)
 
 
 # ---------------------------------------------------------------- smoke

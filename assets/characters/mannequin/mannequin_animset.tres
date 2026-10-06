@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" path="res://addons/ultra_controller/animation/root_motion_curve.gd" id="1_yc1s2"]
 [ext_resource type="Resource" path="res://assets/characters/mannequin/rootmotion/ClimbUp_1m_RM.tres" id="2_4rnyo"]
+[ext_resource type="Resource" uid="uid://beibwaonmnwyb" path="res://assets/characters/mannequin/rootmotion/PR_RollR_RM.tres" id="30_prroll"]
 [ext_resource type="Resource" path="res://assets/characters/mannequin/rootmotion/Crawl_RM.tres" id="3_4elb1"]
 [ext_resource type="Resource" path="res://assets/characters/mannequin/rootmotion/Dodge_back_RM.tres" id="4_8bn38"]
 [ext_resource type="Resource" path="res://assets/characters/mannequin/rootmotion/Dodge_left_RM.tres" id="5_rq22h"]
@@ -88,6 +89,11 @@ roles = {
 &"prone_idle": "mixamo/PR_Idle",
 &"prone_reload": "mixamo/PR_Reload",
 &"prone_roll_r": "mixamo/PR_RollR",
+&"prone_roll": "mixamo/PR_RollR_RM",
+&"block_two": "mixamo/B_Great",
+&"block_two_hit": "mixamo/B_GreatHit",
+&"block_one": "mixamo/B_Axe",
+&"block_one_hit": "mixamo/B_AxeHit",
 &"prone_turn_l": "mixamo/PR_TurnL",
 &"n_walk_b": "Walk_Backwards",
 &"n_walk_f": "mixamo/N_StdWalk2",
@@ -242,7 +248,7 @@ plant_phase = {
 "mixamo/U_Walk_L": 0.208,
 "mixamo/U_Walk_R": 0.35000000000000003
 }
-root_motion = Array[ExtResource("1_yc1s2")]([ExtResource("2_4rnyo"), ExtResource("3_4elb1"), ExtResource("4_8bn38"), ExtResource("5_rq22h"), ExtResource("6_aqc7a"), ExtResource("7_3d43b"), ExtResource("8_0ylt0"), ExtResource("9_ax87n"), ExtResource("10_76aql"), ExtResource("11_ku1qp"), ExtResource("12_005wl"), ExtResource("13_jreq4")])
+root_motion = Array[ExtResource("1_yc1s2")]([ExtResource("2_4rnyo"), ExtResource("3_4elb1"), ExtResource("4_8bn38"), ExtResource("5_rq22h"), ExtResource("6_aqc7a"), ExtResource("7_3d43b"), ExtResource("8_0ylt0"), ExtResource("9_ax87n"), ExtResource("10_76aql"), ExtResource("11_ku1qp"), ExtResource("12_005wl"), ExtResource("13_jreq4"), ExtResource("30_prroll")])
 loops = {
 "Angry": false,
 "Attack_Ground_Pound": false,

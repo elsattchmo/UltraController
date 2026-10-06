@@ -206,20 +206,28 @@ var _black: ColorRect
 var _black_a := 0.0
 
 
-func _drive_blackout(delta: float) -> void:
-	var out := character.state.has(MotorState.F_UNCONSCIOUS)
-	_black_a = move_toward(_black_a, 1.0 if out else 0.0, delta * (4.0 if out else 0.8))
-	if _black == null and _black_a > 0.0:
-		_black = ColorRect.new()
-		_black.color = Color.BLACK
-		_black.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_black.set_anchors_preset(Control.PRESET_FULL_RECT)
-		_root.add_child(_black)
-	if _black:
-		_black.move_to_front()
-		# Eased: a slow bleed of light back in, then clearing.
-		_black.modulate.a = smoothstep(0.0, 1.0, _black_a)
-		_black.visible = _black_a > 0.001
+## Knockout / bleeding / death feedback (UltraDamageScreen): blurred and dark while out cold,
+## tunnel vision bleeding, a cut to black and how you died.
+func _drive_blackout(_delta: float) -> void:
+	if _screen == null:
+		_screen = UltraDamageScreen.new()
+		_screen.name = "DamageScreen"
+		_root.add_child(_screen)
+		_root.move_child(_screen, 0)          # (under the HUD's own widgets...)
+	_screen.character = character
+	_black_a = _screen.ko_amount()
+	# (... except the death screen, which covers them.)
+	if _screen.death_shown() > 0.0:
+		_screen.move_to_front()
+	elif _screen.get_index() != 0:
+		_root.move_child(_screen, 0)
+
+
+var _screen: UltraDamageScreen
+
+
+func damage_screen() -> UltraDamageScreen:
+	return _screen
 
 
 ## Blacked out (0..1) - tests and other HUD layers read it.

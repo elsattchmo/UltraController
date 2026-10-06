@@ -507,6 +507,59 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Melee stance: item stat `stance_yaw` turns the idle/aim clip's hips back toward the front
   (bat 60), `chest_yaw` its UpperChest (machete 18: the clip twists it 20 deg right).
   Tour `stance_probe` prints each bone's facing per item (unarmed = baseline).
+- **MotorState flag bits**: 0-7 in motor_state.gd, 8 = UltraMotor.F_TURNING (motor.gd), 10
+  F_BLOCKING, 11 F_HEART. Check BOTH files before taking a bit (a clash cleared the turn flag
+  every tick: m4 armed-turn tests).
+- Melee block (`MotorState.F_BLOCKING`, set by UltraActionLayer: melee weapon READY + secondary,
+  standing / walking): a `DamageInfo.melee` hit from within `DamageProfile.block_arc_deg` (55)
+  of the facing takes `block_mult` (0.2), region mult 1, no cut / knockout / knock-down; it's
+  broadcast as kind `blocked` (sparks, the block's jolt clip block_one_hit / block_two_hit).
+  The melee item's "aim" role is its block clip (bat: Mixamo Great Sword Blocking Idle B_Great,
+  machete: Blocking An Attack With Axe B_Axe); stance_yaw / chest_yaw only touch the idle role.
+- One-handed melee at rest: the empty arm is taken out of the upper-body Blend2's filter
+  (`AnimDriver._free_side`, inertial trigger on the switch), so it hangs / swings with the legs;
+  the free-hand guard IK only comes in with a swing. (BlendTree outputs can't feed two inputs.)
+- Bat grip = the clip's own: the free hand where the stance / combo clip has it relative to the
+  gun hand (read in _process = clip pose), knuckles pulled onto the handle (`_knuckle_local`);
+  the bat sits 9 cm lower in the hand (build_items) so that fist lands on the tape, not past the
+  knob. Built grips (mirrored / palm-opposite) never closed round the handle (tour bat_grip).
+- Gun-butt (long gun) = a hook from the right: wound up stock OUT right / back, then hooked
+  forward and in (`melee_offset`).
+- Prone: melee weapons are held at the side on the plain crawl (prone_armed() = firearms only),
+  no strikes lying down. Sideways = the prone turn clip in place, looped (`_prone_side_clip`;
+  `_turn_clip(role, lying=true)` reads yaw off the hips' up axis - the pelvis faces the ground).
+  The roll button rolls: ROOT_MOTION PR_RollR_RM (Mixamo "Rifle Prone Rolling Right" with root
+  motion, `RootMotionCurve.rate` 1.6 - motor clock and a stretched clip), mirrored (rm_scale.x
+  -1, yaw sign, `AnimDriver.rm_mirror`) pushing left; the weapon stays (`UltraActionLayer.stows`).
+  Re-running the intake rewrites PR_RollR_RM.tres: put `rate = 1.6` back.
+- rm_t is quantized to 1 ms: ROOT_MOTION ends at `length - 0.002` (it never reached 3.2666 s).
+- Magazine reloads (rifle, pistol, prone too): the old magazine drops as a physics copy
+  (`UltraEffects.drop_mag`, 30 s, <= 16), a fresh one from a pouch on the left hip (prone: under
+  the chest); the hand holds magazines palm-in from the left side (palm-up twisted the wrist).
+  The shotgun stays shouldered loading shells (rolled SHELL_ROLL 35 deg).
+- Climb-down start / stairs (m10 test_edge_no_dip_or_pop, test_stairs_smooth): FootIK leaves a
+  foot with no ground in reach as animated (it counted it as -max_pelvis_drop: hips sank 40 cm
+  at every edge); a tick that moves the capsule > 1 m snaps the visual (no glide) and shifts the
+  inertial blend's hips history (`InertialBlendModifier.shift`); drop_hang xfade 0. Stair steps
+  glide both ways (`UltraMotor.last_step_down`) and the step goes into `_prev_pos` too (the
+  offset was applied a tick before the interpolated position: a 14 cm dip per step up).
+- Damage feedback (`UltraDamageScreen`, HUD child): one shader (tunnel vision / blur / dark),
+  tunnel while bleeding (closing in as hp drops, pulsing), knocked out = blurred + dark; dead =
+  cut to black + recap (hits merged by who / weapon / region, limbs lost, blood lost per source
+  from the replicated state). Controls in the HUD: set_anchors_AND_OFFSETS_preset (a plain
+  anchors preset left them 0 x 0).
+- Heart (`UltraHitboxes.heart`: upper torso capsule, 30 % up, 6 cm forward, 3.5 cm left): a
+  bullet / buckshot / blade whose line passes within `heart_radius` (4.5 cm) -> F_HEART, bleeds
+  `heart_bleed_rate` (12 hp/s), event `heart` (gush; the chest pumps every 0.42 s).
+- Torso gore (buckshot / blast >= 30 to the torso, UltraBodyFX.torso_blast): skin chunks round
+  the hit (`_collect_tris(.., near, radius)`), a flesh crater on the bone, flesh / gut lumps, and
+  >= 45 (or a kill) `UltraGuts` - a verlet strand hanging from the wound. Cleared on respawn.
+- Sounds (`UltraSfx`, child of UltraEffects): assets/audio/weapons made from
+  assets/audio/source by `python tools/audio/prepare_sfx.py` (slices variants at onsets, renders
+  `_far` firing versions: low-pass + reverb). Shots: close + far crossfaded 35..120 m, late by
+  the speed of sound; whiz when a round passes within 4 m of the listener (not the shooter);
+  impacts; cases (random stretch of brass_shells.mp3); mag out / in / pistol slide on the reload
+  clock; shotgun shell inserts and pump. Prefix = item stat "sfx" else its id.
 - Tours run in real time and frame grabs stall them: film fast moves in slow motion
   (`Engine.time_scale`, see melee_review); a tour "tap" is held for at least one tick.
 

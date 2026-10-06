@@ -63,7 +63,7 @@ func test_root_motion_curves() -> void:
 func test_animation_set() -> void:
 	var s: AnimationSet = load(DIR + "mannequin_animset.tres")
 	check(s.roles.size() >= 60, "roles mapped (%d)" % s.roles.size())
-	check(s.root_motion.size() == 12, "12 root-motion curves (%d)" % s.root_motion.size())
+	check(s.root_motion.size() == 13, "13 root-motion curves: the 12 UAL ones + the prone roll (%d)" % s.root_motion.size())
 	for r in [&"roll", &"dodge_left", &"knockback", &"climb_up_1m"]:
 		check(s.rm_index(r) >= 0, "rm index for %s" % r)
 	var w := s.speed_of(&"walk_f", 0)

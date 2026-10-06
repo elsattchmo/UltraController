@@ -195,9 +195,9 @@ static func _near_fade_mat(m: BaseMaterial3D) -> BaseMaterial3D:
 
 
 ## Presentation of a hit (every machine): hit clip, flinch on the hit bone.
-func react_to_hit(region: int, dir: Vector3, amount: float) -> void:
+func react_to_hit(region: int, dir: Vector3, amount: float, kind := &"bullet") -> void:
 	if body_fx:
-		body_fx.react(region, dir, amount)
+		body_fx.react(region, dir, amount, kind)
 	hit_reacted.emit(region, dir, amount)
 
 
@@ -354,8 +354,22 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	tick = input.tick + 1
 	if replaying:
 		return
+	# A scripted move whose capsule jumps to its end (a climb-down waits at the bottom; its clip
+	# is offset back up): no gliding across the jump, and the animation's blends move with it.
+	var jump := state.pos - _prev_pos
+	if jump.length() > 1.0:
+		_prev_pos = state.pos
+		if anim and skeleton:
+			anim.root_jumped((skeleton.global_basis.inverse() * -jump))
+	# Stairs: the body / camera glide over a step instead of popping. The step goes into the
+	# interpolation's start too (else the drawn position took it a tick late while the offset
+	# took it at once - a 14 cm dip on every step up).
 	if motor.last_step_up > 0.0:
-		visual_offset.y -= motor.last_step_up        # the camera/body glide up the step
+		visual_offset.y -= motor.last_step_up
+		_prev_pos.y += motor.last_step_up
+	if motor.last_step_down > 0.03:
+		visual_offset.y += motor.last_step_down
+		_prev_pos.y -= motor.last_step_down
 	if motor.last_landing > 0.0:
 		landed.emit(motor.last_landing)
 	# Into the water: splash (presentation).
@@ -478,6 +492,7 @@ func _process(delta: float) -> void:
 		anim.aim_pitch = input_source.live_pitch if input_source else last_input.pitch
 		anim.turning = state.has(UltraMotor.F_TURNING)
 		anim.rm_clip = state.rm_clip
+		anim.rm_mirror = state.rm_scale.x < 0.0
 		anim.hard_landing = state.has(MotorState.F_HARD_LANDING)
 		anim.land_impact = state.land_impact
 		anim.on_platform = state.platform_id != 0
@@ -506,6 +521,11 @@ func _process(delta: float) -> void:
 		anim.item_action = state.action
 		var sprinting := state.has(MotorState.F_SPRINTING) and Vector2(state.vel.x, state.vel.z).length() > profile.jog_speed * 0.9
 		anim.item_ready_pose = 0.0 if sprinting else smoothstep(0.2, 1.0, UltraActionLayer.raised(state))
+		# A melee weapon's "aim" pose is its block, held while blocking.
+		anim.blocking = state.has(MotorState.F_BLOCKING)
+		var hd := held_def()
+		if hd and hd.kind == ItemDefinition.Kind.MELEE:
+			anim.item_ready_pose = 1.0 if anim.blocking else 0.0
 		if state.held_id != 0:
 			anim.item_action = UltraActionLayer.Action.READY
 			anim.item_ready_pose = 1.0
@@ -585,15 +605,36 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 	if info.kind == &"drown" or info.kind == &"bleed":
 		r = R.TORSO
 	info.region = r
+	# A held block facing a melee blow takes most of it (no knockout, cut or knock-down).
+	var blocked := false
+	if info.melee and state.has(MotorState.F_BLOCKING):
+		var fwd := Vector3(-sin(state.body_yaw), 0.0, -cos(state.body_yaw))
+		var from := Vector3(-info.dir.x, 0.0, -info.dir.z).normalized()
+		blocked = from.dot(fwd) >= cos(deg_to_rad(dp.block_arc_deg))
+	if blocked:
+		info.amount *= dp.block_mult
+		info.shove *= 0.3
+		info.kind = &"blocked"
+	# Through the heart: a tiny target on the shot's line in the chest - a fast bleed-out.
+	if r == R.TORSO and info.kind in [&"bullet", &"buckshot", &"blade"] and not state.has(MotorState.F_HEART) and dp.limb_damage:
+		var h := UltraHitboxes.heart(self, state.pos)
+		if h != Vector3.INF:
+			var d := info.dir.normalized()
+			var rel := h - info.point
+			if (rel - d * rel.dot(d)).length() <= dp.heart_radius and rel.dot(d) > -0.05:
+				state.set_flag(MotorState.F_HEART, true)
+				UltraNet.world.broadcast(&"heart", [net_id, info.point, info.dir], true)
 	var mult := dp.region_mult[r] if dp.limb_damage else 1.0
 	# Blunt trauma to the head knocks you out more than it kills you: its own (milder)
 	# multiplier, and the skull takes half.
 	var blunt_head := info.kind in BLUNT and r == R.HEAD and dp.limb_damage
 	if blunt_head:
 		mult = dp.blunt_head_mult
+	if blocked:
+		mult = 1.0                              # (taken on the weapon, not the body)
 	state.hp = maxf(state.hp - info.amount * mult, 0.0)
 	var cut := 0
-	if dp.limb_damage and info.kind != &"drown" and info.kind != &"bleed":
+	if dp.limb_damage and info.kind != &"drown" and info.kind != &"bleed" and not blocked:
 		var max_hp := dp.region_hp[r]
 		var after := state.limb_hp[r] / 100.0 * max_hp - info.amount * (0.5 if blunt_head else 1.0)
 		state.limb_hp[r] = clampi(int(ceil(after / max_hp * 100.0)), 0, 100)
@@ -626,6 +667,8 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 		state.vel = motor.body.velocity
 		UltraNet.world.broadcast(&"died", [net_id, info.attacker_id], true)
 		died.emit()
+	elif blocked:
+		pass                                    # (held off: no knockout or knock-down)
 	elif _knocks_out(info, r, mult):
 		var push2 := info.dir * clampf(info.amount * 0.06, 1.5, 6.0)
 		if info.shove.length() > push2.length():
@@ -695,6 +738,8 @@ func respawn(at: Transform3D) -> void:
 	state.state = MotorState.Id.IDLE
 	state.action = 0
 	state.set_flag(MotorState.F_UNCONSCIOUS, false)
+	state.set_flag(MotorState.F_HEART, false)
+	state.set_flag(MotorState.F_BLOCKING, false)
 	state.ko_t = 0.0
 	state.ko_count = 0
 	teleport(at.origin, at.basis.get_euler().y)

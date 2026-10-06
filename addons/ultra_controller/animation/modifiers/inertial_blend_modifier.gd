@@ -60,6 +60,16 @@ func trigger() -> void:
 	_window = WINDOW
 
 
+## The character's root moved by `d` (skeleton space) with the clip making up for it (a
+## scripted move whose capsule jumps to its end, the clip offset back): move the remembered
+## hips with it, so the jump isn't taken for a pose change (the body dropped 2 m and rose back).
+func shift(d: Vector3) -> void:
+	_pending_shift += d
+
+
+var _pending_shift := Vector3.ZERO
+
+
 func _process_modification_with_delta(delta: float) -> void:
 	var sk := get_skeleton()
 	if sk == null:
@@ -72,6 +82,14 @@ func _process_modification_with_delta(delta: float) -> void:
 	for b in n:
 		q_in[b] = sk.get_bone_pose_rotation(b)
 	var h_in := sk.get_bone_pose_position(_hips) if _hips >= 0 else Vector3.ZERO
+	if _pending_shift != Vector3.ZERO and _hips >= 0:
+		var par := sk.get_bone_parent(_hips)
+		var d := sk.get_bone_global_pose(par).basis.inverse() * _pending_shift if par >= 0 else _pending_shift
+		_hin1 += d
+		_hin2 += d
+		_hout1 += d
+		_hout2 += d
+		_pending_shift = Vector3.ZERO
 	var dt := maxf(delta, 0.0)
 	# (Not while warming up: the first frames go from the rest pose to the first clip.)
 	if _frames >= WARMUP and _window > 0 and detect and _jumped(q_in, h_in):
