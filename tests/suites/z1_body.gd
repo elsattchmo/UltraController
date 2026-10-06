@@ -113,6 +113,14 @@ func test_walks_at_archetype_speed() -> void:
 	check(float(a.tree.get("parameters/loco/ground/b_walk/blend_amount")) > 0.9, "walk blended in")
 
 
+func test_a_gait_variant_does_not_re_clip_the_walkers() -> void:
+	var walker := ZombieFactory._body_for(ZombieArchetype.get_arch(&"walker"))
+	var before = walker.anim_set.roles[&"walk_f"]
+	var shambler := ZombieFactory._body_for(ZombieArchetype.get_arch(&"shambler"))
+	check(shambler.anim_set.roles[&"walk_f"] != before, "the shambler walks with its own clip")
+	check(walker.anim_set.roles[&"walk_f"] == before, "and the walkers keep theirs")
+
+
 func test_runner_sprints() -> void:
 	var z := zombie(&"runner")
 	await ticks(10)

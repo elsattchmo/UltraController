@@ -70,6 +70,8 @@ static func _body_for(arch: ZombieArchetype) -> BodyProfile:
 		return base
 	var bp := base.duplicate() as BodyProfile
 	bp.anim_set = base.anim_set.duplicate() as AnimationSet
+	# (Resource.duplicate shares a Dictionary property with the original: writing into it re-clipped every walker.)
+	bp.anim_set.roles = base.anim_set.roles.duplicate()
 	bp.anim_set.roles[&"walk_f"] = base.anim_set.roles[arch.gait_role]
 	_body[arch.gait_role] = bp
 	return bp
