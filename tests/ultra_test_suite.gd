@@ -48,6 +48,13 @@ func load_playground() -> Node3D:
 	return map
 
 
+## Any map scene (a mansion, a test arena): freed with the suite fixtures.
+func load_map(path: String) -> Node3D:
+	map = (load(path) as PackedScene).instantiate()
+	add_child(map)
+	return map
+
+
 func marker(n: String) -> Marker3D:
 	return map.call("marker", n) as Marker3D
 

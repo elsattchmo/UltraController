@@ -802,3 +802,35 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Tours: `zombie_look` (archetypes, gaits, attack clips, hit, get-up), `zombie_gore` (gore_review on zombies),
   `crawl_review` (halve -> crawl -> claw -> headshot). The playground's sun renders the Romero albedo near
   black: `ZombieFactory.BRIGHTEN` 1.8 lifts every zombie material (then tinted per archetype).
+
+## Mansion and AI navigation (zombie stage 2)
+- **The mansion** (`--map=mansion`, `demo/maps/mansion.tscn` -> `Mansion`): a 56 x 40 m house built AT LOAD from
+  `MansionLayout` (rooms / doors / stairs / packs as data: ground floor, upstairs with a ring gallery round the
+  Great Hall's void, a basement under the east wing; ~58 doors incl. locked study / gun room and a barricaded
+  closet) by `MansionBuilder` into a `BoxList` (box collection = collision + merged meshes per material + navmesh
+  source geometry: ONE source of truth) - no saved scene, a few ms. Walls are centred on room edges and merged per
+  line (`_resolve`), cut for doors (lintels above), gallery rooms have no walls (their neighbours' are), rails on the
+  void / stairwell edges. `Mansion.marker("spawn")` (outside the front gate, facing north), `door(name)`, `room_at(p)`.
+  Lights: ~80 omnis + two shadowed chandeliers + porch / path lamps + a dim moon; flat-colour materials.
+- **Godot's box winding is CLOCKWISE seen from outside** (`BoxMesh.get_faces()` cross products point inward): render
+  and `add_faces` triangles must wind that way (BoxList._append_box checks it) - the other way renders inside-out.
+- **UltraNav** (addons/ai): one PRIVATE `NavigationServer3D` map (cell 0.1 - 0.25 closes a doorway -, cell height 0.05,
+  radius 0.4, height 1.8, climb 0.35, slope 40; synchronous iterations so a changed cost shows on the next sync;
+  `settle()` awaits it in tests), `query()` (shared result object) / `path()` / `snap()` / `crossings(result)` (the
+  doors a path goes through, from `path_owner_ids` + `path_types`), `add_link` (owner = the door). Bake:
+  `godot --headless --path . res://tools/tool_runner.tscn -- --tool=res://tools/bake_mansion_nav.gd` writes
+  `demo/maps/mansion/mansion_nav.res` (`resource_name` = fingerprint of the nav geometry; the map warns and bakes at
+  load when stale). ~0.7 s to bake, ~0.12 ms a path query.
+- **Recast traps** (all hit here): a staircase of 0.174 m steps is not walkable (the ledge filter: two steps' climb
+  ~ the 0.35 limit) -> stairs are `STAIR` boxes for collision / render only and the navmesh gets a smooth wedge
+  (`BoxList.add_nav_wedge`, floor to floor); a box taller than the agent leaves its hollow inside walkable (only the
+  surfaces are rasterised) -> tall props get a thin nav-only `PLUG` slab at 0.9 m; low props' tops are capped with a
+  nav-only `PLUG` up to the ceiling (not in the hall: no ceiling over the void); a closed door is a `PLUG` in the
+  doorway + a link across it (arches: nothing).
+- **Doors** (`UltraDoor`, upgraded): `hp`, `barricaded`, `door_name`, `partner` (double doors move together),
+  `is_blocked()`, `ai_open(from)`, `bash(amount, from)` (shakes; 0 hp -> `break_open`: planks fly, stays open, no
+  collision), signals bashed / broke / `state_changed`; net state carries broken / hp / barricaded; `UltraDoor.all` is the
+  registry. A link's cost follows its door (`Mansion.door_cost`): open or broken 0, shut 3, locked / barricaded 20 +
+  hp / 10 (a detour of up to that many metres is preferred; a path that still crosses one means: bash it).
+- Tests: `z2_nav` (build, every room reachable from the lawn, doors as crossings, stairs connect floors, nothing
+  walkable over the void, a locked door reroutes then breaks, door rules, query cost). Tour `mansion_walk`.

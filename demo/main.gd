@@ -9,7 +9,7 @@ extends Node
 ##   -- --launch=host_client                start a preset of instances and exit
 ##   -- --tour=m1                           scripted capture tour (single-player bot)
 
-const MAPS := {"playground": "res://demo/maps/playground.tscn"}
+const MAPS := {"playground": "res://demo/maps/playground.tscn", "mansion": "res://demo/maps/mansion.tscn"}
 const PROFILES := {
 	"fps": "res://addons/ultra_controller/profiles/fps.tres",
 	"adventure": "res://addons/ultra_controller/profiles/adventure.tres",
