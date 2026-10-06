@@ -141,6 +141,7 @@ func interact(c: UltraCharacter) -> void:
 		unlocked.emit()
 		UltraNet.world.broadcast(&"unlocked", [c.net_id, String(key_id)], true)
 	set_open(not is_open, c.global_position)
+	UltraNoise.emit(global_position + Vector3.UP, 4.0, &"door", c.net_id)
 
 
 ## Server (or logic gates). `from` decides the swing direction (away from it).
@@ -149,7 +150,7 @@ func set_open(v: bool, from := Vector3.INF, _from_partner := false) -> void:
 		return
 	if v and from != Vector3.INF:
 		var local := global_transform.affine_inverse() * from
-		swing = -1.0 if local.z > 0.0 else 1.0
+		swing = 1.0 if local.z > 0.0 else -1.0       # (+angle turns the leaf's +X toward -Z: from the +Z side it swings away)
 	is_open = v
 	_open_t = 0.0
 	(opened if v else closed).emit()
@@ -176,6 +177,7 @@ func bash(amount: float, from := Vector3.INF) -> void:
 	_wobble = 1.0
 	_mark()
 	bashed.emit(hp)
+	UltraNoise.emit(global_position + Vector3.UP, 18.0, &"bash", 0)
 	if hp <= 0.0:
 		break_open(from)
 
@@ -189,6 +191,7 @@ func break_open(from := Vector3.INF) -> void:
 	barricaded = false
 	is_open = true
 	_set_broken(from)
+	UltraNoise.emit(global_position + Vector3.UP, 25.0, &"crash", 0)
 	_mark()
 	if partner and not partner.broken:
 		partner.break_open(from)

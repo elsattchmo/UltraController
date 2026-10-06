@@ -197,6 +197,7 @@ static func _firearm(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemD
 			shot["dirs"] = pellet_dirs(c, s, shot.dir, def, pellets)
 		c.emit_item_event(&"fire", shot, replaying)
 		if c.is_authority() and not replaying:
+			UltraNoise.emit(shot.origin, UltraNoise.gun_noise(def), &"gunshot", c.net_id)
 			if UltraBallistics.flies(def):
 				# Rounds with speed, drop and drag (UltraBallistics flies them tick by tick).
 				UltraBallistics.instance(c.get_tree()).fire(c, shot.origin, shot.dirs if pellets > 1 else [shot.dir], def)
@@ -494,6 +495,8 @@ static func _melee(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDef
 		s.melee_combo |= COMBO_LANDED
 		var res := UltraCombat.melee_sweep(c, s, i, sw, c.is_authority() and not replaying)
 		c.emit_item_event(&"melee_hit", res, replaying)
+		if c.is_authority() and not replaying:
+			UltraNoise.emit(s.pos + Vector3.UP, 7.0 + (6.0 if res.get("hit", false) else 0.0), &"melee", c.net_id)
 	# Another press late in the swing chains the next one (melee weapons).
 	if def.kind == ItemDefinition.Kind.MELEE and t > float(sw.time) * 0.45 \
 			and (UltraMotor.pressed_edge(s, i, InputFrame.B_PRIMARY) or UltraMotor.pressed_edge(s, i, InputFrame.B_MELEE)):

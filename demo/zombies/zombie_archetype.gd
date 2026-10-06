@@ -22,6 +22,8 @@ extends Resource
 ## Body tint over the skin and body scale (presentation only).
 @export var tint := Color.WHITE
 @export var body_scale := 1.0
+## How fast it can turn (rad/s): zombies pivot slowly.
+@export var turn_rate := 2.6
 
 @export_group("Senses")
 @export var sight_range := 20.0
@@ -79,8 +81,8 @@ static func _build() -> void:
 	# One leg already ruined: the limp.
 	_make(&"limper", {"walk_speed": 0.9, "bad_leg": 1, "tint": Color(0.82, 0.8, 0.74)})
 	# Rare and fast; sees well, hits a little lighter.
-	_make(&"runner", {"walk_speed": 1.3, "run_speed": 3.0, "tint": Color(0.92, 0.82, 0.8), "sight_range": 26.0, "sight_fov_deg": 70.0, "hearing": 1.2, "damage": 9.0, "interval": 1.2, "attacks": [&"atk_jab", &"atk_swipe"]})
+	_make(&"runner", {"walk_speed": 1.3, "run_speed": 3.0, "tint": Color(0.92, 0.82, 0.8), "sight_range": 26.0, "sight_fov_deg": 70.0, "hearing": 1.2, "damage": 9.0, "interval": 1.2, "turn_rate": 4.2, "attacks": [&"atk_jab", &"atk_swipe"]})
 	# Big and hard to put down or knock over.
-	_make(&"brute", {"walk_speed": 0.75, "hp_mult": 2.4, "shove_knockdown": 7.0, "body_scale": 1.12, "tint": Color(0.74, 0.74, 0.7), "damage": 22.0, "interval": 2.0, "reach": 1.35, "attacks": [&"atk_overhead", &"atk_punch"]})
+	_make(&"brute", {"walk_speed": 0.75, "hp_mult": 2.4, "shove_knockdown": 7.0, "body_scale": 1.12, "tint": Color(0.74, 0.74, 0.7), "damage": 22.0, "interval": 2.0, "reach": 1.35, "turn_rate": 2.0, "attacks": [&"atk_overhead", &"atk_punch"]})
 	# No legs: drags itself along on its arms.
-	_make(&"crawler", {"legs_gone": true, "crawl_speed": 0.45, "tint": Color(0.84, 0.8, 0.76), "sight_fov_deg": 50.0, "hearing": 0.8, "reach": 1.0, "attacks": [&"atk_swipe"]})
+	_make(&"crawler", {"legs_gone": true, "crawl_speed": 0.45, "tint": Color(0.84, 0.8, 0.76), "sight_fov_deg": 50.0, "hearing": 0.8, "reach": 1.0, "turn_rate": 2.0, "attacks": [&"atk_swipe"]})

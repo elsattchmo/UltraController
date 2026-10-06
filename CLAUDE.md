@@ -834,3 +834,36 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   hp / 10 (a detour of up to that many metres is preferred; a path that still crosses one means: bash it).
 - Tests: `z2_nav` (build, every room reachable from the lawn, doors as crossings, stairs connect floors, nothing
   walkable over the void, a locked door reroutes then breaks, door rules, query cost). Tour `mansion_walk`.
+
+## Zombie AI (zombie stage 3: demo/zombies/ + addons/ai/ultra_noise.gd)
+- `ZombieDirector` (Node, server / offline only) owns every `ZombieBrain` (RefCounted); `add(character)` builds a brain
+  from the zombie's archetype meta. It thinks brains when due (CHASE / ATTACK / door modes 0.1 s near prey, 0.2 far;
+  INVESTIGATE 0.2; IDLE / WANDER 0.35 near, 1 s far; DORMANT 0.5 / 2 s; <= `max_thinks_per_frame` 12), samples players'
+  footsteps at 5 Hz (`UltraNoise.step_loudness`: sprint 13, jog 9, walk 4.5, creep 1.5 m), passes `UltraNoise` events to
+  zombies within loudness x hearing + 24 m, alerts pack-mates (<= 20 m become INVESTIGATE), caps door bashers at 2.
+  The brain's per-tick part is only `drive()` (BotInputSource.driver): turn toward `want_yaw` at `arch.turn_rate`,
+  walk when roughly facing it. Brain clock = physics frames / tick rate (deterministic under --fixed-fps).
+- **Modes**: DORMANT, IDLE, WANDER (random point <= 6 m round home), INVESTIGATE (go to what it heard / last saw, look
+  about, give up), CHASE (sees it -> its position, else last seen for `arch.memory` s, then investigate the spot),
+  ATTACK (a swing: `play_attack` at once, contact 0.45 s later: the target must still be within reach x 1.2 + 0.2 and
+  75 deg in front -> `DamageInfo` kind `claw`, melee true, shove 1.4), STAGGER (region-weighted damage >= 3 stops it
+  0.35-1.2 s, cancels a swing), OPEN_DOOR / BASH_DOOR, DOWNED (ragdoll / get-up / KO), DEAD. Being shot by a player
+  turns any non-busy zombie on its attacker.
+- **Senses** (`ZombieSenses`, pure physics queries): sight = half-angle `sight_fov_deg` cone out to `sight_range` x
+  target's motion (still 0.7, sprint 1.4) x stance (crouch 0.65, prone 0.4), `close_sense` 1.8 m from any side, two
+  rays (chest, head) through WORLD_STATIC | WORLD_DYNAMIC (a shut door blocks); awareness meter 0 -> 1 (>= 0.35
+  suspicious: investigate, 1: chase; fills 0.8-4/s by distance, empties 0.25/s). Hearing: carries loudness x `hearing`
+  m, +6 m per floor between, +5 per upright wall (3 for a door panel; up to three; floors / ceilings aren't walls).
+- **Noise sources** (authority only): gunshots at the muzzle (`UltraNoise.gun_noise`: item stat `noise`, else pistol
+  35 / rifle 50 / shotgun 60), melee swings (7, 13 on a hit), a player opening a door 4, a bash 18, a door breaking 25.
+- **Paths / doors**: `_goto` repaths <= every 0.3 s or when the goal moves 2 m; `_skip_passed` drops waypoints we are
+  already beyond (a repath from just past a door's link start sent zombies back and forth). A link waypoint of a shut
+  door within 1.25 m: free -> OPEN_DOOR (0.5 s, `ai_open`, 0.9 s for it to swing); locked / barricaded -> BASH_DOOR
+  (swipe every 1.3 s, `bash(damage x 1.4)` at the contact). **Doors swing AWAY from whoever opens them** (the sign was
+  inverted: a door swung into the zombie and pinned it against the wall). Stuck ladder (moved < 0.25 m in 1.4 s):
+  repath, sidestep, back off 1 s, alternate sides.
+- Debug: `ZombieDebug` (F7 / `--zdebug`; new default input action `zombie_debug`, `tools/install_input_defaults.gd`
+  adds actions to project.godot headless): label (mode, awareness, archetype), path, goal, facing, a ring per noise.
+- Tests `z3_brain` (10): hearing through walls and floors, goes to look, sight cone / walls, chase + hurt, doors on the
+  way, stairs, bashing a locked door, the racket draws company, shot staggers / wakes a dormant one, crawler. Tour
+  `zombie_review`.
