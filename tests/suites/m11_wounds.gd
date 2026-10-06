@@ -199,3 +199,107 @@ func test_tunnel_vision_and_death_recap() -> void:
 	check(text.contains("thigh L"), "the earlier wound")
 	check(text.contains("Blood lost"), "the bleeding")
 	hud.queue_free()
+
+
+## Bullet fly-bys: the closer the round passes, the sharper set (close / mid / far); none
+## past WHIZ_RADIUS or for the shooter's own rounds.
+func test_whiz_by_distance() -> void:
+	var fx := UltraEffects.new()
+	add_child(fx)
+	await ticks(1)
+	var sfx := fx.sfx
+	sfx.listener_override = Vector3(0, 1.6, 0)
+	var got := []
+	for miss: float in [0.5, 2.0, 4.5, 8.0]:
+		sfx.last_whiz = ""
+		sfx.whiz(Vector3(miss, 1.6, -40), Vector3(0, 0, 1), 100.0, false)
+		got.append(sfx.last_whiz)
+	info("fly-bys at 0.5 / 2 / 4.5 / 8 m: %s" % [got])
+	check(got == ["whiz_close", "whiz_mid", "whiz_far", ""], "close / mid / far / none (%s)" % [got])
+	sfx.last_whiz = ""
+	sfx.whiz(Vector3(0.5, 1.6, -40), Vector3(0, 0, 1), 100.0, true)
+	check(sfx.last_whiz == "", "your own rounds don't whiz past you")
+	for n in ["whiz_close", "whiz_mid", "whiz_far"]:
+		check(not sfx.streams(n).is_empty(), "%s has sounds" % n)
+	fx.queue_free()
+
+
+## A machine gun burst: each round's attack, then once it stops the ring-out; a distant gun
+## uses the far render.
+func test_auto_fire_sound() -> void:
+	var fx := UltraEffects.new()
+	add_child(fx)
+	await ticks(1)
+	var sfx := fx.sfx
+	sfx.listener_override = Vector3.ZERO
+	sfx.played.clear()
+	for k in 5:
+		sfx.shot(Vector3(0, 0, -2), "rifle", 7)
+		await get_tree().create_timer(0.09).timeout
+	await get_tree().create_timer(0.4).timeout
+	var near := sfx.played.duplicate()
+	info("burst close by: %s" % [near])
+	check(near.count("rifle_fire_auto") == 5 and near.has("rifle_fire_tail"), "5 attacks then the tail")
+	sfx.played.clear()
+	sfx.shot(Vector3(0, 0, -200), "pistol", 8)
+	await get_tree().create_timer(0.8).timeout
+	info("a pistol 200 m off: %s" % [sfx.played])
+	check(sfx.played.has("pistol_fire_far") and not sfx.played.has("pistol_fire"), "far away: only the far render")
+	check(not sfx.streams("pistol_fire_far").is_empty() and not sfx.streams("rifle_fire_tail_far").is_empty(), "the far renders exist")
+	fx.queue_free()
+
+
+## Buckshot at range: the pattern opens up and each pellet does less.
+func test_shotgun_falls_off_at_range() -> void:
+	var sg := ItemDB.get_def(&"shotgun")
+	var out := []
+	for dist: float in [4.0, 12.0]:
+		var t := dummy(Vector3(-24 + (4.0 if dist > 10.0 else 0.0), 0.05, -70), 0.0)
+		await ticks(30)
+		var chest := t.state.pos + Vector3.UP * 1.25
+		var dirs := UltraActionLayer.pellet_dirs(c, c.state, Vector3(0, 0, 1), sg, 9)
+		var hp0 := t.state.hp
+		var hits := UltraCombat.hitscan_pellets(c, chest + Vector3(0, 0, -dist), dirs, sg)
+		await ticks(2)
+		var on_t := 0
+		for h: Dictionary in hits:
+			if UltraCharacter.of_collider(h.collider) == t:
+				on_t += 1
+		out.append([dist, on_t, hp0 - t.state.hp])
+		await ticks(5)
+	info("4 m: %d pellets on him, %.0f hp | 12 m: %d pellets, %.0f hp" % [out[0][1], out[0][2], out[1][1], out[1][2]])
+	check(out[1][1] < out[0][1], "fewer pellets land at 12 m")
+	check(out[1][2] > 0.0 and out[1][2] < 45.0, "far less damage at 12 m (%.0f)" % out[1][2])
+	check(is_equal_approx(UltraCombat.falloff([[5.0, 1.0], [12.0, 0.55], [25.0, 0.3]], 25.0), 0.3), "falloff points")
+
+
+## Rounds fly: they take time to get there (muzzle velocity, drag) and fall (gravity) - a
+## pistol aimed level at a dummy 60 m off lands about 0.18 s later and ~15 cm low; the
+## carbine's faster round, sooner and flatter.
+func test_bullet_flight_and_drop() -> void:
+	var t := dummy(Vector3(-24, 0.05, -70), 0.0)
+	await ticks(30)
+	var got := []
+	var cb := func(pos: Vector3, _n: Vector3, kind: StringName, _sid: int) -> void:
+		if kind == &"flesh":
+			got.append(pos)
+	UltraNet.world.on_event(&"impact", cb)
+	var res := {}
+	for gun: StringName in [&"pistol", &"rifle"]:
+		var def := ItemDB.get_def(gun)
+		var aim := t.state.pos + Vector3.UP * 1.3
+		var from := aim + Vector3(0, 0, 60.0)
+		got.clear()
+		var b := UltraBallistics.instance(get_tree())
+		b.fire(c, from, [Vector3(0, 0, -1)], def)
+		var n := 0
+		while got.is_empty() and n < 120:
+			await get_tree().physics_frame
+			n += 1
+		var y: float = (got[0] as Vector3).y if not got.is_empty() else INF
+		res[gun] = [n / 60.0, aim.y - y]
+		info("%s at 60 m: landed after %.3f s, %.3f m low" % [gun, n / 60.0, aim.y - y])
+	UltraNet.world.off_event(&"impact", cb)
+	check(float(res.pistol[0]) > 0.14 and float(res.pistol[0]) < 0.26, "the pistol round takes ~0.18 s")
+	check(float(res.pistol[1]) > 0.08 and float(res.pistol[1]) < 0.3, "and drops ~15 cm")
+	check(float(res.rifle[0]) < float(res.pistol[0]) * 0.6 and float(res.rifle[1]) < float(res.pistol[1]) * 0.4, "the carbine: sooner and flatter")

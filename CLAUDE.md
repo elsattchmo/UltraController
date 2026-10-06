@@ -544,7 +544,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   glide both ways (`UltraMotor.last_step_down`) and the step goes into `_prev_pos` too (the
   offset was applied a tick before the interpolated position: a 14 cm dip per step up).
 - Damage feedback (`UltraDamageScreen`, HUD child): one shader (tunnel vision / blur / dark),
-  tunnel while bleeding (closing in as hp drops, pulsing), knocked out = blurred + dark; dead =
+  tunnel ONLY while bleeding (0.05 + 0.6 x hp lost, <= 0.65, a slight pulse), knocked out =
+  blurred + dark; dead =
   cut to black + recap (hits merged by who / weapon / region, limbs lost, blood lost per source
   from the replicated state). Controls in the HUD: set_anchors_AND_OFFSETS_preset (a plain
   anchors preset left them 0 x 0).
@@ -555,11 +556,27 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   the hit (`_collect_tris(.., near, radius)`), a flesh crater on the bone, flesh / gut lumps, and
   >= 45 (or a kill) `UltraGuts` - a verlet strand hanging from the wound. Cleared on respawn.
 - Sounds (`UltraSfx`, child of UltraEffects): assets/audio/weapons made from
-  assets/audio/source by `python tools/audio/prepare_sfx.py` (slices variants at onsets, renders
-  `_far` firing versions: low-pass + reverb). Shots: close + far crossfaded 35..120 m, late by
-  the speed of sound; whiz when a round passes within 4 m of the listener (not the shooter);
-  impacts; cases (random stretch of brass_shells.mp3); mag out / in / pistol slide on the reload
-  clock; shotgun shell inserts and pump. Prefix = item stat "sfx" else its id.
+  assets/audio/source by `python tools/audio/prepare_sfx.py`. Variants are name_0, name_1 ...
+  (a far render is name_far_k - it was written name_k_far and never found: distant shots were
+  just the close one turned down). Far render: 4th-order low-pass ~650 Hz, rounded attack,
+  squashed, slap-back echoes, long reverb. Carbine = the light machine gun recording (single
+  shots at 17/21/25 s): rifle_fire_k whole, rifle_fire_auto_k (attack, 0.16 s) per round of a
+  burst (the last one cut), rifle_fire_tail_k once the trigger's let go (AUTO_GAP 0.2 s).
+  Close fades out 25..110 m, far in 20..80 m, late by the speed of sound. Fly-bys graded from
+  "bullet close.wav": whiz_close (< 1.2 m) / whiz_mid (< 3) / whiz_far (< 6, dulled). Impacts,
+  cases (random stretch of brass_shells.mp3), mag out / in / slide, shotgun shells and pump.
+  Prefix = item stat "sfx" else its id.
+- **Rounds fly** (`UltraBallistics`, authority, a node under the scene, physics priority 150):
+  stats `muzzle_velocity` (pistol 360, carbine 880, buckshot 400 m/s) and `drag` (1/s: 0.6 /
+  0.9 / 3.5); gravity; one lag-compensated segment per tick (`UltraNet.world.rewound`); hits
+  through `UltraCombat.resolve_bullet` / `apply_pellets` (a load's pellets summed once all have
+  landed). UltraEffects flies a matching round on every machine (`_fly`): tracer streak, the
+  whiz where it actually passes the listener, the shooter's predicted impact on arrival.
+  `hitscan` / `hitscan_pellets` stay as instant tools (tests). m11 test_bullet_flight_and_drop:
+  pistol at 60 m ~0.18 s / 14 cm low, carbine 0.08 s / 2 cm.
+- Shotgun at range: pattern 2.2 deg, opening by `pellet_bloom_deg` 2.2 past
+  `pellet_bloom_from` 6 m; damage per pellet by distance flown, stat `falloff`
+  [[5, 1], [12, 0.55], [25, 0.3], [45, 0.12]] (`UltraCombat.falloff`).
 - Tours run in real time and frame grabs stall them: film fast moves in slow motion
   (`Engine.time_scale`, see melee_review); a tour "tap" is held for at least one tick.
 

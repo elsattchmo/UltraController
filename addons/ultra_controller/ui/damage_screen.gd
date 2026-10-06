@@ -20,13 +20,13 @@ uniform vec3 tint = vec3(0.25, 0.0, 0.0);
 void fragment() {
 	vec2 d = (UV - 0.5) * vec2(aspect, 1.0);
 	float r = length(d) / (0.5 * aspect);              // 0 centre .. ~1 at the side edges
-	float edge = smoothstep(0.75 - tunnel * 0.62, 1.05 - tunnel * 0.45, r) * clamp(tunnel * 1.6, 0.0, 1.0);
+	float edge = smoothstep(0.88 - tunnel * 0.5, 1.15 - tunnel * 0.38, r) * clamp(tunnel * 1.5, 0.0, 1.0);
 	float lod = blur * 5.0 + edge * 3.5;
 	vec3 c = textureLod(screen_tex, SCREEN_UV, lod).rgb;
 	float g = dot(c, vec3(0.299, 0.587, 0.114));
-	c = mix(c, vec3(g), clamp(edge * 0.8 + tunnel * 0.25, 0.0, 1.0));
-	c = mix(c, tint, edge * 0.35);
-	c *= 1.0 - edge * 0.92;
+	c = mix(c, vec3(g), clamp(edge * 0.6 + tunnel * 0.15, 0.0, 1.0));
+	c = mix(c, tint, edge * 0.25);
+	c *= 1.0 - edge * 0.78;
 	c *= 1.0 - dark;
 	COLOR = vec4(c, 1.0);
 }
@@ -142,19 +142,17 @@ func _process(delta: float) -> void:
 	var out := s.has(MotorState.F_UNCONSCIOUS)
 	_ko = move_toward(_ko, 1.0 if out else 0.0, delta * (3.0 if out else 0.7))
 	_ko_blur = move_toward(_ko_blur, 1.0 if out else 0.0, delta * (3.0 if out else 0.35))
-	# Tunnel vision: bleeding closes it in as health goes; badly hurt alone, a little.
+	# Tunnel vision: only bleeding out, closing in (gently) as health goes.
 	var hp := clampf(s.hp / 100.0, 0.0, 1.0)
 	var want := 0.0
 	if bleed > 0.0:
-		want = clampf(0.1 + (1.0 - hp) * 0.85, 0.0, 1.0)
-	elif hp < 0.35:
-		want = (0.35 - hp) / 0.35 * 0.55
+		want = clampf(0.05 + (1.0 - hp) * 0.6, 0.0, 0.65)
 	if dead:
 		want = 0.0
 	_tunnel = move_toward(_tunnel, want, delta * 0.8)
 	# The pulse: faster as health drops (and harder bleeding).
 	_pulse += delta * lerpf(1.1, 2.4, 1.0 - hp) * TAU
-	var beat := pow(maxf(sin(_pulse), 0.0), 6.0) * (0.12 if bleed > 0.0 else 0.0)
+	var beat := pow(maxf(sin(_pulse), 0.0), 6.0) * (0.07 if bleed > 0.0 else 0.0)
 	var tun := clampf(_tunnel + beat * _tunnel, 0.0, 1.0)
 	var show := tun > 0.002 or _ko > 0.002 or _ko_blur > 0.002
 	_fx.visible = show

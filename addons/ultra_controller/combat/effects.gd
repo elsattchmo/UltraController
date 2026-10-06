@@ -91,16 +91,28 @@ func _on_item(c: UltraCharacter, kind: StringName, data: Dictionary) -> void:
 	flash(muzzle)
 	var def := c.held_def()
 	smoke(muzzle, float(def.stat("smoke", 0.6)) if def else 0.6)
-	sfx.shot(muzzle.origin, sound_of(def))
+	sfx.shot(muzzle.origin, sound_of(def), c.get_instance_id())
+	if eq and not eq.pumps():          # (a pump-action throws its shell when it's racked)
+		shell(eq.eject_transform(), eq.eject_side(), String(def.stat("shell", "9mm")) if def else "9mm")
 	var own := c.net_id in local_ids
+	# Rounds that fly (speed, drop, drag): this machine's picture of them - a tracer down the
+	# arc, the whiz as one goes past, the shooter's own impacts when they arrive.
+	if UltraBallistics.flies(def):
+		var dirs: Array = data.dirs if data.has("dirs") else ([data.dir] if data.has("origin") else [-muzzle.basis.z])
+		var from: Vector3 = data.origin if data.has("origin") else muzzle.origin
+		var axis := Vector3.ZERO
+		for d: Vector3 in dirs:
+			axis += d
+		axis = axis.normalized()
+		for d: Vector3 in dirs:
+			_fly(c, muzzle.origin, from, d, axis if dirs.size() > 1 else Vector3.ZERO, def, own)
+		return
 	if data.has("dirs"):
 		sfx.whiz(data.origin, (data.dirs as Array)[0], 70.0, own)
 	elif data.has("origin"):
 		sfx.whiz(data.origin, data.dir, 120.0, own)
 	else:
 		sfx.whiz(muzzle.origin, -muzzle.basis.z, 120.0, own)
-	if eq and not eq.pumps():          # (a pump-action throws its shell when it's racked)
-		shell(eq.eject_transform(), eq.eject_side(), String(def.stat("shell", "9mm")) if def else "9mm")
 	# Buckshot: a tracer and a predicted impact per pellet.
 	if data.has("dirs"):
 		for d: Vector3 in data.dirs:
@@ -186,6 +198,111 @@ func _on_hit(target_id: int, pos: Vector3, dir: Vector3, amount: float, attacker
 		return
 	if c == null or c.damage_profile.blood_on():
 		blood(pos, -dir, c, dir, amount)
+
+
+# ---------------------------------------------------------------- rounds in flight (presentation)
+
+var _rounds: Array[Dictionary] = []
+const MAX_ROUNDS := 80
+
+
+## A round as this machine sees it: it leaves the muzzle and closes onto the true path from
+## `origin` along `dir` (the eye's ray the server flies) within ~12 m, then flies like the
+## server's (UltraBallistics): gravity, drag, bloom for buckshot (`axis` = the load's middle).
+func _fly(c: UltraCharacter, muzzle: Vector3, origin: Vector3, dir: Vector3, axis: Vector3, def: ItemDefinition, own: bool) -> void:
+	if _rounds.size() >= MAX_ROUNDS:
+		var old: Dictionary = _rounds.pop_front()
+		if is_instance_valid(old.streak):
+			(old.streak as Node).queue_free()
+	var speed := float(def.stat("muzzle_velocity", 800.0))
+	var aim := (origin + dir * 12.0 - muzzle).normalized()
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.008, 0.008, 2.5)
+	mi.mesh = bm
+	mi.material_override = _tracer_mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.visible = false
+	add_child(mi)
+	var ex: Array[RID] = [c.get_rid()]
+	if c.hit_volume:
+		ex.append(c.hit_volume.get_rid())
+	_rounds.append({"pos": muzzle, "vel": aim * speed, "true_dir": dir, "def": def, "dist": 0.0, "t": 0.0,
+		"axis": axis, "bloomed": false, "own": own, "ex": ex, "streak": mi, "whizzed": false, "pellet": axis != Vector3.ZERO})
+
+
+func _process(delta: float) -> void:
+	if _rounds.is_empty():
+		return
+	var space := get_world_3d().direct_space_state if get_world_3d() else null
+	var lp := sfx.listener() if sfx else Vector3.INF
+	var keep: Array[Dictionary] = []
+	for r in _rounds:
+		if _fly_step(r, delta, space, lp):
+			keep.append(r)
+		elif is_instance_valid(r.streak):
+			(r.streak as Node).queue_free()
+	_rounds = keep
+
+
+func _fly_step(r: Dictionary, dt: float, space: PhysicsDirectSpaceState3D, lp: Vector3) -> bool:
+	var def: ItemDefinition = r.def
+	var v0: Vector3 = r.vel
+	# Off the muzzle the round turns onto the eye's line (the first ~12 m), then flies free.
+	if float(r.dist) < 12.0:
+		var want: Vector3 = (r.true_dir as Vector3) * v0.length()
+		v0 = v0.lerp(want, clampf(dt * 25.0, 0.0, 1.0))
+	var v1 := (v0 + Vector3.DOWN * UltraBallistics.GRAVITY * dt) * exp(-float(def.stat("drag", 0.0)) * dt)
+	var step := (v0 + v1) * 0.5 * dt
+	var from: Vector3 = r.pos
+	var to := from + step
+	var seg := step.length()
+	if seg < 1e-5 or space == null:
+		return false
+	var dir := step / seg
+	# The whiz: the stretch of flight that goes past the listener (not the shooter's own).
+	if not r.own and not r.whizzed and lp != Vector3.INF:
+		var tt := (lp - from).dot(dir)
+		if tt > 0.0 and tt <= seg and float(r.dist) + tt > 3.0:
+			var closest := from + dir * tt
+			r.whizzed = true
+			if not r.pellet or randf() < 0.35:
+				sfx.whiz_at(closest, closest.distance_to(lp))
+	var q := PhysicsRayQueryParameters3D.create(from, to, UltraCombat.MASK, r.ex)
+	var hit := UltraCombat._cast(space, q, from, dir)
+	var streak := r.streak as MeshInstance3D
+	if not hit.is_empty():
+		if r.own:
+			var who := UltraCharacter.of_collider(hit.collider)
+			if not r.pellet or randf() < 0.4:
+				sfx.impact(hit.position, who != null)
+			if who:
+				if who.damage_profile.blood_on():
+					blood(hit.position, hit.normal, who, dir, 14.0 if r.pellet else 30.0)
+			else:
+				sparks(hit.position, hit.normal)
+		return false
+	r.pos = to
+	r.vel = v1
+	r.dist = float(r.dist) + seg
+	r.t = float(r.t) + dt
+	if r.pellet and not r.bloomed and float(r.dist) >= float(def.stat("pellet_bloom_from", 6.0)):
+		r.bloomed = true
+		var bloom := deg_to_rad(float(def.stat("pellet_bloom_deg", 0.0)))
+		var axis: Vector3 = r.axis
+		var vd := v1.normalized()
+		var off := vd - axis * vd.dot(axis)
+		if bloom > 0.0 and off.length() > 1e-4:
+			r.vel = (vd + off.normalized() * tan(bloom)).normalized() * v1.length()
+			r.true_dir = (r.vel as Vector3).normalized()
+	# The streak: its head at the round, along the flight.
+	if is_instance_valid(streak):
+		var len := minf(2.5, float(r.dist))
+		streak.visible = len > 0.4
+		var b := Basis.looking_at(dir, Vector3.UP if absf(dir.y) < 0.99 else Vector3.RIGHT)
+		streak.global_transform = Transform3D(b, to - dir * len * 0.5)
+		streak.scale = Vector3(1, 1, len / 2.5)
+	return float(r.dist) < float(def.stat("range", 300.0)) and float(r.t) < UltraBallistics.MAX_LIFE
 
 
 func flash(at: Transform3D) -> void:

@@ -31,6 +31,8 @@ anim_clips = {
 }
 recoil_gun_deg = 3.0
 stats = {
+"drag": 0.6,
+"muzzle_velocity": 360.0,
 "ads_fov": 55.0,
 "ads_spread_deg": 0.15,
 "ammo": "ammo_9mm",

@@ -194,7 +194,10 @@ static func _firearm(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemD
 			shot["dirs"] = pellet_dirs(c, s, shot.dir, def, pellets)
 		c.emit_item_event(&"fire", shot, replaying)
 		if c.is_authority() and not replaying:
-			if pellets > 1:
+			if UltraBallistics.flies(def):
+				# Rounds with speed, drop and drag (UltraBallistics flies them tick by tick).
+				UltraBallistics.instance(c.get_tree()).fire(c, shot.origin, shot.dirs if pellets > 1 else [shot.dir], def)
+			elif pellets > 1:
 				UltraCombat.hitscan_pellets(c, shot.origin, shot.dirs, def)
 			else:
 				UltraCombat.hitscan(c, shot.origin, shot.dir, def)

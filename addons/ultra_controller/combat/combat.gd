@@ -33,8 +33,15 @@ static func hitscan(shooter: UltraCharacter, origin: Vector3, dir: Vector3, def:
 	var hit: Dictionary = UltraNet.world.rewound(shooter, func() -> Dictionary: return _cast(space, q, origin, dir))
 	if hit.is_empty():
 		return {}
+	resolve_bullet(shooter, hit, dir, def, origin.distance_to(hit.position))
+	return hit
+
+
+## A round's hit `hit` (from _cast) after flying `dist` m along `dir`: damage (falloff by the
+## distance), the impulse, the impact event.
+static func resolve_bullet(shooter: UltraCharacter, hit: Dictionary, dir: Vector3, def: ItemDefinition, dist: float) -> void:
 	var info := DamageInfo.new()
-	info.amount = float(def.stat("damage", 10.0))
+	info.amount = float(def.stat("damage", 10.0)) * falloff(def.stat("falloff", []), dist)
 	info.dir = dir
 	info.point = hit.position
 	info.normal = hit.normal
@@ -49,29 +56,70 @@ static func hitscan(shooter: UltraCharacter, origin: Vector3, dir: Vector3, def:
 	if sp and sp.role == NetPlayer.Role.AUTHORITY_REMOTE:
 		shooter_peer = sp.peer_id
 	UltraNet.world.broadcast(&"impact", [info.point, info.normal, kind, shooter.net_id], false, shooter_peer)
-	return hit
 
 
 ## Buckshot: every pellet resolved like a bullet (lag-compensated, through limbs), then the
 ## pellets that struck the same region of the same character are dealt as ONE hit (their damage
 ## summed, kind `buckshot`): a close, tight pattern on a limb is far past its health and takes
 ## it off; a spread pattern at range just wounds. Everything else takes each pellet.
+## A damage multiplier from [[distance, mult], ...] (sorted), linear between the points and
+## held past the ends; 1.0 with none.
+static func falloff(points: Array, d: float) -> float:
+	if points.is_empty():
+		return 1.0
+	if d <= float(points[0][0]):
+		return float(points[0][1])
+	for k in range(1, points.size()):
+		var a: Array = points[k - 1]
+		var b: Array = points[k]
+		if d <= float(b[0]):
+			return lerpf(float(a[1]), float(b[1]), (d - float(a[0])) / maxf(float(b[0]) - float(a[0]), 0.001))
+	return float(points[-1][1])
+
+
 static func hitscan_pellets(shooter: UltraCharacter, origin: Vector3, dirs: Array, def: ItemDefinition) -> Array:
 	var space := shooter.get_world_3d().direct_space_state
 	var excl: Array[RID] = [shooter.get_rid()]
 	if shooter.hit_volume:
 		excl.append(shooter.hit_volume.get_rid())
 	var rng := float(def.stat("range", 100.0))
+	# The pattern opens up past `pellet_bloom_from` m: each pellet bends out from the middle of
+	# the load by `pellet_bloom_deg` (tight close in, wide at range).
+	var bloom_from := float(def.stat("pellet_bloom_from", 6.0))
+	var bloom := deg_to_rad(float(def.stat("pellet_bloom_deg", 0.0)))
+	var axis := Vector3.ZERO
+	for d: Vector3 in dirs:
+		axis += d
+	axis = axis.normalized() if axis.length() > 1e-5 else Vector3.FORWARD
 	var hits: Array = UltraNet.world.rewound(shooter, func() -> Array:
 		var out := []
 		for d: Vector3 in dirs:
-			var q := PhysicsRayQueryParameters3D.create(origin, origin + d * rng, MASK, excl.duplicate())
+			var first := minf(bloom_from, rng) if bloom > 0.0 else rng
+			var q := PhysicsRayQueryParameters3D.create(origin, origin + d * first, MASK, excl.duplicate())
 			var h := _cast(space, q, origin, d)
+			var dd := d
+			if h.is_empty() and bloom > 0.0 and rng > first:
+				var off := d - axis * d.dot(axis)
+				dd = (d + (off.normalized() if off.length() > 1e-4 else Vector3.ZERO) * tan(bloom)).normalized()
+				var o2 := origin + d * first
+				var q2 := PhysicsRayQueryParameters3D.create(o2, o2 + dd * (rng - first), MASK, excl.duplicate())
+				h = _cast(space, q2, o2, dd)
 			if not h.is_empty():
-				h["dir"] = d
+				h["dir"] = dd
+				h["dist"] = origin.distance_to(h.position)
 				out.append(h)
 		return out)
-	var per := float(def.stat("damage", 10.0))
+	apply_pellets(shooter, origin, hits, def, dirs.size())
+	return hits
+
+
+## Pellet hits (each with "dir" and "dist" - how far it flew) from ONE shot of `n` pellets:
+## summed per character region into one `buckshot` hit, everything else per pellet, and the
+## blast's shove on each character struck.
+static func apply_pellets(shooter: UltraCharacter, origin: Vector3, hits: Array, def: ItemDefinition, n_pellets: int) -> void:
+	var per0 := float(def.stat("damage", 10.0))
+	# Damage falls off with the distance each pellet flew: stat "falloff" = [[m, mult], ...].
+	var fo: Array = def.stat("falloff", [])
 	var impulse := float(def.stat("impulse", 4.0))
 	var groups := {}           # [character, region] -> DamageInfo
 	var shooter_peer := 0
@@ -80,6 +128,8 @@ static func hitscan_pellets(shooter: UltraCharacter, origin: Vector3, dirs: Arra
 		shooter_peer = sp.peer_id
 	for h: Dictionary in hits:
 		var who := UltraCharacter.of_collider(h.collider)
+		var dist := float(h.get("dist", origin.distance_to(h.position)))
+		var per := per0 * falloff(fo, dist)
 		var info := DamageInfo.new()
 		info.amount = per
 		info.dir = h.dir
@@ -105,7 +155,7 @@ static func hitscan_pellets(shooter: UltraCharacter, origin: Vector3, dirs: Arra
 	# pellets) and how close (full within ~3 m, fading out by ~20 m) - point blank lifts them
 	# off their feet; a few stray pellets at range barely rock them. Given with the character's
 	# first group so it lands once.
-	var n := float(dirs.size())
+	var n := float(n_pellets)
 	var shoved := {}
 	for g: DamageInfo in groups.values():
 		var who := UltraCharacter.of_collider(g.collider)
@@ -116,14 +166,13 @@ static func hitscan_pellets(shooter: UltraCharacter, origin: Vector3, dirs: Arra
 		var dir := Vector3.ZERO
 		for g2: DamageInfo in groups.values():
 			if UltraCharacter.of_collider(g2.collider) == who:
-				count += g2.amount / per
+				count += g2.amount / per0          # (fewer at range: the falloff weakens the shove too)
 				dir += g2.dir * g2.amount
 		var near := 1.0 - smoothstep(3.0, 20.0, origin.distance_to(g.point))
 		dir = Vector3(dir.x, 0.0, dir.z).normalized()
 		g.shove = dir * float(def.stat("knockback", 9.0)) * (count / n) * lerpf(0.15, 1.0, near)
 	for g: DamageInfo in groups.values():
-		apply(g, impulse * g.amount / per)
-	return hits
+		apply(g, impulse * g.amount / per0)
 
 
 ## A melee blow (swing `sw` from UltraActionLayer.melee_swing): rays fanned across the aim from

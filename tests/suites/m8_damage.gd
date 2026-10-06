@@ -436,14 +436,15 @@ func test_getup_camera_is_steady() -> void:
 
 
 ## Shotgun: nine pellets, summed per region. Point blank the blast takes a limb off and knocks
-## the target flying; far off a few pellets wound and barely rock it.
+## the target flying; further off (11 m - past ~6 m the pattern opens up and each pellet does
+## less) a few pellets wound and barely rock it.
 func test_shotgun_blast() -> void:
 	var def := ItemDB.get_def(&"shotgun")
 	check(def != null, "shotgun defined")
 	if def == null:
 		return
 	var res := []
-	for spec: Array in [["point blank leg", 2.5, R.THIGH_L], ["point blank arm", 2.5, R.ARM_R], ["far torso", 18.0, R.TORSO]]:
+	for spec: Array in [["point blank leg", 2.5, R.THIGH_L], ["point blank arm", 2.5, R.ARM_R], ["far torso", 11.0, R.TORSO]]:
 		# (On the long straight track: nothing in between at any range.)
 		var t := dummy(Vector3(-24, 0.05, -70))
 		c.teleport(Vector3(-24, 0.05, -70 + float(spec[1])), 0.0)

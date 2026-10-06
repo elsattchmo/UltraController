@@ -13,9 +13,14 @@ extends Node3D
 const DIR := "res://assets/audio/weapons/"
 const MAX_VOICES := 40
 const SPEED_OF_SOUND := 343.0
-const WHIZ_RADIUS := 4.0
-const FAR_FROM := 35.0              ## m: the far render starts here...
-const FAR_FULL := 120.0             ## ... and has it all by here
+const WHIZ_RADIUS := 6.0
+const FAR_FROM := 20.0              ## m: the far render (muffled, echoing) comes in from here...
+const FAR_FULL := 80.0              ## ... and has it all by here
+const NEAR_GONE := 110.0            ## m: the close report has faded out by here
+const AUTO_GAP := 0.2               ## s: a round this soon after the last one continues a burst
+
+var listener_override := Vector3.INF     ## (tests: where the listener is)
+var _auto := {}                     ## shooter key -> {t, at, prefix, voice, tail_due}
 
 var _variants := {}                 ## name -> Array[AudioStream]
 var _pool: Array[AudioStreamPlayer3D] = []
@@ -48,6 +53,7 @@ func streams(name: String) -> Array:
 
 ## Play `name` at `at`. `unit` = the distance (m) it's at full volume; `max_dist` where it's gone.
 func play(name: String, at: Vector3, volume_db := 0.0, unit := 6.0, max_dist := 80.0, pitch_spread := 0.05, delay := 0.0, variant := -1) -> void:
+	_log(name)
 	var list := streams(name)
 	if list.is_empty() or not is_inside_tree():
 		return
@@ -58,7 +64,7 @@ func play(name: String, at: Vector3, volume_db := 0.0, unit := 6.0, max_dist := 
 		_start(s, at, volume_db, unit, max_dist, pitch_spread)
 
 
-func _start(s: AudioStream, at: Vector3, volume_db: float, unit: float, max_dist: float, pitch_spread: float) -> void:
+func _start(s: AudioStream, at: Vector3, volume_db: float, unit: float, max_dist: float, pitch_spread: float) -> AudioStreamPlayer3D:
 	var p := _pool[_next]
 	_next = (_next + 1) % _pool.size()
 	p.stop()
@@ -69,25 +75,86 @@ func _start(s: AudioStream, at: Vector3, volume_db: float, unit: float, max_dist
 	p.pitch_scale = 1.0 + randf_range(-pitch_spread, pitch_spread)
 	p.global_position = at
 	p.play()
+	return p
 
 
 ## The listener: the current camera (the first local one).
 func listener() -> Vector3:
+	if listener_override != Vector3.INF:
+		return listener_override
 	var cam := get_viewport().get_camera_3d() if get_viewport() else null
 	return cam.global_position if cam else Vector3.INF
 
 
-## A shot from `c`'s gun at `at`: the close report and the far one, mixed by the distance.
-func shot(at: Vector3, prefix: String, loud := 1.0) -> void:
+## A shot from a gun at `at` (`key`: whose gun, for automatic fire): the close report and the
+## far render, mixed by the distance, late by the speed of sound. A gun with an automatic set
+## (prefix_fire_auto / _tail) plays each round's attack alone, cutting the one before, and the
+## ring-out once the trigger's let go; others play the whole shot.
+func shot(at: Vector3, prefix: String, key := 0, loud := 1.0) -> void:
 	var lp := listener()
 	var d := at.distance_to(lp) if lp != Vector3.INF else 0.0
 	var late := d / SPEED_OF_SOUND
-	var k := smoothstep(FAR_FROM, FAR_FULL, d)
+	var near_w := 1.0 - smoothstep(25.0, NEAR_GONE, d)
+	var far_w := smoothstep(FAR_FROM, FAR_FULL, d)
 	var gain := linear_to_db(maxf(loud, 0.01))
-	if k < 0.99:
-		play(prefix + "_fire", at, gain + linear_to_db(maxf(1.0 - k, 0.001)), 9.0, 260.0, 0.04, late)
-	if k > 0.01:
-		play(prefix + "_fire_far", at, gain + linear_to_db(maxf(k, 0.001)) + 6.0, 60.0, 1400.0, 0.06, late)
+	var auto := not streams(prefix + "_fire_auto").is_empty()
+	var now := Time.get_ticks_msec() / 1000.0
+	if auto:
+		var st: Dictionary = _auto.get(key, {})
+		var voice: Variant = st.get("voice")
+		if voice != null and is_instance_valid(voice) and now - float(st.get("t", -9.0)) < AUTO_GAP:
+			_cut(voice as AudioStreamPlayer3D)           # (the last round's attack: cut short)
+		st = {"t": now, "at": at, "prefix": prefix, "late": late, "near": near_w, "far": far_w, "gain": gain, "voice": null}
+		_auto[key] = st
+		var sfx_name := prefix + "_fire_auto"
+		if near_w > 0.01:
+			_later(late, func() -> void: st["voice"] = _play_now(sfx_name, at, gain + linear_to_db(near_w), 9.0, 260.0, 0.04))
+		if far_w > 0.01:
+			_later(late, func() -> void: _play_now(sfx_name.replace("_auto", "_auto_far"), at, gain + linear_to_db(far_w) + 2.0, 80.0, 1400.0, 0.05))
+		return
+	if near_w > 0.01:
+		play(prefix + "_fire", at, gain + linear_to_db(near_w), 9.0, 260.0, 0.04, late)
+	if far_w > 0.01:
+		play(prefix + "_fire_far", at, gain + linear_to_db(far_w) + 2.0, 80.0, 1400.0, 0.05, late)
+
+
+func _process(_delta: float) -> void:
+	# Bursts that have stopped: their ring-out.
+	var now := Time.get_ticks_msec() / 1000.0
+	for key: int in _auto.keys():
+		var st: Dictionary = _auto[key]
+		if now - float(st.t) >= AUTO_GAP:
+			_auto.erase(key)
+			var pre := String(st.prefix)
+			var late := float(st.late)
+			if float(st.near) > 0.01:
+				play(pre + "_fire_tail", st.at, float(st.gain) + linear_to_db(float(st.near)), 9.0, 260.0, 0.03, maxf(late - (now - float(st.t)), 0.0))
+			if float(st.far) > 0.01:
+				play(pre + "_fire_tail_far", st.at, float(st.gain) + linear_to_db(float(st.far)) + 2.0, 80.0, 1400.0, 0.03, maxf(late - (now - float(st.t)), 0.0))
+
+
+func _later(delay: float, f: Callable) -> void:
+	if delay > 0.01:
+		get_tree().create_timer(delay).timeout.connect(f)
+	else:
+		f.call()
+
+
+func _play_now(name: String, at: Vector3, volume_db: float, unit: float, max_dist: float, pitch_spread: float) -> AudioStreamPlayer3D:
+	_log(name)
+	var list := streams(name)
+	if list.is_empty() or not is_inside_tree():
+		return null
+	return _start(list[randi() % list.size()], at, volume_db, unit, max_dist, pitch_spread)
+
+
+## Cut a voice short with a quick fade (a round's attack giving way to the next).
+func _cut(p: AudioStreamPlayer3D) -> void:
+	if p == null or not p.playing:
+		return
+	var tw := create_tween()
+	tw.tween_property(p, "volume_db", p.volume_db - 30.0, 0.025)
+	tw.tween_callback(p.stop)
 
 
 ## A round flying from `origin` along `dir` (to `reach`): a listener it passes close by (not its
@@ -104,7 +171,31 @@ func whiz(origin: Vector3, dir: Vector3, reach: float, shooter_is_listener: bool
 	var miss := closest.distance_to(lp)
 	if miss > WHIZ_RADIUS:
 		return
-	play("whiz", closest, linear_to_db(clampf(1.2 - miss / WHIZ_RADIUS, 0.2, 1.0)), 3.0, 30.0, 0.08)
+	# Right past your head: the sharp crack; further out softer fly-bys, the far ones dulled.
+	var band := "whiz_close" if miss < 1.2 else ("whiz_mid" if miss < 3.0 else "whiz_far")
+	last_whiz = band
+	var vol := 2.0 if band == "whiz_close" else (-2.0 if band == "whiz_mid" else -5.0)
+	play(band, closest, vol - miss * 0.6, 4.0, 40.0, 0.07)
+
+
+## A round passing the listener at `at`, `miss` m off: the set by how close.
+func whiz_at(at: Vector3, miss: float) -> void:
+	if miss > WHIZ_RADIUS:
+		return
+	var band := "whiz_close" if miss < 1.2 else ("whiz_mid" if miss < 3.0 else "whiz_far")
+	last_whiz = band
+	var vol := 2.0 if band == "whiz_close" else (-2.0 if band == "whiz_mid" else -5.0)
+	play(band, at, vol - miss * 0.6, 4.0, 40.0, 0.07)
+
+
+var last_whiz := ""                 ## (tests: which set the last fly-by came from)
+var played: Array[String] = []      ## (tests: the last sounds asked for, newest last)
+
+
+func _log(name: String) -> void:
+	played.append(name)
+	if played.size() > 64:
+		played.pop_front()
 
 
 func impact(at: Vector3, flesh: bool) -> void:

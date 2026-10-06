@@ -40,6 +40,8 @@ sway_amount = 1.4
 recoil_gun_deg = 11.0
 sprint_lower_deg = Vector2(66.4, -8.1)
 stats = {
+"drag": 3.5,
+"muzzle_velocity": 400.0,
 "ads_fov": 58.0,
 "ads_spread_deg": 0.2,
 "ammo": "ammo_12g",
@@ -49,6 +51,9 @@ stats = {
 "kick": 5.0,
 "mag_size": 6,
 "pellet_spread_deg": 2.2,
+"pellet_bloom_deg": 2.2,
+"pellet_bloom_from": 6.0,
+"falloff": [[5.0, 1.0], [12.0, 0.55], [25.0, 0.3], [45.0, 0.12]],
 "pellets": 9,
 "pump_delay": 0.42,
 "pump_time": 0.46,

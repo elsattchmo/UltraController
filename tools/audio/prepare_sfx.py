@@ -8,6 +8,7 @@ Writes assets/audio/weapons/<name>_<k>.wav (16-bit mono). numpy only (no scipy):
 plain biquads / Schroeder reverb loops - fine for clips this short.
 """
 import os
+import re
 import struct
 import wave
 
@@ -157,22 +158,61 @@ def reverb(x, sr, mix=0.4, decay=0.78):
     return out
 
 
+def smooth_attack(x, sr, ms=6.0):
+    """Round off the transient (a one-pole smoother on the envelope's rise)."""
+    n = max(int(sr * ms / 1000), 1)
+    k = np.ones(n, dtype=np.float32) / n
+    return np.convolve(x, k, mode='same').astype(np.float32)
+
+
 def far(x, sr):
-    """A gunshot heard from far off: highs gone, the crack softened, a long tail."""
-    y = biquad_lowpass(x, sr, 1100.0)
-    y = biquad_lowpass(y, sr, 1100.0)
-    y = np.tanh(y * 1.6)                                  # (the transient squashed)
-    y = reverb(y, sr, mix=0.55, decay=0.82)
-    return finish(y, sr, peak_db=-4.0, fade_out_ms=200)
+    """A gunshot heard from far off: the crack gone (air eats the highs - 4th order at ~650 Hz),
+    the attack rounded, outdoor slap-back echoes off distant surfaces, a long low tail."""
+    y = smooth_attack(x, sr, 5.0)
+    for _ in range(2):
+        y = biquad_lowpass(y, sr, 650.0)
+    y = np.tanh(y * 2.2) / np.tanh(2.2)                   # (squashed: a thump, not a crack)
+    n = len(y) + int(sr * 2.6)
+    out = np.zeros(n, dtype=np.float32)
+    out[:len(y)] += y
+    # Echoes: later and duller each time.
+    echo = biquad_lowpass(y, sr, 450.0)
+    for delay, gain in ((0.11, 0.45), (0.27, 0.32), (0.55, 0.22), (0.95, 0.14)):
+        d = int(sr * delay)
+        out[d:d + len(echo)] += echo[: max(0, min(len(echo), n - d))] * gain
+    out = reverb(out[: len(y) + int(sr * 1.2)], sr, mix=0.6, decay=0.86)
+    return finish(out, sr, peak_db=-5.0, fade_in_ms=4, fade_out_ms=400)
+
+
+def events(a, sr, rel=0.3, gap_ms=400, max_len=1.0, floor_db=-50.0):
+    """Each event from its onset to just before the next (or `max_len`), trimmed where it's
+    fallen `floor_db` under its own peak."""
+    env, win = envelope(a, sr)
+    pk = env.max()
+    on = []
+    for i in range(1, len(env)):
+        if env[i] > rel * pk and env[i - 1] < rel * 0.7 * pk and (not on or (i - on[-1]) * win > gap_ms * sr / 1000):
+            on.append(i)
+    out = []
+    for k, i in enumerate(on):
+        end = min(on[k + 1] - int(0.04 * sr / win) if k + 1 < len(on) else len(env), i + int(max_len * sr / win))
+        seg = env[i:end]
+        lpk = seg.max()
+        last = i
+        for j in range(i, end):
+            if env[j] > lpk * 10 ** (floor_db / 20):
+                last = j
+        out.append((max(i - 1, 0) * win, (last + 1) * win))
+    return out
 
 
 # name -> (source file, mode, params). mode "slice": every event; "range": [(t0, t1, name)...];
 # "whole": the file as one.
 JOBS = [
     ('pistol_fire', 'handgun fire.wav', 'slice', dict(rel=0.4, max_len=1.1), True),
-    ('rifle_fire', 'automatic fire.wav', 'slice', dict(rel=0.3, max_len=0.6, gap_ms=90), True),
+    ('rifle_fire', '417688__superphat__lightmachinegun1.wav', 'shots', [17.0, 21.0, 25.0], True),
     ('shotgun_fire', 'shotgun/660299__hyperix6__shotgun-fire.wav', 'slice', dict(rel=0.4, max_len=1.6), True),
-    ('whiz', 'bullet close.wav', 'slice', dict(rel=0.3, max_len=1.2, gap_ms=400), False),
+    ('whiz', 'bullet close.wav', 'whiz', {}, False),
     ('impact', 'bullet hit.wav', 'slice', dict(rel=0.3, max_len=0.9, gap_ms=300), False),
     ('pistol_reload', 'handgun reload.wav', 'range', [(0.0, 0.36, 'mag_out'), (0.36, 0.88, 'mag_in'), (0.88, 1.51, 'slide')], False),
     ('rifle_reload', 'automatic gun reload.wav', 'range', [(1.95, 3.30, 'mag_out'), (3.36, 5.11, 'mag_in')], False),
@@ -186,7 +226,38 @@ def main():
     for name, src, mode, params, distant in JOBS:
         a, sr = read_wav(os.path.join(SRC, src))
         outs = []
-        if mode == 'slice':
+        if mode == 'shots':
+            # Single shots at the given times: the whole shot (_k), its attack alone for automatic
+            # fire (_auto_k: each round, the one before cut), and its ring-out (_tail_k: played
+            # once the trigger's let go).
+            for k, t0 in enumerate(params):
+                seg = a[int((t0 - 0.05) * sr):int((t0 + 3.6) * sr)]
+                env, win = envelope(seg, sr)
+                first = int(np.argmax(env > env.max() * 0.2)) * win
+                shot = seg[max(first - int(0.004 * sr), 0):]
+                outs.append(('%s_%d' % (name, k), shot[: int(2.6 * sr)]))
+                outs.append(('%s_auto_%d' % (name, k), finish(shot[: int(0.16 * sr)].copy(), sr, fade_out_ms=45)))
+                tail = shot[int(0.09 * sr): int(2.6 * sr)].copy()
+                tail[: int(0.03 * sr)] *= np.linspace(0, 1, int(0.03 * sr))
+                outs.append(('%s_tail_%d' % (name, k), tail))
+        elif mode == 'whiz':
+            # Graded by how close they sound: the loudest / sharpest cracks for a round right past
+            # your head, the softer ones further out (and those dulled a little more).
+            evs = []
+            for s0, s1 in events(a, sr):
+                x = a[s0:s1]
+                w = max(int(0.03 * sr), 1)
+                rms = np.sqrt(np.convolve(x * x, np.ones(w) / w, mode='valid'))
+                evs.append((rms.max() * (rms.max() / (rms.mean() + 1e-6)) ** 0.3, x))
+            evs.sort(key=lambda e: -e[0])
+            n = len(evs)
+            for k, (_, x) in enumerate(evs):
+                band = 'close' if k < n // 3 else ('mid' if k < 2 * n // 3 else 'far')
+                idx = k if band == 'close' else (k - n // 3 if band == 'mid' else k - 2 * n // 3)
+                if band == 'far':
+                    x = biquad_lowpass(x.copy(), sr, 3500.0)
+                outs.append(('%s_%s_%d' % (name, band, idx), x))
+        elif mode == 'slice':
             for k, (s0, s1) in enumerate(slices(a, sr, **params)):
                 outs.append(('%s_%d' % (name, k), a[s0:s1]))
         elif mode == 'range':
@@ -203,7 +274,10 @@ def main():
             write_wav(os.path.join(OUT, nm + '.wav'), x, sr)
             line = '%-24s %.2f s' % (nm, len(x) / sr)
             if distant:
-                write_wav(os.path.join(OUT, nm + '_far.wav'), far(x, sr), sr)
+                # name_k -> name_far_k (UltraSfx finds a sound's variants as name_0, name_1 ...)
+                m = re.match(r'(.*)_(\d+)$', nm)
+                fn = '%s_far_%s' % (m.group(1), m.group(2)) if m else nm + '_far'
+                write_wav(os.path.join(OUT, fn + '.wav'), far(x, sr), sr)
                 line += ' + far'
             print(line)
 
