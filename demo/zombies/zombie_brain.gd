@@ -69,6 +69,7 @@ var _looking := false
 var _look_sign := 1.0
 var lod := 0                         ## presentation tier (ZombieDirector's pass): 0 full, 1 mid, 2 far / off screen
 var lod_accum := 0.0
+var lod_step := -1.0                 ## animation step (s) when it isn't every frame; 0 = every frame, -1 = unset
 var lod_idle := false                ## hidden: its presentation nodes are not processing
 var pack := ""                       ## the sandbox pack it belongs to
 var home_spawn := Vector3.ZERO       ## where it started (a reset sends it back)

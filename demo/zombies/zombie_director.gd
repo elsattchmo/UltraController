@@ -62,13 +62,16 @@ func character_by_id(id: int) -> UltraCharacter:
 
 
 ## --- presentation LOD (windowed only): what a zombie costs follows how much of it can be seen.
-##   0  within LOD_NEAR m and in view: everything (foot IK within FOOT_IK_RANGE)
+##   0  within LOD_NEAR m and in view: everything (foot IK within FOOT_IK_RANGE); the animation runs every
+##      frame within ANIM_FULL m, at 30 Hz beyond
 ##   1  within LOD_MID m and in view: the animation steps at ~15 Hz, no foot IK / injury modifier, no shadow
 ##   2  further or out of view: the animation is frozen, no modifiers; out of view it is not drawn at all
 ## and a far sleeper is left out of the simulation (sim_skip) altogether.
 const LOD_NEAR := 16.0
 const LOD_MID := 40.0
-const FOOT_IK_RANGE := 9.0
+const FOOT_IK_RANGE := 7.0
+const ANIM_FULL := 6.0
+const NEAR_STEP := 1.0 / 30.0
 const SLEEP_SKIP := 38.0
 const LOD_STEP := 1.0 / 15.0
 const LOD_BATCH := 3                    ## zombies re-tiered per physics tick (each one ~4-5 times a second)
@@ -141,17 +144,17 @@ func _far_visible(b: ZombieBrain, cams: Array[Camera3D]) -> bool:
 	return false
 
 
-func _apply_tier(b: ZombieBrain, tier: int, near: bool, in_view_far: bool) -> void:
+func _apply_tier(b: ZombieBrain, tier: int, dmin: float, in_view_far: bool) -> void:
 	var c := b.c
 	var anim := c.anim as UltraLiteAnimDriver
 	if anim == null or anim.tree == null:
 		return
 	if tier != b.lod:
 		b.lod = tier
+		b.lod_step = -1.0
 		match tier:
 			0:
 				anim.tree.active = true
-				anim.tree.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_IDLE
 				if c.body_fx and c.body_fx.injury:
 					c.body_fx.injury.active = true
 				if c.body_mesh():
@@ -159,8 +162,6 @@ func _apply_tier(b: ZombieBrain, tier: int, near: bool, in_view_far: bool) -> vo
 				c.visual_root.visible = true
 			1:
 				anim.tree.active = true
-				anim.tree.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
-				b.lod_accum = randf() * LOD_STEP
 				if c.body_fx and c.body_fx.injury:
 					c.body_fx.injury.active = false
 				if c.body_mesh():
@@ -174,6 +175,16 @@ func _apply_tier(b: ZombieBrain, tier: int, near: bool, in_view_far: bool) -> vo
 					c.body_mesh().cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	if tier == 2:
 		c.visual_root.visible = in_view_far
+	else:
+		# How often the animation is evaluated: every frame close up, then 30 Hz, then 15 Hz.
+		var want := LOD_STEP
+		if tier == 0:
+			var down := c.state.state == MotorState.Id.RAGDOLL or c.state.state == MotorState.Id.GET_UP or c.state.state == MotorState.Id.DEAD
+			want = 0.0 if dmin < ANIM_FULL or down else NEAR_STEP
+		if want != b.lod_step:
+			b.lod_step = want
+			b.lod_accum = randf() * want
+			anim.tree.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL if want > 0.0 else AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_IDLE
 	# Hidden altogether (out of view or behind a wall): none of its presentation needs to run.
 	var idle := tier == 2 and not in_view_far
 	if idle != b.lod_idle:
@@ -183,7 +194,7 @@ func _apply_tier(b: ZombieBrain, tier: int, near: bool, in_view_far: bool) -> vo
 		if c.body_fx:
 			c.body_fx.set_process(not idle)
 	if anim.foot_ik:
-		anim.foot_ik.active = tier == 0 and near
+		anim.foot_ik.active = tier == 0 and dmin < FOOT_IK_RANGE
 
 
 func _lod_pass() -> void:
@@ -203,7 +214,7 @@ func _lod_pass() -> void:
 		var tier := _tier_of(b, cams)
 		var dmin := _dmin
 		# (Drawn only if it is a tier 0 / 1 zombie, or a far one in plain view: a tier-2 one was found hidden or out of range.)
-		_apply_tier(b, tier, dmin < FOOT_IK_RANGE, tier < 2 or _far_visible(b, cams))
+		_apply_tier(b, tier, dmin, tier < 2 or _far_visible(b, cams))
 		b.c.live_hit_capture = tier == 0
 		# A far sleeper isn't simulated at all.
 		var near_target := 1e9
@@ -216,9 +227,9 @@ func _process(delta: float) -> void:
 	if not lod_enabled:
 		return
 	for b in brains:
-		if b.lod == 1 and is_instance_valid(b.c) and b.c.anim != null and b.c.anim.tree != null:
+		if b.lod_step > 0.0 and b.lod < 2 and is_instance_valid(b.c) and b.c.anim != null and b.c.anim.tree != null:
 			b.lod_accum += delta
-			if b.lod_accum >= LOD_STEP:
+			if b.lod_accum >= b.lod_step:
 				b.c.anim.tree.advance(b.lod_accum)
 				b.lod_accum = 0.0
 
