@@ -136,7 +136,7 @@ func mode_name() -> String:
 func drive(tick: int, src: BotInputSource) -> InputFrame:
 	var f := InputFrame.new()
 	f.tick = tick
-	var dt := 1.0 / float(Engine.physics_ticks_per_second)
+	var dt := float(c.sim_period) / float(Engine.physics_ticks_per_second)       # (a strided step covers several ticks)
 	var err := angle_difference(src.live_yaw, want_yaw)
 	src.live_yaw += clampf(err, -arch.turn_rate * dt, arch.turn_rate * dt)
 	f.yaw = src.live_yaw

@@ -43,6 +43,8 @@ var sim_skip := false
 ## Simulate only every Nth server tick, the step covering N ticks (a standing NPC); hurting or
 ## shoving it puts it back to 1. Set by whoever manages the NPCs.
 var sim_period := 1
+var _stride_len := 1                    ## ticks the last step covered
+var stride_wait := 0                    ## server ticks since then (the net layer counts them)
 ## Keep the hit capsules following the posed skeleton (else the baked ones are used): a far NPC's
 ## capture is cost nobody can tell from the baked pose.
 var live_hit_capture := true
@@ -352,6 +354,9 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	_prev_yaw = state.body_yaw
 	_prev_trav_s = state.trav_s
 	prev_sway = state.sway
+	if not replaying:
+		_stride_len = maxi(roundi(delta * float(Engine.physics_ticks_per_second)), 1)
+		stride_wait = 0
 	var old := state.state
 	motor.apply_pushes = net_role != ROLE_PREDICTED and not replaying   # only the authority shoves props
 	motor.platform_tick = platform_tick
@@ -489,7 +494,10 @@ func _process(delta: float) -> void:
 	ragdoll_offset = ragdoll_offset.lerp(Vector3.ZERO, 1.0 - exp(-2.2 * delta))
 	if state.state != MotorState.Id.GET_UP or ragdoll == null or not ragdoll.active:
 		ragdoll_yaw = lerpf(ragdoll_yaw, 0.0, 1.0 - exp(-2.5 * delta))
-	_sync_visual(Engine.get_physics_interpolation_fraction())
+	var alpha := Engine.get_physics_interpolation_fraction()
+	if _stride_len > 1:
+		alpha = minf((float(stride_wait) + alpha) / float(_stride_len), 1.0)     # one stride, drawn over its own ticks
+	_sync_visual(alpha)
 	if anim:
 		anim.state = state.state
 		anim.stance = state.stance

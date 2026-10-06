@@ -508,7 +508,14 @@ func move(s: MotorState, allow_step: bool) -> void:
 	if allow_step and was_grounded:
 		_try_step_up()
 	_pre_move_vel = body.velocity
-	body.move_and_slide()
+	# A strided NPC's step covers several ticks (dt); the engine's slide covers one: scale the velocity.
+	var stride := dt * float(Engine.physics_ticks_per_second)
+	if stride > 1.5:
+		body.velocity *= stride
+		body.move_and_slide()
+		body.velocity /= stride
+	else:
+		body.move_and_slide()
 	_push_bodies()
 	var grounded := body.is_on_floor()
 	if not grounded and allow_step and was_grounded and body.velocity.y <= 0.5 and s.platform_id == 0:

@@ -74,6 +74,11 @@ const LOD_STEP := 1.0 / 15.0
 const LOD_BATCH := 3                    ## zombies re-tiered per physics tick (each one ~4-5 times a second)
 ## A zombie standing still (dormant / idle) is simulated every IDLE_STRIDE-th tick: it has nothing to do.
 const IDLE_STRIDE := 4
+## A walking zombie is simulated every 2nd tick once it is STRIDE_NEAR m from every target (it is drawn over
+## its own ticks, so it stays smooth), every 3rd from STRIDE_MID m, every 4th from STRIDE_FAR m.
+const STRIDE_NEAR := 4.0
+const STRIDE_MID := 14.0
+const STRIDE_FAR := 30.0
 var lod_enabled := DisplayServer.get_name() != "headless"
 var _lod_i := 0
 var _viewers: Array[Camera3D] = []
@@ -238,28 +243,42 @@ func _physics_process(delta: float) -> void:
 		budget -= 1
 		thinks += 1
 		b.think(now)
-		b.c.sim_period = _stride_of(b)
-		b.next_think = now + _interval(b, tg)
+		var near := _near_target(b, tg)
+		b.c.sim_period = _stride_of(b, near)
+		b.next_think = now + _interval(b, near)
 
 
 ## Standing still with nothing in mind: simulated every IDLE_STRIDE-th tick (anything stirring puts it back
 ## to 1: the brain's mode changes, damage, a shove).
-func _stride_of(b: ZombieBrain) -> int:
-	if b.mode != ZombieBrain.Mode.DORMANT and b.mode != ZombieBrain.Mode.IDLE:
-		return 1
+func _stride_of(b: ZombieBrain, near: float) -> int:
 	var s := b.c.state
-	if s.state != MotorState.Id.IDLE or not s.is_grounded() or s.platform_id != 0:
+	if not s.is_grounded() or s.platform_id != 0 or s.state not in [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.CRAWL]:
 		return 1
-	if s.vel.length_squared() > 0.01 or absf(s.turn_v) > 0.01 or absf(angle_difference(s.body_yaw, b.want_yaw)) > 0.05:
-		return 1
-	return IDLE_STRIDE
+	var M := ZombieBrain.Mode
+	if b.mode == M.DORMANT or b.mode == M.IDLE:
+		if s.state != MotorState.Id.IDLE or s.vel.length_squared() > 0.01 or absf(s.turn_v) > 0.01 or absf(angle_difference(s.body_yaw, b.want_yaw)) > 0.05:
+			return 1
+		return IDLE_STRIDE
+	if b.mode == M.CHASE or b.mode == M.INVESTIGATE or b.mode == M.WANDER:
+		if near >= STRIDE_FAR:
+			return 4
+		if near >= STRIDE_MID:
+			return 3
+		if near >= STRIDE_NEAR:
+			return 2
+	return 1
 
 
-## How soon this brain thinks again: by what it's doing and how close prey is.
-func _interval(b: ZombieBrain, tg: Array[UltraCharacter]) -> float:
+## Distance to the nearest living target (99 when there is none).
+func _near_target(b: ZombieBrain, tg: Array[UltraCharacter]) -> float:
 	var near := 99.0
 	for t in tg:
 		near = minf(near, b.c.state.pos.distance_to(t.state.pos))
+	return near
+
+
+## How soon this brain thinks again: by what it's doing and how close prey is.
+func _interval(b: ZombieBrain, near: float) -> float:
 	var base := 0.1
 	match b.mode:
 		ZombieBrain.Mode.CHASE, ZombieBrain.Mode.ATTACK, ZombieBrain.Mode.BASH_DOOR, ZombieBrain.Mode.OPEN_DOOR, ZombieBrain.Mode.STAGGER:
