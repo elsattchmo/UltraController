@@ -4,3 +4,4 @@
 __pycache__/
 art_src/zombie/*.fbx
 tools/tmp/
+/build/
