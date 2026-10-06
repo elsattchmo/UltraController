@@ -1,72 +1,77 @@
 class_name UltraGuts
 extends Node3D
-## A loop of gut hanging out of a torso wound (presentation): a verlet chain whose first point
-## rides the wound on the body (a BoneAttachment3D parent), the rest swinging and settling under
-## gravity, kept off the floor with a ray per point every few frames. Drawn as capsules between
-## the points. Lives until the character respawns (UltraBodyFX clears it).
+## Intestine hanging out of a belly wound (presentation): a verlet chain whose first point rides
+## the wound on the body (`anchor`, a node under a BoneAttachment3D) - a loop when the far end is
+## held in the wound too (`anchor_b`) - swinging and settling under gravity, kept off the floor
+## with a ray per point (round robin). Drawn as one smooth tube along the chain (Catmull-Rom),
+## bulging and pinching in sections like gut, wet and pink-grey. Lives until the character
+## respawns (UltraBodyFX clears it).
 
-const SEG_LEN := 0.06
-const RADIUS := 0.022
+const RADIUS := 0.017
+const SIDES := 8
+const SUB := 3                      ## tube rings per chain segment
 
-var anchor: Node3D                  ## follows the wound
-## A loop: the far end is held in the wound too (`anchor_b`), the middle sags out and down.
+var anchor: Node3D
 var anchor_b: Node3D
-var segments := 9
-var _p := PackedVector3Array()
-var _q := PackedVector3Array()      ## previous positions
-var _parts: Array[MeshInstance3D] = []
-var _floor := PackedFloat32Array()
-var _ray_i := 0
+var segments := 12
+var seg_len := 0.045
 var exclude: Array[RID] = []
 
+var _p := PackedVector3Array()
+var _q := PackedVector3Array()      ## previous positions
+var _floor := PackedFloat32Array()
+var _ray_i := 0
+var _mesh := ImmediateMesh.new()
+var _mi := MeshInstance3D.new()
+var _bump := 0.0
 
 static var _mat: StandardMaterial3D
-static var _mesh: CapsuleMesh
 
 
 static func gut_mat() -> StandardMaterial3D:
 	if _mat == null:
 		_mat = StandardMaterial3D.new()
-		_mat.albedo_color = Color(0.72, 0.36, 0.36)
 		var tex := NoiseTexture2D.new()
 		tex.width = 64
 		tex.height = 64
 		tex.seamless = true
 		var n := FastNoiseLite.new()
-		n.frequency = 0.12
+		n.frequency = 0.09
+		n.fractal_octaves = 3
 		tex.noise = n
 		var g := Gradient.new()
-		g.set_color(0, Color(0.55, 0.16, 0.2))
-		g.set_color(1, Color(0.95, 0.62, 0.6))
+		g.set_color(0, Color(0.62, 0.3, 0.33))
+		g.set_color(1, Color(0.93, 0.68, 0.66))
+		g.add_point(0.55, Color(0.82, 0.5, 0.5))
 		tex.color_ramp = g
 		_mat.albedo_texture = tex
-		_mat.roughness = 0.15
-		_mat.metallic_specular = 0.9
+		_mat.roughness = 0.25
+		_mat.metallic_specular = 0.8
+		_mat.clearcoat_enabled = true
+		_mat.clearcoat = 1.0
+		_mat.clearcoat_roughness = 0.1
 		_mat.rim_enabled = true
-		_mat.rim = 0.25
+		_mat.rim = 0.2
+		_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return _mat
 
 
 func _ready() -> void:
 	top_level = true
+	_bump = randf() * TAU
+	_mi.mesh = _mesh
+	_mi.material_override = gut_mat()
+	_mi.top_level = true                 # (the tube is built in world space)
+	add_child(_mi)
+	_mi.global_transform = Transform3D.IDENTITY
+	_mi.extra_cull_margin = 2.0
 	var at := anchor.global_position if anchor else global_position
 	for i in segments + 1:
-		var p := at + Vector3(randf_range(-0.01, 0.01), -SEG_LEN * mini(i, segments - i if anchor_b else i) * 0.6, randf_range(-0.01, 0.01))
+		var drop := mini(i, segments - i) if anchor_b else i
+		var p := at + Vector3(randf_range(-0.02, 0.02), -seg_len * drop * 0.55, randf_range(-0.02, 0.02))
 		_p.append(p)
 		_q.append(p)
 		_floor.append(-INF)
-	for i in segments:
-		# Bumpy: each piece its own thickness, a little swollen or pinched.
-		var cm := CapsuleMesh.new()
-		cm.radius = RADIUS * randf_range(0.8, 1.2)
-		cm.height = SEG_LEN + cm.radius * 2.0
-		cm.radial_segments = 8
-		cm.rings = 2
-		var mi := MeshInstance3D.new()
-		mi.mesh = cm
-		mi.material_override = gut_mat()
-		add_child(mi)
-		_parts.append(mi)
 
 
 ## Thrown out of the wound along `v` (m/s) to start with.
@@ -79,20 +84,21 @@ func _physics_process(delta: float) -> void:
 	if anchor == null or not is_instance_valid(anchor):
 		queue_free()
 		return
+	var last := _p.size() - 1
 	_p[0] = anchor.global_position
 	_q[0] = _p[0]
-	var last := _p.size() - 1
-	if anchor_b and is_instance_valid(anchor_b):
+	var pinned_b := anchor_b != null and is_instance_valid(anchor_b)
+	if pinned_b:
 		_p[last] = anchor_b.global_position
 		_q[last] = _p[last]
 	var g := Vector3.DOWN * 9.8 * delta * delta
-	var free_end := _p.size() - (1 if anchor_b else 0)
+	var free_end := _p.size() - (1 if pinned_b else 0)
 	for i in range(1, free_end):
 		var cur := _p[i]
-		var v := (cur - _q[i]) * 0.97
+		var v := (cur - _q[i]) * 0.96
 		_q[i] = cur
 		_p[i] = cur + v + g
-	for it in 4:
+	for it in 5:
 		for i in range(_p.size() - 1):
 			var a := _p[i]
 			var b := _p[i + 1]
@@ -100,15 +106,17 @@ func _physics_process(delta: float) -> void:
 			var l := d.length()
 			if l < 1e-5:
 				continue
-			var corr := d * ((l - SEG_LEN) / l)
-			if i == 0:
+			var corr := d * ((l - seg_len) / l)
+			var a_fixed := i == 0
+			var b_fixed := pinned_b and i + 1 == last
+			if a_fixed and not b_fixed:
 				_p[i + 1] = b - corr
-			elif anchor_b and i + 1 == _p.size() - 1:
+			elif b_fixed and not a_fixed:
 				_p[i] = a + corr
-			else:
+			elif not a_fixed and not b_fixed:
 				_p[i] = a + corr * 0.5
 				_p[i + 1] = b - corr * 0.5
-	# The floor: a ray under one point per frame (round robin), a clamp for all of them.
+	# The floor: a ray under one point per tick (round robin), a clamp for all of them.
 	var space := get_world_3d().direct_space_state
 	_ray_i = (_ray_i + 1) % _p.size()
 	var q := PhysicsRayQueryParameters3D.create(_p[_ray_i] + Vector3.UP * 0.4, _p[_ray_i] + Vector3.DOWN * 1.5, UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC, exclude)
@@ -122,11 +130,62 @@ func _physics_process(delta: float) -> void:
 
 
 func _process(_delta: float) -> void:
-	for i in _parts.size():
-		var a := _p[i]
-		var b := _p[i + 1]
-		var mid := (a + b) * 0.5
-		var d := b - a
-		var up := d.normalized() if d.length() > 1e-5 else Vector3.UP
-		var side := up.cross(Vector3.FORWARD if absf(up.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT).normalized()
-		_parts[i].global_transform = Transform3D(Basis(side, up, side.cross(up)), mid)
+	if _p.size() < 2:
+		return
+	# The chain smoothed into a curve, then a tube round it.
+	var pts := PackedVector3Array()
+	var n := _p.size()
+	for i in n - 1:
+		var p0 := _p[maxi(i - 1, 0)]
+		var p1 := _p[i]
+		var p2 := _p[i + 1]
+		var p3 := _p[mini(i + 2, n - 1)]
+		for k in SUB:
+			var t := float(k) / SUB
+			var t2 := t * t
+			var t3 := t2 * t
+			pts.append(0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3))
+	pts.append(_p[n - 1])
+	_mesh.clear_surfaces()
+	_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	var normal := Vector3.UP
+	var prev_ring: Array[Vector3] = []
+	var prev_n: Array[Vector3] = []
+	var prev_v := 0.0
+	for i in pts.size():
+		var tan := (pts[mini(i + 1, pts.size() - 1)] - pts[maxi(i - 1, 0)]).normalized()
+		if tan.length() < 0.5:
+			tan = Vector3.DOWN
+		# (Parallel transport: the ring doesn't twist along the tube.)
+		normal = (normal - tan * normal.dot(tan))
+		if normal.length() < 1e-3:
+			normal = tan.cross(Vector3.RIGHT if absf(tan.x) < 0.9 else Vector3.FORWARD)
+		normal = normal.normalized()
+		var bin := tan.cross(normal)
+		# Sections: swollen and pinched along the length; the ends taper into the wound.
+		var u := float(i) / (pts.size() - 1)
+		var r := RADIUS * (1.0 + 0.22 * sin(i * 1.3 + _bump)) * clampf(minf(u, 1.0 - u) * 12.0 + 0.55, 0.55, 1.0)
+		var ring: Array[Vector3] = []
+		var norms: Array[Vector3] = []
+		for s in SIDES:
+			var a := TAU * s / SIDES
+			var dn := normal * cos(a) + bin * sin(a)
+			ring.append(pts[i] + dn * r)
+			norms.append(dn)
+		var v := u * 6.0
+		if not prev_ring.is_empty():
+			for s in SIDES:
+				var s2 := (s + 1) % SIDES
+				var quad := [[prev_ring[s], prev_n[s], Vector2(float(s) / SIDES, prev_v)],
+					[ring[s], norms[s], Vector2(float(s) / SIDES, v)],
+					[ring[s2], norms[s2], Vector2(float(s + 1) / SIDES, v)],
+					[prev_ring[s2], prev_n[s2], Vector2(float(s + 1) / SIDES, prev_v)]]
+				for idx in [0, 1, 2, 0, 2, 3]:
+					var vtx: Array = quad[idx]
+					_mesh.surface_set_normal(vtx[1])
+					_mesh.surface_set_uv(vtx[2])
+					_mesh.surface_add_vertex(vtx[0])
+		prev_ring = ring
+		prev_n = norms
+		prev_v = v
+	_mesh.surface_end()

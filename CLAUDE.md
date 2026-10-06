@@ -561,9 +561,16 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   Attachments: work offsets out from the bone's posed transform - a new BoneAttachment3D only
   takes its pose at the next skeleton update. Cleared on respawn (back from dead or hp jumping
   to full - NOT simply "hp is 100": that wiped gore on an undamaged body).
-- Stumps / cut ends (UltraWoundMesh.stump): ragged domed meat (cellular-noise albedo + normal
-  map, wet), a thin skin / fat rim, bone(s) out of it with marrow (2 for forearm / shin), torn
-  flaps - on the body (`_make_cap`) and on the part that flew off (`spawn_gib` -> `_make_gib`).
+- Cut ends are FITTED (UltraWoundMesh.cap(ring, out, bones)): on the body the ring is the posed
+  cross-section of the parent region's skin within 3 cm of the joint (`outline`: per-slice
+  radius held near the median and smoothed - sparse points made a star), sunk 12 mm inside the
+  skin; on the part that flew off it's the mesh's real open edge (`_open_loop`: edges used by one
+  triangle, chained, the loop nearest the joint) - else it showed hollow inside. Cap = thin fat
+  band, a ragged meat dome (cellular noise, clearcoat, double-sided), short broken bone(s) with a
+  shard and marrow (2 for forearm / shin), 1-3 drooping shreds. Craters = the same dished in.
+- Guts (UltraGuts): verlet chain drawn as ONE smooth tube (Catmull-Rom, ImmediateMesh in world
+  space - its MeshInstance top_level at the origin, else it drew offset by the node's position),
+  sections bulging / pinched, ends tapering into the wound; two loops + a hanging length.
 - Melee animation: one-handed melee at rest takes ONLY the weapon arm from the item layer (the
   sword idle is a hunched crouch; filter toggled in AnimDriver, inertial trigger), no
   item_hips_yaw twist; a melee item's "aim" (block) is never its stance (item_hips_yaw / bladed

@@ -40,17 +40,24 @@ static func meat_mat() -> StandardMaterial3D:
 		nt.noise = n
 		_meat.normal_enabled = true
 		_meat.normal_texture = nt
-		_meat.roughness = 0.22
-		_meat.metallic_specular = 0.8
-		_meat.uv1_scale = Vector3(2.0, 2.0, 1.0)
+		_meat.roughness = 0.3
+		_meat.metallic_specular = 0.7
+		_meat.clearcoat_enabled = true              # (wet)
+		_meat.clearcoat = 0.8
+		_meat.clearcoat_roughness = 0.15
+		_meat.uv1_scale = Vector3(3.0, 3.0, 1.0)
+		_meat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_meat.vertex_color_use_as_albedo = true
 	return _meat
 
 
 static func fat_mat() -> StandardMaterial3D:
 	if _fat == null:
 		_fat = StandardMaterial3D.new()
-		_fat.albedo_color = Color(0.86, 0.62, 0.48)            # (skin edge and fat, blood-stained)
-		_fat.roughness = 0.35
+		_fat.albedo_color = Color(0.86, 0.6, 0.42)             # (the fat under the skin, blood-stained)
+		_fat.roughness = 0.6
+		_fat.metallic_specular = 0.3
+		_fat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return _fat
 
 
@@ -156,23 +163,177 @@ static func stump(radius: float, rng_seed: int, bones := 1) -> Node3D:
 	return root
 
 
-## A crater blown into the body (a torso hit by a blast): meat sunk into the surface, ragged
-## skin and fat round it, a rib or two showing. +Y out of the body.
-static func crater(radius: float, rng_seed: int) -> Node3D:
-	var root := stump(radius, rng_seed, 0)
-	(root.get_child(0) as Node3D).scale = Vector3(1.0, -0.7, 1.0)    # (dished in, not domed out)
+## The cut end fitted to the real cut: `ring` (points round the edge of the cut, in order, in
+## the parent's space), `out` pointing out of the wound. A thin band of yellow fat just inside
+## the skin, the meat raised in a ragged dome, darker and wetter in the middle, the bone(s)
+## broken off standing out of it with marrow in the end, a few torn muscle strands hanging out.
+static func cap(ring: PackedVector3Array, out: Vector3, bones: int, rng_seed: int, dome := 1.0, strands := true) -> Node3D:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = rng_seed + 17
-	for i in rng.randi_range(1, 2):
-		var rib := MeshInstance3D.new()
-		var cm := CapsuleMesh.new()
-		cm.radius = radius * 0.07
-		cm.height = radius * 1.4
-		cm.radial_segments = 6
+	rng.seed = rng_seed
+	var root := Node3D.new()
+	root.name = "Stump"
+	var n := ring.size()
+	if n < 3:
+		return root
+	out = out.normalized()
+	var c := Vector3.ZERO
+	for v in ring:
+		c += v
+	c /= n
+	var rad := 0.0
+	for v in ring:
+		rad += (v - c).length()
+	rad /= n
+	# Fat band (rim -> 88 % in), then meat: a middle ring raised and jittered, the centre higher.
+	var inner := PackedVector3Array()
+	var mid := PackedVector3Array()
+	for v in ring:
+		var d := v - c
+		inner.append(c + d * 0.88 + out * rad * 0.04)
+		mid.append(c + d * rng.randf_range(0.5, 0.6) + out * rad * rng.randf_range(0.14, 0.22) * dome)
+	var top := c + out * rad * 0.3 * dome
+	var fat := SurfaceTool.new()
+	fat.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var meat := SurfaceTool.new()
+	meat.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var col_edge := Color(0.8, 0.26, 0.24)
+	var col_mid := Color(0.7, 0.18, 0.17)
+	var col_top := Color(0.45, 0.06, 0.07)
+	var tri := func(st: SurfaceTool, a: Vector3, b: Vector3, d: Vector3, ca: Color, cb: Color, cd: Color) -> void:
+		# Wound facing out of the cut.
+		if (b - a).cross(d - a).dot(out) < 0.0:
+			var t := b
+			b = d
+			d = t
+			var tc := cb
+			cb = cd
+			cd = tc
+		for pair: Array in [[a, ca], [b, cb], [d, cd]]:
+			var p: Vector3 = pair[0]
+			st.set_color(pair[1])
+			st.set_uv(Vector2((p - c).dot(out.cross(Vector3.UP if absf(out.y) < 0.9 else Vector3.RIGHT).normalized()), (p - c).dot(out.cross(out.cross(Vector3.UP if absf(out.y) < 0.9 else Vector3.RIGHT)).normalized())) / (rad * 2.0) + Vector2(0.5, 0.5))
+			st.add_vertex(p)
+	for i in n:
+		var j := (i + 1) % n
+		tri.call(fat, ring[i] + out * 0.001, ring[j] + out * 0.001, inner[j], col_edge, col_edge, col_edge)
+		tri.call(fat, ring[i] + out * 0.001, inner[j], inner[i], col_edge, col_edge, col_edge)
+		tri.call(meat, inner[i], inner[j], mid[j], col_edge, col_edge, col_mid)
+		tri.call(meat, inner[i], mid[j], mid[i], col_edge, col_mid, col_mid)
+		tri.call(meat, mid[i], mid[j], top, col_mid, col_mid, col_top)
+	fat.generate_normals()
+	meat.generate_normals()
+	var fm := MeshInstance3D.new()
+	fm.mesh = fat.commit()
+	fm.material_override = fat_mat()
+	root.add_child(fm)
+	var mm := MeshInstance3D.new()
+	mm.mesh = meat.commit()
+	mm.material_override = meat_mat()
+	root.add_child(mm)
+	# The bone(s), snapped off: a shaft out of the meat, a sharp shard on one side, marrow.
+	var side := out.cross(Vector3.UP if absf(out.y) < 0.9 else Vector3.RIGHT).normalized()
+	for b in bones:
+		var off := Vector3.ZERO if bones == 1 else side * (b - 0.5) * rad * 0.75
+		var br := rad * (0.24 if bones == 1 else 0.15)
+		var len := rad * rng.randf_range(0.25, 0.45)
+		var axis := (out + side * rng.randf_range(-0.15, 0.15)).normalized()
+		var bone := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = br * 0.85
+		cm.bottom_radius = br
+		cm.height = len
+		cm.radial_segments = 8
 		cm.rings = 1
-		rib.mesh = cm
-		rib.material_override = bone_mat()
-		rib.position = Vector3(rng.randf_range(-0.3, 0.3) * radius, -radius * 0.12, (i - 0.5) * radius * 0.6)
-		rib.rotation = Vector3(0, 0, PI * 0.5)
-		root.add_child(rib)
+		bone.mesh = cm
+		bone.material_override = bone_mat()
+		bone.transform = Transform3D(Basis(Quaternion(Vector3.UP, axis)), c + off + axis * len * 0.5)
+		root.add_child(bone)
+		var shard := MeshInstance3D.new()
+		var sh := CylinderMesh.new()
+		sh.top_radius = 0.0
+		sh.bottom_radius = br * 0.5
+		sh.height = len * 0.45
+		sh.radial_segments = 5
+		sh.rings = 1
+		shard.mesh = sh
+		shard.material_override = bone_mat()
+		shard.position = Vector3(br * 0.5, len * 0.5 + sh.height * 0.4, 0)
+		bone.add_child(shard)
+		var mar := MeshInstance3D.new()
+		var mc := CylinderMesh.new()
+		mc.top_radius = br * 0.5
+		mc.bottom_radius = br * 0.5
+		mc.height = 0.003
+		mc.radial_segments = 8
+		mar.mesh = mc
+		mar.material_override = marrow_mat()
+		mar.position = Vector3(0, len * 0.5 + 0.0015, 0)
+		bone.add_child(mar)
+	# Torn shreds of muscle drooping out of the meat (rounded, not spikes).
+	for k in (rng.randi_range(1, 3) if strands else 0):
+		var i := rng.randi() % n
+		var from := c.lerp(mid[i], rng.randf_range(0.5, 0.9)) + out * rad * 0.05
+		var dir := (out * rng.randf_range(0.3, 0.6) + Vector3.DOWN * rng.randf_range(0.7, 1.0) + side * rng.randf_range(-0.3, 0.3)).normalized()
+		var len := rad * rng.randf_range(0.35, 0.6)
+		var strand := MeshInstance3D.new()
+		var sm := CapsuleMesh.new()
+		sm.radius = rad * rng.randf_range(0.07, 0.11)
+		sm.height = len
+		sm.radial_segments = 6
+		sm.rings = 2
+		strand.mesh = sm
+		strand.material_override = meat_mat()
+		strand.transform = Transform3D(Basis(Quaternion(Vector3.UP, dir)), from + dir * len * 0.4)
+		strand.scale = Vector3(1.0, 1.0, 0.6)
+		root.add_child(strand)
+	return root
+
+
+## A ring of `segs` points round a cross-section: from points `pts` (any order) near a plane
+## through `c` with normal `axis`, the farthest out in each angular slice (an irregular outline
+## that fits the limb), pulled out a little so it covers the skin.
+static func outline(pts: PackedVector3Array, c: Vector3, axis: Vector3, segs := 18, grow := 1.06) -> PackedVector3Array:
+	axis = axis.normalized()
+	var u := axis.cross(Vector3.UP if absf(axis.y) < 0.9 else Vector3.RIGHT).normalized()
+	var w := axis.cross(u)
+	var best := PackedFloat32Array()
+	best.resize(segs)
+	best.fill(0.0)
+	for p in pts:
+		var d := p - c
+		d -= axis * d.dot(axis)
+		var a := atan2(d.dot(w), d.dot(u))
+		var k := int(floor((a + PI) / TAU * segs)) % segs
+		best[k] = maxf(best[k], d.length())
+	# Sparse points made spikes: each slice is held near the median radius (empty slices take
+	# it), then smoothed with its neighbours - a limb's outline, not a star.
+	var vals: Array[float] = []
+	for k in segs:
+		if best[k] > 0.0:
+			vals.append(best[k])
+	vals.sort()
+	var med: float = vals[vals.size() / 2] if not vals.is_empty() else 0.04
+	var held := PackedFloat32Array()
+	for k in segs:
+		held.append(clampf(best[k], med * 0.8, med * 1.15) if best[k] > 0.0 else med)
+	var out := PackedVector3Array()
+	for k in segs:
+		var r := (held[(k + segs - 1) % segs] + held[k] * 2.0 + held[(k + 1) % segs]) * 0.25
+		var a := (float(k) + 0.5) / segs * TAU - PI
+		out.append(c + (u * cos(a) + w * sin(a)) * r * grow)
+	return out
+
+
+## A crater blown into the body (a blast into the torso): `radius` round the middle, in a plane
+## facing +Y, the meat dished in under a ragged edge - a fitted cap turned inside out.
+static func crater(radius: float, rng_seed: int) -> Node3D:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = rng_seed
+	var ring := PackedVector3Array()
+	for k in 16:
+		var a := TAU * k / 16.0
+		var r := radius * rng.randf_range(0.8, 1.15)
+		ring.append(Vector3(cos(a) * r, rng.randf_range(-0.004, 0.004), sin(a) * r))
+	var root := cap(ring, Vector3.UP, 0, rng_seed, -0.9, false)
+	# Torn strands of muscle round the edge, hanging down out of it.
 	return root

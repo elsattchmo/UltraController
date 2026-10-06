@@ -18,6 +18,12 @@ const CAP_RADIUS := {
 	R.HAND_L: 0.032, R.HAND_R: 0.032, R.FOOT_L: 0.04, R.FOOT_R: 0.04,
 }
 const MAX_GIBS := 32
+## The region a cut through `r` leaves the stump on.
+const PARENT_REGION := {
+	R.HEAD: R.TORSO, R.ARM_L: R.TORSO, R.ARM_R: R.TORSO, R.THIGH_L: R.TORSO, R.THIGH_R: R.TORSO,
+	R.FOREARM_L: R.ARM_L, R.FOREARM_R: R.ARM_R, R.HAND_L: R.FOREARM_L, R.HAND_R: R.FOREARM_R,
+	R.SHIN_L: R.THIGH_L, R.SHIN_R: R.THIGH_R, R.FOOT_L: R.SHIN_L, R.FOOT_R: R.SHIN_R,
+}
 ## Bones showing in a cut through the region (a forearm / shin has two).
 const BONES_IN := {R.FOREARM_L: 2, R.FOREARM_R: 2, R.SHIN_L: 2, R.SHIN_R: 2}
 
@@ -206,11 +212,38 @@ func _make_cap(r: int) -> Node3D:
 	var child := sk.find_bone(UltraLimbs.BONES[r][0])
 	var at := sk.get_bone_rest(child).origin
 	var rad: float = CAP_RADIUS[r]
-	# The open end of the limb: meat, skin and fat, bone(s) standing out, torn flaps (not a ball).
-	var stump := UltraWoundMesh.stump(rad * 1.15, randi(), BONES_IN[r] if BONES_IN.has(r) else 1)
-	var dir := at.normalized() if at.length() > 0.001 else Vector3.UP
-	stump.transform = Transform3D(Basis(Quaternion(Vector3.UP, dir)), at)
-	att.add_child(stump)
+	var bones: int = BONES_IN[r] if BONES_IN.has(r) else 1
+	# The open end of the limb, fitted to its cross-section at the joint (the posed skin of the
+	# limb it was cut from, within a couple of cm of the cut): fat, meat, bone, torn strands.
+	# (From the bone's posed transform: a new attachment only takes it next update.)
+	var parent_xf := sk.global_transform * sk.get_bone_global_pose(sk.find_bone(PARENT_BONE[r]))
+	var joint := sk.global_transform * sk.get_bone_global_pose(child).origin
+	var axis := (joint - parent_xf.origin).normalized() if joint.distance_to(parent_xf.origin) > 0.01 else parent_xf.basis.y.normalized()
+	var ring := PackedVector3Array()
+	var bm := character.body_mesh()
+	if PARENT_REGION.has(r) and bm and bm.mesh and bm.skin:
+		var tris: Array = []
+		_collect_tris(bm, 1 << int(PARENT_REGION[r]), tris, joint, rad * 2.2)
+		var pts := PackedVector3Array()
+		for t: Array in tris:
+			for j in 3:
+				var v: Vector3 = t[j]
+				if absf((v - joint).dot(axis)) < 0.03:
+					pts.append(v)
+		if pts.size() >= 8:
+			ring = UltraWoundMesh.outline(pts, joint - axis * 0.012, axis, 18, 0.93)     # (sunk inside the skin's edge)
+	if ring.is_empty():
+		var u := axis.cross(Vector3.UP if absf(axis.y) < 0.9 else Vector3.RIGHT).normalized()
+		var w := axis.cross(u)
+		for k in 16:
+			var a := TAU * k / 16.0
+			ring.append(joint + (u * cos(a) + w * sin(a)) * rad * 1.1)
+	var inv := parent_xf.affine_inverse()
+	var local := PackedVector3Array()
+	for v in ring:
+		local.append(inv * v)
+	var cap := UltraWoundMesh.cap(local, (inv.basis * axis).normalized(), bones, randi())
+	att.add_child(cap)
 	return att
 
 
@@ -373,20 +406,20 @@ func _spill_guts(dir: Vector3) -> void:
 	var out_l := (bone_xf.basis.inverse() * front).normalized()
 	w.transform = Transform3D(Basis(Quaternion(Vector3.UP, out_l)), inv * belly - out_l * 0.055)    # (sunk: the skin covers its rim)
 	att.add_child(w)
-	for k in 2:
+	# Two loops sagging out of the belly (both ends inside) and a loose length hanging below.
+	var specs := [[side * 0.035, -side * 0.04 + Vector3.UP * 0.025, 13], [-side * 0.01 + Vector3.DOWN * 0.02, side * 0.045 + Vector3.DOWN * 0.01, 9], [-side * 0.03, Vector3.INF, 10]]
+	for spec: Array in specs:
 		var a := Node3D.new()
-		a.position = inv * (belly + side * (0.03 if k == 0 else -0.04))
+		a.position = inv * (belly + (spec[0] as Vector3))
 		att.add_child(a)
 		var guts := UltraGuts.new()
 		guts.anchor = a
-		if k == 0:
+		guts.segments = int(spec[2])
+		if spec[1] != Vector3.INF:
 			var b := Node3D.new()
-			b.position = inv * (belly - side * 0.05 + Vector3.UP * 0.03)
+			b.position = inv * (belly + (spec[1] as Vector3))
 			att.add_child(b)
 			guts.anchor_b = b
-			guts.segments = 16
-		else:
-			guts.segments = 11
 		guts.exclude = [character.get_rid()]
 		root.add_child(guts)
 		guts.global_position = belly
@@ -617,12 +650,22 @@ func _make_gib(tris: Array, group: Array, center: Vector3, vel: Vector3, chunk: 
 		f.position = aabb.get_center() * 0.6
 		body.add_child(f)
 	if not chunk and _cap_r > 0.0 and _cap_at != Vector3.INF:
-		# The part that came off is open at the cut too.
-		var local := _cap_at - center
-		var out := local.normalized() if local.length() > 0.001 else Vector3.UP
-		var stump := UltraWoundMesh.stump(_cap_r * 1.1, randi(), _cap_bones)
-		stump.transform = Transform3D(Basis(Quaternion(Vector3.UP, out)), local)
-		body.add_child(stump)
+		# The part that came off is open at the cut: fill its real open edge (the loop of
+		# triangle edges used once, nearest the joint) - a hollow shell showed inside otherwise.
+		var loop := _open_loop(tris, group, _cap_at, _cap_r * 3.0)
+		var out := (_cap_at - center).normalized() if _cap_at.distance_to(center) > 0.001 else Vector3.UP
+		var ring := PackedVector3Array()
+		if loop.size() >= 3:
+			for v in loop:
+				ring.append(v - center)
+		else:
+			var u := out.cross(Vector3.UP if absf(out.y) < 0.9 else Vector3.RIGHT).normalized()
+			var w := out.cross(u)
+			for k in 16:
+				var a := TAU * k / 16.0
+				ring.append(_cap_at - center + (u * cos(a) + w * sin(a)) * _cap_r * 1.1)
+		var cap := UltraWoundMesh.cap(ring, out, _cap_bones, randi())
+		body.add_child(cap)
 	var cs := CollisionShape3D.new()
 	var bx := BoxShape3D.new()
 	bx.size = aabb.size.clamp(Vector3.ONE * (0.025 if chunk else 0.06), Vector3.ONE * 2.0) * 0.85
@@ -656,6 +699,68 @@ func _make_gib(tris: Array, group: Array, center: Vector3, vel: Vector3, chunk: 
 	var fx := UltraEffects.instance()
 	if chunk and fx and fx.blood_fx and character.damage_profile.blood_on():
 		fx.blood_fx.spray(center, vel, 3, vel.length() * 0.8, 15.0, 0.007)
+
+
+## The open edge of a set of triangles (edges used by only one of them), chained into loops;
+## the loop whose middle is nearest `near` (within `max_d`), in order. Empty if none.
+static func _open_loop(tris: Array, group: Array, near: Vector3, max_d: float) -> PackedVector3Array:
+	var key := func(v: Vector3) -> Vector3i: return Vector3i(roundi(v.x * 4000.0), roundi(v.y * 4000.0), roundi(v.z * 4000.0))
+	var count := {}
+	var pos := {}
+	for k: int in group:
+		var t: Array = tris[k]
+		for j in 3:
+			var a: Vector3 = t[j]
+			var b: Vector3 = t[(j + 1) % 3]
+			var ka: Vector3i = key.call(a)
+			var kb: Vector3i = key.call(b)
+			if ka == kb:
+				continue
+			pos[ka] = a
+			pos[kb] = b
+			var e := [ka, kb] if str(ka) < str(kb) else [kb, ka]
+			var ek := "%s|%s" % e
+			count[ek] = int(count.get(ek, 0)) + 1
+			if not count.has(ek + "#"):
+				count[ek + "#"] = e
+	var nbr := {}
+	for ek: String in count:
+		if ek.ends_with("#") or int(count[ek]) != 1:
+			continue
+		var e: Array = count[ek + "#"]
+		(nbr.get_or_add(e[0], []) as Array).append(e[1])
+		(nbr.get_or_add(e[1], []) as Array).append(e[0])
+	var seen := {}
+	var best := PackedVector3Array()
+	var best_d := max_d
+	for start: Vector3i in nbr:
+		if seen.has(start):
+			continue
+		var loop := PackedVector3Array()
+		var prev: Variant = null
+		var cur: Vector3i = start
+		for guard in 4000:
+			seen[cur] = true
+			loop.append(pos[cur])
+			var nx: Variant = null
+			for m: Vector3i in nbr[cur]:
+				if m != prev and not seen.has(m):
+					nx = m
+					break
+			if nx == null:
+				break
+			prev = cur
+			cur = nx
+		if loop.size() < 3:
+			continue
+		var c := Vector3.ZERO
+		for v in loop:
+			c += v
+		c /= loop.size()
+		if c.distance_to(near) < best_d:
+			best_d = c.distance_to(near)
+			best = loop
+	return best
 
 
 ## `n` directions spread evenly over a sphere (Fibonacci).
