@@ -16,7 +16,9 @@ var glance_target := Vector3.ZERO
 var glance_weight := 0.0
 var weight := 0.0
 var speed := 4.0
-var _cur := Vector3.ZERO
+var _rel := NAN                     ## target yaw off the chest, unwrapped (continuous)
+var _yaw := 0.0                     ## yaw / pitch the head is turned (smoothed)
+var _pitch := 0.0
 
 var _neck := -1
 var _head := -1
@@ -51,10 +53,11 @@ func _process_modification_with_delta(delta: float) -> void:
 	var goal_w := want_weight if use_poi else glance_weight
 	var goal_p := target if use_poi else glance_target
 	weight = move_toward(weight, goal_w, delta * speed)
-	_cur = goal_p if _cur == Vector3.ZERO else _cur.lerp(goal_p, 1.0 - exp(-10.0 * delta))
 	if sk == null or _head < 0 or weight <= 0.001:
 		return
-	var t_sk := sk.global_transform.affine_inverse() * _cur
+	# (Turned toward as angles, not by easing a world point: a point eased across to a target
+	# behind passed through the head itself.)
+	var t_sk := sk.global_transform.affine_inverse() * goal_p
 	var head := sk.get_bone_global_pose(_head)
 	var to := t_sk - head.origin
 	if to.length() < 0.2:
@@ -64,8 +67,20 @@ func _process_modification_with_delta(delta: float) -> void:
 	chest_fwd.y = 0.0
 	chest_fwd = chest_fwd.normalized()
 	var flat := Vector3(to.x, 0, to.z).normalized()
-	var yaw := clampf(chest_fwd.signed_angle_to(flat, Vector3.UP), -deg_to_rad(max_yaw_deg), deg_to_rad(max_yaw_deg))
-	var pitch := clampf(atan2(to.y, Vector2(to.x, to.z).length()), -deg_to_rad(max_pitch_deg), deg_to_rad(max_pitch_deg))
+	# The yaw kept continuous through the back (a target swung round behind stays over the
+	# shoulder it went round - wrapped, the clamped yaw flipped from one side to the other).
+	var raw := chest_fwd.signed_angle_to(flat, Vector3.UP)
+	if is_nan(_rel):
+		_rel = raw
+	var u := _rel + angle_difference(wrapf(_rel, -PI, PI), raw)
+	if absf(u) > deg_to_rad(200.0):
+		u = raw
+	_rel = u
+	var k := 1.0 - exp(-12.0 * delta)
+	_yaw = lerpf(_yaw, clampf(u, -deg_to_rad(max_yaw_deg), deg_to_rad(max_yaw_deg)), k)
+	_pitch = lerpf(_pitch, clampf(atan2(to.y, Vector2(to.x, to.z).length()), -deg_to_rad(max_pitch_deg), deg_to_rad(max_pitch_deg)), k)
+	var yaw := _yaw
+	var pitch := _pitch
 	var w := smoothstep(0.0, 1.0, weight)
 	for pair in [[_neck, neck_share], [_head, 1.0 - neck_share]]:
 		var b: int = pair[0]

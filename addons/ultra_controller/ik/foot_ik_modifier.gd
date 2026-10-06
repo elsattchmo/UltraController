@@ -104,8 +104,14 @@ func _process_modification_with_delta(delta: float) -> void:
 	var want := minf(minf(ground_h[0], ground_h[1]), 0.0)
 	want = maxf(want, -max_pelvis_drop) * w
 	var k := 160.0
-	_pelvis_vel += ((want - pelvis_drop) * k - _pelvis_vel * 2.0 * sqrt(k) * 0.9) * delta
-	pelvis_drop += _pelvis_vel * delta
+	# (Explicit: unstable past ~70 ms a frame - a sustained low frame rate grew it to NaN. The
+	# step is capped and substepped.)
+	var dtp := clampf(delta, 0.0, 0.1)
+	var ns := int(ceil(dtp / 0.02))
+	for _i in ns:
+		var h := dtp / ns
+		_pelvis_vel += ((want - pelvis_drop) * k - _pelvis_vel * 2.0 * sqrt(k) * 0.9) * h
+		pelvis_drop += _pelvis_vel * h
 	pelvis_drop = clampf(pelvis_drop, -max_pelvis_drop, 0.05)
 	if w <= 0.001 and absf(pelvis_drop) < 0.001:
 		reset_locks()

@@ -284,13 +284,16 @@ static func _free_aim(c: UltraCharacter, s: MotorState, i: InputFrame, def: Item
 		s.sway = Vector2.ZERO
 		s.sway_v = Vector2.ZERO
 		s.gun_low = 0.0
+		s.ads_w = 0.0
 		return
 	# A snap of the aim (spawn, teleport, respawn) isn't a turn.
 	if absf(dyaw) > 0.5 or absf(dpitch) > 0.5:
 		dyaw = 0.0
 		dpitch = 0.0
 	var ads := i.has(InputFrame.B_SECONDARY) and s.action == Action.READY
-	var calm := def.ads_sway_mult if ads else 1.0
+	s.ads_w = move_toward(s.ads_w, 1.0 if ads else 0.0, dt * 8.0)
+	var aw := smoothstep(0.0, 1.0, s.ads_w)
+	var calm := lerpf(1.0, def.ads_sway_mult, aw)
 	if s.stance != MotorState.Stance.STAND:
 		calm *= 0.6
 	var shaky := UltraInjury.aim_mult(s, c.damage_profile)
@@ -317,7 +320,7 @@ static func _free_aim(c: UltraCharacter, s: MotorState, i: InputFrame, def: Item
 		var k := smoothstep(0.0, 1.0, s.gun_low)
 		target += Vector2(deg_to_rad(def.sprint_lower_deg.x) * side, deg_to_rad(def.sprint_lower_deg.y)) * k
 	# Inertia: the gun doesn't follow all of this tick's turn straight away.
-	var lag := def.sway_inertia * (calm if ads else 1.0) * clampf(shaky, 1.0, 2.0)
+	var lag := def.sway_inertia * lerpf(1.0, calm, aw) * clampf(shaky, 1.0, 2.0)
 	s.sway -= Vector2(dyaw, dpitch) * lag
 	# Damped spring toward the target (semi-implicit Euler: stable at 60 Hz).
 	var w := TAU * def.sway_return_hz
@@ -325,7 +328,7 @@ static func _free_aim(c: UltraCharacter, s: MotorState, i: InputFrame, def: Item
 	s.sway_v += acc * dt
 	s.sway += s.sway_v * dt
 	# Free-aim zone around the target: past it the gun drags along (and loses its swing).
-	var zone := deg_to_rad(def.free_aim_deg) * (calm if ads else 1.0) * clampf(shaky, 1.0, 1.5)
+	var zone := deg_to_rad(def.free_aim_deg) * lerpf(1.0, calm, aw) * clampf(shaky, 1.0, 1.5)
 	var d := s.sway - target
 	for k in 2:
 		if absf(d[k]) > zone:

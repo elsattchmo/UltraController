@@ -87,6 +87,12 @@ var _crawl_speed := 0.76
 var _lean := Vector2.ZERO
 var _lean_vel := Vector2.ZERO
 var _warp := 0.0
+## The hips' turn toward travel: a target set by the gait code (the backwards / side-step /
+## crawl-direction choices flip it), followed once a frame with its speed and acceleration
+## capped - an exponential chase moved ~20 deg in the first frame of a flip (a pop at the head,
+## far from the hips when crawling).
+var _warp_to := 0.0
+var _warp_st := Vector2.ZERO
 var _backwards := false
 var _side_step := false             ## walking: side-step cycle (vs forward walk) in use
 var _side_g := 0.0
@@ -635,8 +641,16 @@ func _build() -> AnimationNodeBlendTree:
 	item.connect_node("pose", 0, "low")
 	item.connect_node("pose", 1, "aim")
 	var fire := AnimationNodeOneShot.new()
+	fire.fadein_curve = _ease_curve()
+	fire.fadeout_curve = _ease_curve()
 	fire.fadein_time = 0.02
 	fire.fadeout_time = 0.12
+	# Never the neck or head: the shot clip restarts from its first frame every round, and the
+	# first-person eye rides the head - auto fire shook the view with every shot.
+	fire.filter_enabled = true
+	for b in _upper_body_bones():
+		if b != "Neck" and b != "Head":
+			fire.set_filter_path(NodePath("%GeneralSkeleton:" + b), true)
 	item.add_node("fire", fire, Vector2(400, 50))
 	var fire_clip := AnimationNodeAnimation.new()
 	item.add_node("fire_clip", fire_clip, Vector2(200, 200))
@@ -656,6 +670,8 @@ func _build() -> AnimationNodeBlendTree:
 	item.connect_node("fire", 0, "carry")
 	item.connect_node("fire", 1, "fire_clip")
 	var reload := AnimationNodeOneShot.new()
+	reload.fadein_curve = _ease_curve()       # (eased: a linear fade popped at its start)
+	reload.fadeout_curve = _ease_curve()
 	reload.fadein_time = 0.12
 	reload.fadeout_time = 0.2
 	for os: AnimationNodeOneShot in [fire, reload]:
@@ -1099,7 +1115,7 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 		if side_k > 0.0 and speed < side_r and not backwards:
 			clamped = clamped.lerp(Vector2(signf(bp.x) * side_r, 0.0), side_k)
 			rate = lerpf(rate, maxf(speed / side_r, 0.4), side_k)
-	_warp = lerp_angle(_warp, target_warp, 1.0 - exp(-10.0 * delta))
+	_warp_to = target_warp
 	# Limp: the cycle hurries through the bad leg's stance (short step) and lingers on the good
 	# one, so the asymmetry comes from the real clip's timing rather than an overlay.
 	if limp > 0.0 and moving and skeleton:
@@ -1179,13 +1195,18 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	tree.set(LOCO + "crawl/mix/blend_amount", 1.0)
 	if state in [MotorState.Id.CROUCH, MotorState.Id.CRAWL] and moving and not prone_armed():
 		var rel2 := angle_difference(PI if backwards else 0.0, theta)
-		_warp = lerp_angle(_warp, clampf(rel2, -1.2, 1.2), 1.0 - exp(-10.0 * delta))
+		_warp_to = clampf(rel2, -1.2, 1.2)
 	_drive_prone(local_v, speed, moving, delta)
 
 
 ## Prone with a firearm in hand: the directional crawl / roll set and the prone item roles.
 ## (A melee weapon lying down is just held at your side on the plain crawl - the rifle prone
 ## pose looked wrong with it.)
+## Getting down to prone or back up (the transition clip plays).
+func prone_transitioning() -> bool:
+	return _cur_loco == "prone_down" or _cur_loco == "prone_up"
+
+
 func prone_armed() -> bool:
 	return state == MotorState.Id.CRAWL and held_def != null and held_def.kind == ItemDefinition.Kind.FIREARM 		and _role_anim(&"prone_idle") != null
 
@@ -1197,6 +1218,7 @@ var _prone_dir := Vector2.ZERO
 var _prone_axis := Vector2.ZERO
 var _prev_body_yaw := 0.0
 var _prone_turn := 0.0
+var _prone_side := 0.0
 var prone_moving := 0.0                ## 0..1 crawling (the item layer gives the arms over to it)
 
 
@@ -1207,7 +1229,7 @@ func _drive_prone(local_v: Vector2, speed: float, moving: bool, delta: float) ->
 	if not prone_armed():
 		prone_moving = 0.0
 		return
-	_warp = lerp_angle(_warp, 0.0, 1.0 - exp(-10.0 * delta))      # (the clips move each way)
+	_warp_to = 0.0                    # (the clips move each way)
 	# Nearest of the four directions, with a little hysteresis (mixing a crawl with a roll on a
 	# diagonal looked like neither).
 	if moving:
@@ -1225,7 +1247,9 @@ func _drive_prone(local_v: Vector2, speed: float, moving: bool, delta: float) ->
 	_prone_turn = move_toward(_prone_turn, 1.0 if turning else 0.0, delta * 5.0)
 	tree.set(LOCO + "prone/turn/blend_amount", smoothstep(0.0, 1.0, _prone_turn))
 	if turning:
-		tree.set(LOCO + "prone/turn_side/blend_amount", 1.0 if yaw_rate < 0.0 else 0.0)
+		_prone_side = 1.0 if yaw_rate < 0.0 else 0.0
+	# (Eased: switched, a flick the other way while pivoting cut from one turn clip to the other.)
+	tree.set(LOCO + "prone/turn_side/blend_amount", _ease_w(&"prone_side", _prone_side, delta))
 
 
 ## The gait speed on a spring (half-life GAIT_HALFLIFE); it starts from the real speed.
@@ -1278,6 +1302,8 @@ var _turn_dir := 0                  ## -1 left, +1 right, 0 none
 var _turn_from := 0.0
 var _turn_p := 0.0                  ## 0..1 of this turn done
 var _turn_w := 0.0
+var _turn_side_w := [0.0, 0.0]      ## left / right turn clip weights
+var _turn_side_p := [0.0, 0.0]      ## left / right turn clip progress
 
 
 ## Insert a turn blend (left clip, `idle_node`, right clip) into `bt`; returns the node to use
@@ -1397,26 +1423,30 @@ func _drive_turn(moving: bool, delta: float) -> void:
 				inertial.trigger()
 			_turn_dir = dir
 			_turn_from = body_yaw
-			_turn_p = 0.0
+			_turn_side_p[0 if dir < 0 else 1] = 0.0
 		var done := absf(angle_difference(_turn_from, body_yaw))
 		var rest := absf(angle_difference(body_yaw, aim_yaw))
-		_turn_p = maxf(_turn_p, done / maxf(done + rest, 0.01))
-	elif _turn_dir != 0:
-		_turn_p = move_toward(_turn_p, 1.0, delta * 2.0)
-	# In quickly (the feet must start stepping as the body starts turning), out over ~0.3 s.
-	_turn_w = move_toward(_turn_w, 1.0 if on else 0.0, delta * (8.0 if on else 3.5))
+		var i := 0 if _turn_dir < 0 else 1
+		_turn_side_p[i] = maxf(_turn_side_p[i], done / maxf(done + rest, 0.01))
+	# Each side's clip has its own weight: in quickly (the feet must start stepping as the body
+	# starts turning), out over ~0.3 s. A flip of direction fades one side out while the other
+	# comes in - as one signed amount it jumped from the left clip to the right in a frame (a
+	# 770 m/s^2 hips pop flicking the aim left and right while crouched; m12 fuzz).
+	for k in 2:
+		var want := on and _turn_dir == (-1 if k == 0 else 1)
+		_turn_side_w[k] = move_toward(_turn_side_w[k], 1.0 if want else 0.0, delta * (8.0 if want else 3.5))
+		if not want:
+			_turn_side_p[k] = move_toward(_turn_side_p[k], 1.0, delta * 2.0)
+	_turn_w = maxf(_turn_side_w[0], _turn_side_w[1])
+	_turn_p = _turn_side_p[0 if _turn_dir < 0 else 1]
 	if _turn_w <= 0.0:
 		_turn_dir = 0
-	var amt := float(_turn_dir) * smoothstep(0.0, 1.0, _turn_w)
-	# The turn clip's own quick steps are real motion (played from the body's turn): don't
-	# smooth them as if they were jumps.
-	if inertial:
-		inertial.detect = _turn_w < 0.05
+	var amt := smoothstep(0.0, 1.0, _turn_side_w[1]) - smoothstep(0.0, 1.0, _turn_side_w[0])
 	for n: Array in _turn_nodes:
 		tree.set(n[0] + "_turn/blend_amount", amt)
-		if _turn_dir != 0:
-			var i := 0 if _turn_dir < 0 else 1
-			tree.set("%s_seek%d/seek_request" % [n[0], i], _turn_time(n[1 + i], _turn_p))
+		for k in 2:
+			if _turn_side_w[k] > 0.0:
+				tree.set("%s_seek%d/seek_request" % [n[0], k], _turn_time(n[1 + k], _turn_side_p[k]))
 
 
 # ---------------------------------------------------------------- neutral locomotion
@@ -1607,6 +1637,7 @@ var _stance_w := 0.0
 ## (first person follows the body then, so both views show the same carry).
 var sprint_carry := 0.0
 const SPRINT_CARRY_SPEED := 4.2
+var _carry_on := false
 const UNARMED_STEADY := 0.45           ## torso_steady at a run with nothing in hand
 const ITEM_STEADY := 0.72              ## ... with a one-handed item (0.85 looked frozen)
 const SPRINT_CARRY_T := 0.225          ## s into e_sprint_f: mid arm pump, rifle level across the chest
@@ -1799,8 +1830,13 @@ func _drive_body(delta: float) -> void:
 		target.x += (1.0 if limp_left else -1.0) * limp * (0.11 if _bad_stance else 0.03)
 	var k := 60.0
 	var c := 2.0 * sqrt(k) * 0.7
-	_lean_vel += ((target - _lean) * k - _lean_vel * c) * delta
-	_lean += _lean_vel * delta
+	# (Substepped and capped: explicit, it flipped the lean past a 135 ms hitch.)
+	var dtl := clampf(delta, 0.0, 0.1)
+	var nl := int(ceil(dtl / 0.03))
+	for _i in nl:
+		var h := dtl / nl
+		_lean_vel += ((target - _lean) * k - _lean_vel * c) * h
+		_lean += _lean_vel * h
 	_drive_item(delta)
 	# Feet: full grounding when standing / walking, easing off at a run, off in the air.
 	var foot_w := 0.0
@@ -1816,17 +1852,20 @@ func _drive_body(delta: float) -> void:
 	modifier.lean_pitch = _lean.y
 	modifier.hunch = injury_hunch
 	var gsp := Vector2(velocity.x, velocity.z).length()
-	modifier.sway_weight = smoothstep(0.3, 1.2, gsp) if state in [MotorState.Id.MOVE, MotorState.Id.IDLE, MotorState.Id.CROUCH] else 0.0
+	modifier.sway_weight = _ease_w(&"sway", smoothstep(0.3, 1.2, gsp) if state in [MotorState.Id.MOVE, MotorState.Id.IDLE, MotorState.Id.CROUCH] else 0.0, delta)
+	_warp_st = UltraFollow.angle(_warp_st, _warp_to, delta, 6.0, 45.0, 12.0)
+	_warp = _warp_st.x
 	modifier.warp_yaw = _warp
 	_aim_w = move_toward(_aim_w, aim_weight, delta * 4.0)
-	var yaw_off := clampf(-angle_difference(body_yaw, aim_yaw), -deg_to_rad(80.0), deg_to_rad(80.0))
+	var yaw_off := _aim_yaw_off(delta)
 	# Climbing / hanging: look with the head, not the chest (the hands stay on the wall).
 	var climbing := state in [MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.LEDGE_HANG,
 		MotorState.Id.LEDGE_CLIMB, MotorState.Id.MANTLE, MotorState.Id.ROPE]
 	_climb_look = move_toward(_climb_look, 1.0 if climbing else 0.0, delta * 4.0)
 	modifier.spine_aim_scale = lerpf(1.0, 0.15, smoothstep(0.0, 1.0, _climb_look))
 	var pitch_lim := lerpf(1.35, 0.95, _climb_look)
-	modifier.aim_pitch = clampf(aim_pitch, -pitch_lim, pitch_lim) * _aim_w
+	_aim_p = _follow(_aim_p, clampf(aim_pitch, -pitch_lim, pitch_lim), delta)
+	modifier.aim_pitch = _aim_p.x * _aim_w
 	modifier.aim_yaw = yaw_off * _aim_w
 	if look and skeleton:
 		# Free third person: the head (not the spine) follows where the player looks.
@@ -1858,6 +1897,37 @@ func _drive_body(delta: float) -> void:
 	_teeter_w = move_toward(_teeter_w, 1.0 if teeter > 0.05 else 0.0, delta * (6.0 if teeter > 0.05 else 3.0))
 	if tree.get("parameters/teeter/blend_amount") != null:
 		tree.set("parameters/teeter/blend_amount", smoothstep(0.0, 1.0, _teeter_w))
+
+
+## The spine / head aim, conditioned before it reaches the body:
+##   * the aim's yaw off the body is kept continuous through the back - an aim swung round
+##     behind you stays over the shoulder it went round (wrapped to +-180 and clamped to
+##     +-80 it flipped from one side to the other in a frame: spine and head snapped 160 deg,
+##     and the first-person eye, which sits on the head, jumped with them);
+##   * yaw and pitch follow it with their speed and acceleration capped (UltraFollow): a mouse
+##     flick turns the view at once (the camera takes the aim directly), the body follows in
+##     ~0.2 s - a spring set off by a big flick reached full speed in one frame (a pop too).
+const AIM_MAX_SPEED := 7.0              ## rad/s (~400 deg/s: a fast torso turn)
+const AIM_MAX_ACCEL := 60.0             ## rad/s^2
+var _aim_rel := NAN                     ## the aim's yaw off the body, unwrapped
+var _aim_y := Vector2.ZERO              ## spine yaw (value, rate)
+var _aim_p := Vector2.ZERO              ## spine pitch (value, rate)
+
+
+func _aim_yaw_off(delta: float) -> float:
+	var raw := -angle_difference(body_yaw, aim_yaw)
+	if is_nan(_aim_rel):
+		_aim_rel = raw
+	var u := _aim_rel + angle_difference(wrapf(_aim_rel, -PI, PI), raw)
+	if absf(u) > deg_to_rad(200.0):
+		u = raw                               # (wound past behind you: come round the short way)
+	_aim_rel = u
+	_aim_y = _follow(_aim_y, clampf(u, -deg_to_rad(80.0), deg_to_rad(80.0)), delta)
+	return _aim_y.x
+
+
+static func _follow(st: Vector2, target: float, delta: float) -> Vector2:
+	return UltraFollow.scalar(st, target, delta, AIM_MAX_SPEED, AIM_MAX_ACCEL, 28.0)
 
 
 func _drive_item(delta: float) -> void:
@@ -1892,7 +1962,9 @@ func _drive_item(delta: float) -> void:
 	# the item's low-ready clip on sprinting legs twisted the chest and tipped the head over,
 	# and first person (camera-placed gun) showed a different carry altogether.
 	var gsp := Vector2(velocity.x, velocity.z).length()
-	var carry := _stance_w > 0.5 and item_ready_pose < 0.5 and item_action == UltraActionLayer.Action.READY 		and gsp > SPRINT_CARRY_SPEED and state in [MotorState.Id.MOVE, MotorState.Id.IDLE]
+	# (Hysteresis on the speed: hovering at it flipped the carry - and the gun - back and forth.)
+	var carry := _stance_w > 0.5 and item_ready_pose < 0.5 and item_action == UltraActionLayer.Action.READY 		and gsp > SPRINT_CARRY_SPEED * (0.85 if _carry_on else 1.0) and state in [MotorState.Id.MOVE, MotorState.Id.IDLE]
+	_carry_on = carry
 	sprint_carry = _ease_w(&"carry", 1.0 if carry and _role_anim(&"e_sprint_f") else 0.0, delta)
 	var cw := smoothstep(0.0, 1.0, sprint_carry)
 	tree.set("parameters/upper/blend_amount", smoothstep(0.0, 1.0, _item_w) * (1.0 - cw))
@@ -1905,12 +1977,14 @@ func _drive_item(delta: float) -> void:
 	tree.set("parameters/carry_chest_seek/seek_request", 0.0)
 	tree.set("parameters/carry_chest_hold/scale", 0.0)
 	if modifier:
-		modifier.weapon_aim = _item_w * _pose_w * (1.0 - smoothstep(0.0, 1.0, swing_w)) * (0.35 if prone else 1.0)
+		# (The prone factor eased: switched, going down / up with a gun raised snapped the spine.)
+		modifier.weapon_aim = _item_w * _pose_w * (1.0 - smoothstep(0.0, 1.0, swing_w)) * _ease_w(&"prone_aim", 0.35 if prone else 1.0, delta)
 		# A held item's static upper body on running legs: steady the torso against the swing
 		# (a little less with a one-handed item: the pistol run looked frozen).
 		# Unarmed, part of it too: the sprint clip rocks the shoulders and head side to side.
 		var steady := lerpf(UNARMED_STEADY, 0.85 if _stance_w > 0.5 else ITEM_STEADY, smoothstep(0.0, 1.0, _item_w))
-		modifier.torso_steady = steady * smoothstep(1.5, 4.0, gsp) if state in [MotorState.Id.MOVE, MotorState.Id.IDLE, MotorState.Id.CROUCH] else 0.0
+		# (Eased: it switched off in a frame on a jump / prone / any other state.)
+		modifier.torso_steady = _ease_w(&"steady", steady * smoothstep(1.5, 4.0, gsp) if state in [MotorState.Id.MOVE, MotorState.Id.IDLE, MotorState.Id.CROUCH] else 0.0, delta)
 
 
 const PRONE_ROLES := {"idle": "prone_idle", "aim": "prone_idle", "fire": "prone_fire", "reload": "prone_reload"}
@@ -2353,6 +2427,8 @@ func item_event(kind: StringName, data := {}) -> void:
 		&"reload":
 			if not (fp_gun and held_def and String(held_def.stat("reload_mode", "")) != "shell"):
 				tree.set("parameters/upper_src/reload/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+				if inertial:
+					inertial.trigger(0.25)
 		&"reload_cancel":
 			tree.set("parameters/upper_src/reload/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
 		&"throw":

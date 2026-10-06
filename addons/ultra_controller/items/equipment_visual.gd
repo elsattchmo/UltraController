@@ -15,9 +15,12 @@ var holster_node: Node3D              ## what's in the hip holster (first hip it
 var back_node: Node3D                 ## what's slung on the back (first back item not in hand)
 var held_def: ItemDefinition
 var ads := 0.0                        ## 0..1, presentation blend
+var _ads_st := Vector2.ZERO              ## ads followed (value, rate)
+var _sprinting := false                  ## (with hysteresis)
 var camera: Camera3D                  ## set for the local first-person viewer
 
 var _held_uid := -1
+var _equipped := -1
 ## Holstered / slung items: bone name -> {"uid": int, "node": Node3D}.
 var _stowed := {}
 var _stow_attach := {}
@@ -83,12 +86,15 @@ func _process(delta: float) -> void:
 	var s := character.state
 	# --- held item
 	var side := -1 if UltraInjury.weapon_hand(s) == -1 else 1
-	if s.held_uid != _held_uid or side != _side:
+	# (`equipped` too: remote players' snapshots carry the item, not its uid - their weapon
+	# switches never redrew the gun.)
+	if s.held_uid != _held_uid or s.equipped != _equipped or side != _side:
 		# The aim trim is the clip's own error for that item: keep one per item, so a draw
 		# starts from its own (the last item's pulled the new gun off for a moment).
 		if held_def:
 			_aim_fix_of[held_def.id] = _aim_fix
 		_held_uid = s.held_uid
+		_equipped = s.equipped
 		_side = side
 		var nd := ItemDB.by_index(s.equipped)
 		_aim_fix = _aim_fix_of.get(nd.id, Vector2.ZERO) if nd else Vector2.ZERO
@@ -379,7 +385,8 @@ func _gun_motion(gun: Transform3D, cam: Transform3D, delta: float, ads_e: float)
 	var pos := right * sin(_bob_phase) * 0.011 * amp + up * -absf(cos(_bob_phase)) * 0.013 * amp
 	var roll := sin(_bob_phase) * 0.04 * amp
 	# Sprinting: hands down and in, gun canted (the simulated free aim points it low).
-	var sprinting := s.has(MotorState.F_SPRINTING) and speed > character.profile.jog_speed * 0.9
+	_sprinting = s.has(MotorState.F_SPRINTING) and speed > character.profile.jog_speed * (0.75 if _sprinting else 0.9)
+	var sprinting := _sprinting
 	_sprint_w = move_toward(_sprint_w, 1.0 if sprinting and ads_e < 0.1 else 0.0, delta * 5.0)
 	var sw := smoothstep(0.0, 1.0, _sprint_w)
 	pos += up * -0.05 * sw + right * -0.03 * sw * _side
@@ -404,7 +411,10 @@ func _drive_hands(delta: float) -> void:
 	var s := character.state
 	var ready := held_node != null and UltraActionLayer.is_up(s.action)
 	var aiming := ready and character.last_input.has(InputFrame.B_SECONDARY) and held_def and held_def.kind == ItemDefinition.Kind.FIREARM
-	ads = move_toward(ads, 1.0 if aiming else 0.0, delta * 6.0)
+	# (Speed and acceleration capped: a linear ramp reversed on an ADS spam flipped the gun's
+	# velocity - and the FOV's, the sensitivity's - in a frame.)
+	_ads_st = UltraFollow.scalar(_ads_st, 1.0 if aiming else 0.0, delta, 7.5, 70.0, 18.0)
+	ads = clampf(_ads_st.x, 0.0, 1.0)
 	_recoil.target = Vector3.ZERO
 	_recoil.step(delta)
 	var gun := held_node.global_transform if held_node else Transform3D()
@@ -423,6 +433,9 @@ func _drive_hands(delta: float) -> void:
 	if mag_reload():
 		rise = 1.0                            # (the gun stays where it's held: the left hand reloads)
 	var fp_drive := has_view() and held_node != null and rise > 0.0 and held_def.kind == ItemDefinition.Kind.FIREARM 		and anim.sprint_carry < 0.5 and s.state != MotorState.Id.ROOT_MOTION     # (sprinting / a prone roll: the body carries it)
+	# (Getting down / up: the transition clip carries the gun - the body bent to the camera's gun
+	# fought it.)
+	fp_drive = fp_drive and not anim.prone_transitioning()
 	fp_drive = fp_drive or shell_fp
 	anim.fp_gun = fp_drive
 	var fp_target := (1.0 if shell_fp else rise) if fp_drive else 0.0
@@ -528,9 +541,10 @@ func _shoulder_gun(fp_target: Transform3D, fp_w: float) -> void:
 	wp.eye_offset_sk = to_sk * character.body_profile.eye_offset / maxf(sk.global_basis.get_scale().x, 0.001)
 	if camera != null or _fp_w > 0.001:
 		wp.from_body = false
+		wp.bend_scale = move_toward(wp.bend_scale, 0.35 if s.state == MotorState.Id.CRAWL else 1.0, get_process_delta_time() * 2.5)
 		wp.weight = fp_w
 		wp.gun = fp_target
-		wp.eye_target = camera.global_position if camera else Vector3.INF
+		wp.eye_target = view_xf().origin if camera else Vector3.INF
 		return
 	# Third person: weapon up, two working hands, not reloading / sprinting (the clips do those).
 	var rise := UltraActionLayer.raised(s)
@@ -661,8 +675,8 @@ func _drive_reload(delta: float) -> void:
 	var was := _reload_w > 0.001
 	_reload_w = move_toward(_reload_w, 1.0 if reloading else 0.0, delta * 3.5)
 	if _reload_w <= 0.001:
-		if anim.arm_out:
-			anim.arm_out.hand_give = 0.0
+		if anim.arm_out and not mag_reload() and _mag_w <= 0.0:
+			anim.arm_out.hand_give = 0.0       # (not over the magazine reload's own give)
 		if was:
 			for h in [HandIKModifier.Hand.LEFT, HandIKModifier.Hand.RIGHT]:
 				if _owns[h] and not (h == HandIKModifier.Hand.LEFT and ready_support()):
@@ -703,10 +717,13 @@ var fp_view_frame := -1
 
 
 func view_xf() -> Transform3D:
-	if camera:
-		return camera.global_transform
+	# The first-person eye first, whatever the view: while the view switches (first <-> third
+	# person) the camera itself is somewhere in between - the gun, the body bent to it and the
+	# cheek were posed from up to 1.6 m behind the head, then snapped back.
 	if fp_view_frame >= Engine.get_process_frames() - 1:
 		return fp_view
+	if camera:
+		return camera.global_transform
 	var yaw := character.anim.aim_yaw
 	var pitch := clampf(character.anim.aim_pitch, -1.45, 1.45)
 	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
@@ -975,7 +992,9 @@ func _drive_mag_reload(gun: Transform3D, delta: float) -> void:
 		goal = (hand_on.call(below) as Transform3D).interpolate_with(hand_on.call(pouch), smoothstep(MAG_OUT, t_pouch, t))
 	else:
 		goal = (hand_on.call(in_well) as Transform3D).interpolate_with(sup, smoothstep(t_seat, commit + 0.15, t))
-	anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, goal, smoothstep(0.0, 1.0, _mag_w), true, 18.0)
+	# (Full weight from the start: the path starts on the handguard where the hand already is -
+	# weighted up from 0 it first dropped off the gun to the clip's hand for a few frames.)
+	anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, goal, 1.0, true, 18.0)
 	anim.hand_ik.set_curl(HandIKModifier.Hand.LEFT, 0.8 if in_hand else 0.3)
 	if in_hand and mag is MeshInstance3D:
 		anim.hand_ik.set_wrap(HandIKModifier.Hand.LEFT, mag, Transform3D(Basis(), ab.get_center()), ab.size * 0.5)
@@ -995,6 +1014,10 @@ func _on_item_event(kind: StringName, _data: Dictionary) -> void:
 		_melee_t = -1.0
 	if kind == &"fire":
 		_slide_kick = 0.045
+		# (The kick is meant to be sharp: the hands' goal-continuity isn't to soften it.)
+		if character.anim and character.anim.hand_ik:
+			character.anim.hand_ik.allow_jump(HandIKModifier.Hand.RIGHT)
+			character.anim.hand_ik.allow_jump(HandIKModifier.Hand.LEFT)
 		var def := character.held_def()
 		_recoil.impulse(Vector3(0, 0.5, 1.8) * (float(def.stat("kick", 1.0)) if def else 1.0))
 		if pumps():

@@ -207,13 +207,16 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   crouch and sprint look-downs never put the camera inside the shoulders.
 - Animation flow (m1_blend.test_transitions_flow: head/chest/hips acceleration through a course
   of starts, stops, flips, crouch, turns, jumps and rifle changes; was 250-760 m/s^2, now ~20-80):
-  * `InertialBlendModifier` (first modifier): trigger() opens a 4-frame WINDOW in which a jump
-    in the incoming pose is looked for (trigger() from _process lands a frame before the tree
-    changes the pose); never detects on its own - fast motion inside a clip (roll, jump) is
-    real. Restart: offset to where the output was heading, decaying from REST on a critically
-    damped spring (half-life 0.11 s). Giving the offset the old velocity ADDED it to the new
-    clip's motion (legs flung twice as far in a roll) - don't. No end-of-stack smoothing pass:
-    it fought the IK (feet through floors, hands off rungs).
+  * `InertialBlendModifier` (first modifier) = DEAD BLENDING (Holden 2023): trigger() (driver,
+    unconditional) starts a blend from the pose ON SCREEN carried on along its own motion
+    (velocity decaying, half-life 0.08 s, capped) crossfaded (smoothstep, `blend_time` 0.2 s)
+    into whatever the tree shows; HOLD 2 frames first (the trigger comes a frame or two before
+    the tree switches - mixing in the not-yet-switched pose leaked a 12 cm dip on a 2 m root
+    jump). C1 at the switch; a re-trigger mid-blend starts again from what's on screen (the
+    tree's own crossfade drops its old state when interrupted: quick inputs popped). The old
+    jump-detecting inertializer restarted from rest - a velocity jump at every switch.
+    `UltraBoneBlend` is the same for a modifier's own output on a mode switch (WeaponPose
+    first <-> third person).
   * Weights that used to follow speed / flags instantly are springs (`_ease_w`, half-life
     0.09 s): idle<->move mixes, item / raise-lower / stance weights, the TP shouldered pose
     (`EquipmentVisual._tp_w`, `_tp_ads`). Gait position uses an eased speed (`_ease_speed`);
@@ -645,6 +648,48 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Shotgun at range: pattern 2.2 deg, opening by `pellet_bloom_deg` 2.2 past
   `pellet_bloom_from` 6 m; damage per pellet by distance flown, stat `falloff`
   [[5, 1], [12, 0.55], [25, 0.3], [45, 0.12]] (`UltraCombat.falloff`).
+- **Animation stability rules** (m12_fuzz: a seeded bot hammering every control - flicks of up
+  to 180 deg in 0-8 ticks, ADS / crouch / prone / sprint toggles, jumps, fire, reloads, slot
+  switches, view toggles - checks core pops > 350 m/s^2 (outside clip allowances: jump /
+  leap take-off, prone transitions), NaNs, camera off its aim, eye and gun-in-view jerk, with
+  a probe before every modifier naming the stage a pop comes from; `-- --seed=N
+  --fuzz-ticks=M`, env FUZZ_DBG=<tick> traces WeaponPose round a tick). Before: 37-64 pops of
+  1000-2300 per 1800 frames; the FP eye jerked 2500-5000 m/s^2.
+  * No raw discrete value into the pose: every input that can step goes through a follower
+    (`UltraFollow`: speed + acceleration capped, sqrt braking, soft arrival - never stopped
+    dead) or `_ease_w`, with hysteresis on thresholds. Angles are kept continuous through the
+    back (unwrapped vs. the last value, re-wrapped past 200 deg) before any clamp: the spine /
+    head aim (`AnimDriver._aim_yaw_off`, AIM_MAX_SPEED 7 rad/s, 60 rad/s^2), LookModifier,
+    WeaponPose blade - wrapped to +-180 then clamped they flipped 160 deg in a frame.
+  * Procedural passes that bend toward an outside target FOLLOW THE TARGET (in the skeleton's
+    frame), never the bend: WeaponPose follows the gun heading / stock point / eye target and
+    solves the bend afresh each frame, so it keeps steadying the chest through the gait
+    (smoothing the bend itself let the rifle sprint's sway back in: m1 sprint_sway). Followers
+    reset while the pass is off (stale, they raced 1.2 m to catch up). `_turn_toward` fades
+    out for a target nearly behind (its axis flips). Lying prone the bend is scaled to 0.35;
+    during prone_down / prone_up the camera-placed gun lets go (the clip carries it).
+  * Headings read with atan2 off a bone axis fade out as the axis tips vertical (prone hips,
+    a head looking straight down) - BodyDynamics item_hips_yaw and head stabiliser.
+  * HandIK goal continuity (`_settle`): a goal whose target jumps (owner change, cancelled
+    reload) is reached from where the hand was heading on a spring (half-life 0.06 s); moving
+    targets are untouched; `allow_jump` lets the recoil kick through.
+  * Visual yaw glue leads the sim toward the live mouse by GLUE_LEAD 0.08 rad at most (it glued
+    the whole body to a flick for a frame, then slid back). The FP eye's placement round the
+    neck (and the look-down shift / ADS eye drop) uses a followed yaw / pitch, not the raw
+    mouse (a flick while prone teleported the eye 30-50 cm). The view direction stays raw.
+  * The fire one-shot never moves the neck / head (filtered): auto fire shook the FP eye. All
+    one-shots fade on ease curves; a reload start dead-blends.
+  * Turn in place: each side's clip has its own weight (a direction flip fades one out as the
+    other comes in - as one signed amount it cut from left to right). Prone pivot side eased.
+  * Sim ADS is `MotorState.ads_w` (codec'd, 8/s): the free-aim zone / calm / inertia blend by
+    it (as a step the zone tightened in a tick and threw the gun up to 4 deg). Presentation
+    ADS (`EquipmentVisual.ads`, FOV, sensitivity) is a follower (a ramp reversed on spam).
+  * Hitch-proof springs: UltraSpring caps dt at 0.1 s; the FootIK pelvis and driver lean
+    springs are capped + substepped (the pelvis one went NaN below ~11 fps).
+  * Camera: down view hands back fully once up (it lurched back to the head's view the frame
+    GET_UP ended); `_tame_view` keeps heading / roll continuous for an inverted head.
+  * The gun is posed from `fp_view` (the FP eye) in every view, never the camera mid-toggle.
+    Remote players' guns redraw on `equipped` (snapshots carry no held_uid).
 - Tours run in real time and frame grabs stall them: film fast moves in slow motion
   (`Engine.time_scale`, see melee_review); a tour "tap" is held for at least one tick.
 

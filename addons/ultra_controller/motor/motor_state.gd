@@ -78,6 +78,9 @@ var breath: float = 20.0           ## seconds of air left
 var teeter: float = 0.0            ## seconds perched on an edge over a drop (loses balance)
 var turn_v: float = 0.0            ## turn-in-place angular velocity (rad/s, eased in and out)
 var gun_low: float = 0.0           ## 0..1 the gun carried low for a sprint (eased, not a step)
+## 0..1 aiming down sights, eased (the free-aim zone, calm and inertia blend by it: as a step
+## the zone tightened in a tick and threw the gun - and the shot, the dot - up to 4 deg).
+var ads_w: float = 0.0
 ## Free aim (weapon inertia / sway, UltraActionLayer._free_aim): the gun points along the aim
 ## plus `sway` (x = yaw, y = pitch, radians), a damped spring (`sway_v`, rad/s) that lags turns,
 ## bobs with the gait (`sway_phase`) and takes the recoil. `aim_prev_*` is last tick's aim.
@@ -137,6 +140,7 @@ func copy_from(o: MotorState) -> void:
 	teeter = o.teeter
 	turn_v = o.turn_v
 	gun_low = o.gun_low
+	ads_w = o.ads_w
 	sway = o.sway; sway_v = o.sway_v; sway_phase = o.sway_phase
 	aim_prev_yaw = o.aim_prev_yaw; aim_prev_pitch = o.aim_prev_pitch
 	ko_t = o.ko_t; ko_count = o.ko_count
@@ -157,6 +161,7 @@ func diff(o: MotorState) -> float:
 	d += absf(ko_t - o.ko_t) * 0.1
 	d += absf(action_t - o.action_t) + absf(hp - o.hp) * 0.01
 	d += (sway - o.sway).length() * 2.0 + (sway_v - o.sway_v).length() * 0.05
+	d += absf(ads_w - o.ads_w) * 0.05
 	return d
 
 
@@ -209,6 +214,7 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_u8(clampi(int(roundf(teeter * 100.0)), 0, 255))
 	buf.put_16(_q(turn_v, 1000.0))
 	buf.put_u8(clampi(int(roundf(gun_low * 255.0)), 0, 255))
+	buf.put_u8(clampi(int(roundf(ads_w * 255.0)), 0, 255))
 	buf.put_16(_q(sway.x, 10000.0)); buf.put_16(_q(sway.y, 10000.0))
 	buf.put_16(_q(sway_v.x, 1000.0)); buf.put_16(_q(sway_v.y, 1000.0))
 	buf.put_u16(int(roundf(fposmod(sway_phase, TAU) / TAU * 65536.0)) % 65536)
@@ -271,6 +277,7 @@ func decode(buf: StreamPeerBuffer) -> void:
 	teeter = buf.get_u8() / 100.0
 	turn_v = buf.get_16() / 1000.0
 	gun_low = buf.get_u8() / 255.0
+	ads_w = buf.get_u8() / 255.0
 	sway = Vector2(buf.get_16() / 10000.0, buf.get_16() / 10000.0)
 	sway_v = Vector2(buf.get_16() / 1000.0, buf.get_16() / 1000.0)
 	sway_phase = buf.get_u16() / 65536.0 * TAU

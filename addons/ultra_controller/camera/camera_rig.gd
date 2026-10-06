@@ -18,6 +18,8 @@ var tp_blend := 0.0              ## 0 = first person, 1 = third person
 var _eye_lp := Vector3.ZERO      ## low-passed eye, character-local
 var _eye_lp_ready := false
 var _aim_frame_w := 1.0
+var _eye_yaw := Vector2(NAN, 0.0)      ## the yaw the eye is placed round the neck by (followed)
+var _eye_pitch := Vector2.ZERO
 var _head_eye_cached := Vector3.ZERO
 var _head_look_cached := Basis()
 var _down_w := 0.0                  ## knocked down / dead / getting up: the view is the head's
@@ -232,22 +234,32 @@ func _process(delta: float) -> void:
 	var Id := MotorState.Id
 	var upright := character.state.state in [Id.IDLE, Id.MOVE, Id.CROUCH, Id.CRAWL, Id.LAND, Id.TURN_IN_PLACE, Id.JUMP, Id.FALL, Id.SLIDE]
 	_aim_frame_w = move_toward(_aim_frame_w, 1.0 if upright else 0.0, delta * 3.0)
-	var aim_basis := Basis(Vector3.UP, src.live_yaw)
+	# The frame the eye is placed in follows the aim (speed / acceleration capped): the view
+	# turns at once, but the eye's place round the neck is no reason to teleport - placed from
+	# the raw aim, a flick while prone (the head far ahead of the hips) moved the eye 30-50 cm
+	# in a frame (m12 fuzz).
+	if is_nan(_eye_yaw.x):
+		_eye_yaw = Vector2(src.live_yaw, 0.0)
+	_eye_yaw = UltraFollow.angle(_eye_yaw, src.live_yaw, delta, 9.0, 90.0, 30.0)
+	_eye_pitch = UltraFollow.scalar(_eye_pitch, src.live_pitch, delta, 9.0, 90.0, 30.0)
+	var aim_basis := Basis(Vector3.UP, _eye_yaw.x)
+	var ey := _eye_yaw.x                 # (the eye's offsets below are placed by these too)
+	var ep := _eye_pitch.x
 	var e_world := vis * fp_local
 	var d := aim_basis.inverse() * (e_world - vis.origin)
 	# Side-to-side (in the aim frame): stay on the body's axis, keeping a little of the sway.
-	var lat := cam_profile.fp_lateral_follow * lerpf(1.0, 0.35, smoothstep(deg_to_rad(15.0), deg_to_rad(60.0), -src.live_pitch))
+	var lat := cam_profile.fp_lateral_follow * lerpf(1.0, 0.35, smoothstep(deg_to_rad(15.0), deg_to_rad(60.0), -ep))
 	d.x *= lat
 	if _neck_cached != Vector3.INF:
 		var nd := aim_basis.inverse() * (vis.basis * _neck_cached)
 		d.y = maxf(d.y, nd.y + EYE_ABOVE_NECK)
 		# Looking straight down the collar would sit right under the eye: get further ahead.
-		var steep := smoothstep(deg_to_rad(40.0), deg_to_rad(80.0), -src.live_pitch)
+		var steep := smoothstep(deg_to_rad(40.0), deg_to_rad(80.0), -ep)
 		d.z = minf(d.z, nd.z - EYE_AHEAD_OF_NECK - 0.09 * steep)
 	var fp_base := e_world.lerp(vis.origin + aim_basis * d, _aim_frame_w)
 	# Look down: ease forward along the aim so the torso never blocks the view.
-	var down := smoothstep(deg_to_rad(25.0), deg_to_rad(80.0), -pitch)
-	var shift := Vector3(-sin(yaw), 0, -cos(yaw)) * cam_profile.fp_lookdown_shift * down
+	var down := smoothstep(deg_to_rad(25.0), deg_to_rad(80.0), -ep)
+	var shift := Vector3(-sin(ey), 0, -cos(ey)) * cam_profile.fp_lookdown_shift * down
 	# Lean.
 	var lean_in := 0.0
 	if character.profile.enable_lean:
@@ -255,7 +267,7 @@ func _process(delta: float) -> void:
 		if character.last_input.has(InputFrame.B_LEAN_R): lean_in += 1.0
 	_lean.target = lean_in
 	_lean.step(delta)
-	shift += Vector3(cos(yaw), 0, -sin(yaw)) * cam_profile.lean_offset * float(_lean.value)
+	shift += Vector3(cos(ey), 0, -sin(ey)) * cam_profile.lean_offset * float(_lean.value)
 	_land.step(delta)
 	shift.y += float(_land.value)
 	var fp_raw := fp_base + shift
@@ -263,7 +275,7 @@ func _process(delta: float) -> void:
 	var ads_eq := _equipment()
 	if ads_eq and ads_eq.held_def and ads_eq.ads > 0.0 and ads_eq.held_def.fp_ads_eye != Vector3.ZERO:
 		var o := ads_eq.held_def.fp_ads_eye
-		fp_raw += Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch) * Vector3(o.x, o.y, -o.z) * smoothstep(0.0, 1.0, ads_eq.ads)
+		fp_raw += Basis(Vector3.UP, ey) * Basis(Vector3.RIGHT, ep) * Vector3(o.x, o.y, -o.z) * smoothstep(0.0, 1.0, ads_eq.ads)
 	var fp_pos := _fp_guard(vis, fp_raw) if t < 0.99 else fp_raw
 	# Swimming at the surface: keep the eye just above the water line (never half-submerged).
 	if character.state.state == MotorState.Id.SWIM and character.motor and character.motor.water:
@@ -305,6 +317,7 @@ func _process(delta: float) -> void:
 	if _down_w > 0.001:
 		var getting_up := character.state.state == Id2.GET_UP
 		var head_q := _tame_view((vis.basis.orthonormalized() * _head_look_cached).get_rotation_quaternion())
+		_tv_live = true
 		# Never look back down into our own neck / chest (a tucked chin while getting up).
 		if _neck_cached != Vector3.INF:
 			var to_neck := (vis * _neck_cached - vis * _head_eye_cached).normalized()
@@ -317,7 +330,10 @@ func _process(delta: float) -> void:
 					head_q = Quaternion(axis.normalized(), deg_to_rad(60.0) - ang) * head_q
 		# Getting up: the get-up clip throws the head about. Follow it loosely and hand the view
 		# back to your own aim as you rise, so you're looking where you aim once you're up.
-		var handback := smoothstep(0.1, 0.75, character.state.state_time / UltraAnimDriver.GETUP_TIME) if getting_up else 0.0
+		# (Up again - the get-up done, or respawned - while the down view fades out: fully handed
+		# back. It dropped to 0 the moment GET_UP ended, and for a few frames the view lurched
+		# back to the head's before fading to the aim.)
+		var handback := smoothstep(0.1, 0.75, character.state.state_time / UltraAnimDriver.GETUP_TIME) if getting_up else (0.0 if is_down else 1.0)
 		head_q = head_q.slerp(cam_basis.get_rotation_quaternion(), handback)
 		if _down_w < 0.02 or _down_p == Vector3.INF:
 			_down_q = head_q
@@ -338,6 +354,7 @@ func _process(delta: float) -> void:
 	else:
 		_down_q = cam_basis.get_rotation_quaternion()
 		_down_p = Vector3.INF
+		_tv_live = false
 	global_position = fp_pos.lerp(tp_pos, t)
 	camera.global_transform = Transform3D(cam_basis.slerp(rot * Basis(Vector3.BACK, roll), t) if t > 0.0 else cam_basis, global_position)
 	# The first-person eye, whatever the view: third person holds the gun from it too, so it's
@@ -439,20 +456,35 @@ func _fp_guard(vis: Transform3D, eye: Vector3) -> Vector3:
 
 
 ## Keep the knocked-down eye view watchable: no more than 50 deg down (face down you'd stare
-## along your own arms into the floor) and at most 35 deg of roll.
-static func _tame_view(q: Quaternion) -> Quaternion:
+## along your own arms into the floor) and at most 35 deg of roll. Continuous from frame to
+## frame: a head tumbling upside down reads a heading 180 deg round and a roll past +-180 -
+## the view whipped round and the roll snapped from one limit to the other.
+var _tv_yaw := 0.0
+var _tv_roll := 0.0                      ## unwrapped
+var _tv_live := false
+
+
+func _tame_view(q: Quaternion) -> Quaternion:
 	var b := Basis(q)
 	var f := -b.z
 	# Heading: looking near straight down (lying on your face) the view direction alone gives
 	# a heading that spins wildly; the top of the head points where the face does then.
 	var hv := Vector2(f.x, f.z) + Vector2(b.y.x, b.y.z) * (-f.y)
 	var yaw := atan2(-hv.x, -hv.y)
+	if _tv_live and absf(angle_difference(_tv_yaw, yaw)) > deg_to_rad(120.0):
+		yaw = wrapf(yaw + PI, -PI, PI)          # (the same heading, read off an inverted head)
+	_tv_yaw = yaw
 	var raw_pitch := asin(clampf(f.y, -1.0, 1.0))
 	var pitch := clampf(raw_pitch, deg_to_rad(-50.0), deg_to_rad(70.0))
 	# Roll: the head's up against the level "up" for that heading and pitch, measured around
 	# the view direction (measuring it against world up flips +-90 when looking down).
 	var level := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, raw_pitch)
-	var roll := clampf(atan2(-b.y.dot(level.x), b.y.dot(level.y)), deg_to_rad(-25.0), deg_to_rad(25.0))
+	var raw_roll := atan2(-b.y.dot(level.x), b.y.dot(level.y))
+	var u := _tv_roll + angle_difference(wrapf(_tv_roll, -PI, PI), raw_roll) if _tv_live else raw_roll
+	if absf(u) > TAU:
+		u = raw_roll
+	_tv_roll = u
+	var roll := clampf(u, deg_to_rad(-25.0), deg_to_rad(25.0))
 	return (Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch) * Basis(Vector3.BACK, roll)).get_rotation_quaternion()
 
 

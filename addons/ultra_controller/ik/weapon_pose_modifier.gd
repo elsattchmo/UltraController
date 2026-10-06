@@ -11,6 +11,9 @@ extends SkeletonModifier3D
 ## Runs after BodyDynamics / FootIK and before HandIK, which puts both hands on the gun.
 
 var weight := 0.0                   ## 0..1, set every frame by UltraEquipmentVisual
+## 0..1 how far the spine / chest / shoulders may be bent to the gun (lying prone, little: a
+## flick behind you twisted a body lying on the ground up to 60 deg). Eased by the caller.
+var bend_scale := 1.0
 var gun := Transform3D()            ## world transform of the gun
 var stock := Vector3.ZERO           ## butt point in the gun's frame
 var side := 1                       ## 1 = right shoulder, -1 = left
@@ -54,6 +57,22 @@ var _head := -1
 var _ua := PackedInt32Array([-1, -1])     ## [right, left] UpperArm
 var _clav := PackedInt32Array([-1, -1])
 var _head_rest_inv := Basis()
+## The targets the body bends to are followed in the skeleton's frame (UltraFollow: speed and
+## acceleration capped), not taken raw: the gun is placed from the camera, and a mouse flick
+## moved it - and with it the whole upper body and the head (the first-person eye) - in one
+## frame (m12 fuzz: 1000-1800 m/s^2 head pops). The bend itself is still solved afresh each
+## frame against the animated pose, so it keeps steadying the chest through the gait (easing
+## the bend instead let the sprint's sway back in).
+var _blade_rel := NAN                ## the gun's heading off the chest, unwrapped
+var _head_st := Vector2(NAN, 0.0)    ## gun heading (skeleton space), followed
+var _stock_st := [Vector3.INF, Vector3.ZERO]
+var _eye_st := [Vector3.INF, Vector3.ZERO]
+var _dt := 1.0 / 60.0
+## Switching between first-person (the body to the camera-placed gun) and third-person (the gun
+## to the body) work flips what the spine, neck and shoulders are bent to in a frame (a view
+## toggle with a gun up): the bones dead-blend across the switch.
+var _switch: UltraBoneBlend
+var _was_body := false
 
 
 func _ready() -> void:
@@ -89,6 +108,17 @@ func _process_modification_with_delta(_delta: float) -> void:
 			return
 	pre_head = sk.get_bone_global_pose(_head)
 	pre_neck = sk.get_bone_global_pose(_neck).origin
+	_dt = maxf(_delta, 0.0)
+	if _switch == null:
+		_switch = UltraBoneBlend.new(PackedInt32Array([_spine, _chest, _upper, _neck, _clav[0], _clav[1]]), 0.3)
+	_pass(sk)
+	if from_body != _was_body and weight > 0.001:
+		_switch.trigger()
+	_was_body = from_body
+	_switch.apply(sk, _dt)
+
+
+func _pass(sk: Skeleton3D) -> void:
 	shouldered = weight > 0.001
 	if not (shouldered and from_body) and _hands_set and hand_ik:
 		# By now the gun is back where the clip holds it (weight ~0): let the right hand go at
@@ -97,32 +127,56 @@ func _process_modification_with_delta(_delta: float) -> void:
 		_hands_set = false
 	if not shouldered:
 		last_gap = 0.0
+		# (The followed targets start again on the target next time: kept from long ago, they
+		# raced 1.2 m to catch up as the gun came back up after a sprint - and stopped dead.)
+		_head_st.x = NAN
+		_stock_st[0] = Vector3.INF
+		_eye_st[0] = Vector3.INF
 		return
 	var w := smoothstep(0.0, 1.0, weight)
 	var inv := sk.global_transform.affine_inverse()
 	var sc := maxf(sk.global_basis.get_scale().x, 0.001)
 	var gdir := gun_dir if from_body else -gun.basis.z
-	_blade(sk, (inv.basis * gdir).normalized(), w)
+	var dsk := (inv.basis * gdir).normalized()
+	var heading := atan2(dsk.x, dsk.z)
+	if is_nan(_head_st.x):
+		_head_st = Vector2(heading, 0.0)
+	_head_st = UltraFollow.angle(_head_st, heading, _dt, 5.0, 40.0, 20.0)
+	if Vector2(dsk.x, dsk.z).length() >= 0.05:
+		dsk = Vector3(sin(_head_st.x) * Vector2(dsk.x, dsk.z).length(), dsk.y, cos(_head_st.x) * Vector2(dsk.x, dsk.z).length())
+	_blade(sk, dsk, w)
 	if from_body:
 		_gun_to_body(sk, sc, w)
 		return
-	var s := inv * (gun * stock)
+	var s := _followed(_stock_st, inv * (gun * stock))
 	# Spine: two passes over Spine and Chest, each turning about its own joint.
 	var per := deg_to_rad(max_spine_deg) / 4.0
 	for _pass in 2:
-		_turn_toward(sk, _spine, _pocket(sk, sc), s, per, 0.5 * w)
-		_turn_toward(sk, _chest, _pocket(sk, sc), s, per, w)
+		_turn_toward(sk, _spine, _pocket(sk, sc), s, per, 0.5 * w * bend_scale)
+		_turn_toward(sk, _chest, _pocket(sk, sc), s, per, w * bend_scale)
 	# Shoulder: shrug / roll forward the rest of the way.
 	var i := 0 if side == 1 else 1
 	if _clav[i] >= 0:
-		_turn_toward(sk, _clav[i], _pocket(sk, sc), s, deg_to_rad(max_shrug_deg), w)
+		_turn_toward(sk, _clav[i], _pocket(sk, sc), s, deg_to_rad(max_shrug_deg), w * bend_scale)
 	last_gap = (_pocket(sk, sc) - s).length() * sc
 	# Head: the eye back to the camera (the cheek comes down onto the stock).
 	if eye_target != Vector3.INF:
-		var e_t := inv * eye_target
+		var e_t := _followed(_eye_st, inv * eye_target)
 		var h := sk.get_bone_global_pose(_head)
 		var eye := h.origin + (h.basis.orthonormalized() * _head_rest_inv) * eye_offset_sk
 		_turn_toward(sk, _neck, eye, e_t, deg_to_rad(max_neck_deg), w)
+
+
+## `p` (skeleton space) followed: st = [value, rate], updated in place.
+func _followed(st: Array, p: Vector3) -> Vector3:
+	if st[0] == Vector3.INF or (st[0] as Vector3).distance_to(p) > 1.5:
+		st[0] = p
+		st[1] = Vector3.ZERO
+		return p
+	var r: Array = UltraFollow.vector(st[0], st[1], p, _dt, 3.0, 30.0, 22.0)
+	st[0] = r[0]
+	st[1] = r[1]
+	return r[0]
 
 
 ## Turn the upper body so the chest faces blade_deg off the gun (the bladed clips, the aim
@@ -135,7 +189,16 @@ func _blade(sk: Skeleton3D, d: Vector3, w: float) -> void:
 		return
 	var cur := atan2(fwd.x, fwd.z)
 	var want := atan2(d.x, d.z) - deg_to_rad(blade_deg) * float(side)
-	var diff := clampf(angle_difference(cur, want), -deg_to_rad(max_blade_turn_deg), deg_to_rad(max_blade_turn_deg)) * w
+	# (Kept continuous through the back: a gun swung round behind the chest - a flick faster
+	# than the body turns - stays on the side it went round instead of flipping the clamp.)
+	var raw := angle_difference(cur, want)
+	if is_nan(_blade_rel):
+		_blade_rel = raw
+	var u := _blade_rel + angle_difference(wrapf(_blade_rel, -PI, PI), raw)
+	if absf(u) > deg_to_rad(200.0):
+		u = raw
+	_blade_rel = u
+	var diff := clampf(u, -deg_to_rad(max_blade_turn_deg), deg_to_rad(max_blade_turn_deg)) * w * bend_scale
 	for pair: Array in [[_spine, 0.4], [_chest, 0.3], [_upper, 0.3], [_neck, -1.0]]:
 		var b: int = pair[0]
 		if b < 0:
@@ -198,6 +261,10 @@ func _turn_toward(sk: Skeleton3D, bone: int, p: Vector3, target: Vector3, max_an
 	var axis := a.cross(b)
 	if a.length() < 1e-4 or b.length() < 1e-4 or axis.length() < 1e-7:
 		return
-	var ang := minf(a.angle_to(b) * frac, max_ang)
+	# (A target nearly behind the point gives an axis that flips from frame to frame - a big
+	# flick while lying down turned the spine one way, then the other: no turn toward it then.)
+	var full := a.angle_to(b)
+	frac *= 1.0 - smoothstep(deg_to_rad(110.0), deg_to_rad(160.0), full)
+	var ang := minf(full * frac, max_ang)
 	g.basis = Basis(axis.normalized(), ang) * g.basis
 	sk.set_bone_global_pose(bone, g)

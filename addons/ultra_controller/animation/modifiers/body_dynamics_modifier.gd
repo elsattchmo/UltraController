@@ -24,6 +24,10 @@ var weapon_aim: float = 0.0
 ## the difference to the locomotion hips, so an upper-body clip keeps the stance it was made in
 ## (and a mirrored clip isn't twisted by the unmirrored legs). NAN = off.
 var item_hips_yaw: float = NAN
+## What's applied of it: followed (a clip swap - a weapon switch, prone roles - changed it in a
+## frame) and faded in / out when it turns on / off.
+var _ihy := Vector2(NAN, 0.0)
+var _ihy_w := 0.0
 
 ## Distribution weights over [Spine, Chest, UpperChest, Neck, Head].
 @export var aim_pitch_weights := PackedFloat32Array([0.18, 0.22, 0.25, 0.17, 0.18])
@@ -66,6 +70,13 @@ func _process_modification_with_delta(_delta: float) -> void:
 	_measure_head(sk, _delta)
 	var hips_g := sk.get_bone_global_pose(_hips)
 	var hips_anim_yaw := atan2(hips_g.basis.z.x, hips_g.basis.z.z)
+	# (A heading only means something while the axis it's read off is near level: lying prone
+	# the hips' forward points at the floor and its atan2 is noise - the stance turn fades out.)
+	var hips_level := smoothstep(0.35, 0.7, Vector2(hips_g.basis.z.x, hips_g.basis.z.z).length() / maxf(hips_g.basis.z.length(), 1e-4))
+	var dtt := maxf(_delta, 0.0)
+	if not is_nan(item_hips_yaw):
+		_ihy = Vector2(item_hips_yaw, 0.0) if is_nan(_ihy.x) else UltraFollow.angle(_ihy, item_hips_yaw, dtt, 6.0, 40.0)
+	_ihy_w = move_toward(_ihy_w, 1.0 if not is_nan(item_hips_yaw) else 0.0, dtt * 4.0)
 	# Sideways sway: keep the slow part, cut most of the step-to-step wobble.
 	if is_nan(_hip_x_lp):
 		_hip_x_lp = hips_g.origin.x
@@ -106,8 +117,8 @@ func _process_modification_with_delta(_delta: float) -> void:
 		var roll := lean_roll * (0.25 if k < 3 else 0.0)
 		var fwd_lean := lean_pitch * (0.2 if k < 2 else 0.0)
 		var r := Basis(Vector3.UP, -yaw) * Basis(Vector3.RIGHT, -pitch + fwd_lean) * Basis(Vector3.BACK, roll)
-		if k == 0 and not is_nan(item_hips_yaw) and weapon_aim > 0.0:
-			r = Basis(Vector3.UP, angle_difference(hips_anim_yaw, item_hips_yaw) * weapon_aim) * r
+		if k == 0 and not is_nan(_ihy.x) and weapon_aim > 0.0 and _ihy_w > 0.0:
+			r = Basis(Vector3.UP, angle_difference(hips_anim_yaw, _ihy.x) * weapon_aim * hips_level * smoothstep(0.0, 1.0, _ihy_w)) * r
 		# Rotate about this bone's own origin.
 		g.basis = r * g.basis
 		sk.set_bone_global_pose(b, g)
@@ -148,7 +159,8 @@ func _measure_head(sk: Skeleton3D, delta: float) -> void:
 	if is_nan(_head_yaw_lp):
 		_head_yaw_lp = yaw
 	_head_yaw_lp = lerp_angle(_head_yaw_lp, yaw, 1.0 - exp(-1.5 * maxf(delta, 0.0)))
-	_head_dev = angle_difference(_head_yaw_lp, yaw)
+	# (Looking straight down / face down the head's heading is noise: no stabilising then.)
+	_head_dev = angle_difference(_head_yaw_lp, yaw) * smoothstep(0.35, 0.7, Vector2(f.x, f.z).length())
 
 
 ## Take most of that swing back out (split over neck and head so the neck doesn't kink).

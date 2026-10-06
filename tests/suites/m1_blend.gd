@@ -230,7 +230,7 @@ func test_sprint_sway() -> void:
 			for v: float in a:
 				t += v
 			return t / a.size()
-		res.append("%s: head side %.3f m, chest side %.3f m, head roll %.1f deg (mean %.1f), head yaw %.1f deg (mean %.1f)" % [spec[0], rng.call(hx), rng.call(cx), rng.call(roll), mean.call(roll), rng.call(yaws), mean.call(yaws)])
+		res.append("%s: head side %.3f m, chest side %.3f m, head roll %.1f deg (mean %.1f), head yaw %.1f deg (mean %.1f), blends %d" % [spec[0], rng.call(hx), rng.call(cx), rng.call(roll), mean.call(roll), rng.call(yaws), mean.call(yaws), c.anim.inertial.jumps])
 		# (Before: pistol 0.33 m / 42 deg, unarmed 0.12 m / 16 deg.)
 		check(rng.call(hx) < 0.12 and rng.call(roll) < 12.0, "%s: the head doesn't swing about at a sprint (%.2f m, %.0f deg)" % [spec[0], rng.call(hx), rng.call(roll)])
 		c.queue_free()

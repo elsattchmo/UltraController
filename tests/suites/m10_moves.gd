@@ -384,6 +384,9 @@ func test_edge_no_dip_or_pop() -> void:
 	for i in range(start, mini(start + 12, hips.size())):
 		jump = maxf(jump, absf(hips[i] - hips[i - 1]))
 	info("walking to the edge: lowest hips %.2f (standing ~8.9); first frames of the move: biggest step %.3f m" % [before, jump])
+	if OS.get_environment("EDGE_DBG") != "":
+		for i in range(maxi(start - 4, 0), mini(start + 12, hips.size())):
+			print("EDGE %d %s %.3f" % [i - start, MotorState.Id.keys()[states[i]], hips[i]])
 	check(start > 0 and before > 8.75, "no dip toward the drop (hips %.2f)" % before)
 	check(jump < 0.08, "no pop as the climb-down starts (%.3f m in a frame)" % jump)
 

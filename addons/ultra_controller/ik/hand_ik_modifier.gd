@@ -138,6 +138,80 @@ func release(hand: int, speed := 6.0) -> void:
 
 var _palm_local := [Vector3.ZERO, Vector3.ZERO]
 
+## Goal continuity: a goal whose target jumps between frames (another owner took the hand - a
+## shell reload cut short by the trigger put the hand from the loading port on the pump in a
+## frame; a reload cancelled; a gun swapped) is reached from where the hand was heading, the
+## offset settling on a critically damped spring (half-life SETTLE_HALFLIFE). A target moving
+## continuously - the gun in your hands - is never touched: the hands stay exact on it.
+const JUMP_POS := 0.035                  ## m off where the target was heading = a jump
+const JUMP_ROT := 0.21                   ## rad (12 deg)
+const SETTLE_HALFLIFE := 0.06
+var _raw1: Array[Transform3D] = [Transform3D(), Transform3D(), Transform3D(), Transform3D()]
+var _raw2: Array[Transform3D] = [Transform3D(), Transform3D(), Transform3D(), Transform3D()]
+var _app1: Array[Transform3D] = [Transform3D(), Transform3D(), Transform3D(), Transform3D()]
+var _app2: Array[Transform3D] = [Transform3D(), Transform3D(), Transform3D(), Transform3D()]
+var _hist := [0, 0, 0, 0]                ## frames of history (0 = none: the goal just came in)
+var _op: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+var _ov: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+var _or: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+var _orv: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+## Jumps settled so far (tests).
+var settles := 0
+var _allow := [0, 0, 0, 0]               ## frames a jump is meant (recoil) and taken as it is
+
+
+## The next few frames' jumps of `hand`'s target are meant (a gun's recoil kick).
+func allow_jump(hand: int, frames := 3) -> void:
+	_allow[hand] = maxi(_allow[hand], frames)
+
+
+func _settle(i: int, t: Transform3D, w: float, delta: float) -> Transform3D:
+	if w < 0.5:
+		# (Fading in / out: the weight blends it.)
+		_hist[i] = 0
+		_op[i] = Vector3.ZERO
+		_ov[i] = Vector3.ZERO
+		_or[i] = Vector3.ZERO
+		_orv[i] = Vector3.ZERO
+		return t
+	var tq := t.basis.orthonormalized().get_rotation_quaternion()
+	if _hist[i] >= 2:
+		var r1 := _raw1[i].basis.get_rotation_quaternion()
+		var r2 := _raw2[i].basis.get_rotation_quaternion()
+		var pred_o := _raw1[i].origin + (_raw1[i].origin - _raw2[i].origin)
+		var pred_q := ((r1 * r2.inverse()).normalized() * r1).normalized()
+		var jump := pred_o.distance_to(t.origin) > JUMP_POS or InertialBlendModifier._to_vec((pred_q * tq.inverse()).normalized()).length() > JUMP_ROT
+		if jump and _allow[i] > 0:
+			jump = false
+		if jump:
+			# Carry on from where the hand was going (its applied target moved on by its motion).
+			var a1 := _app1[i].basis.get_rotation_quaternion()
+			var a2 := _app2[i].basis.get_rotation_quaternion()
+			var ap := _app1[i].origin + (_app1[i].origin - _app2[i].origin).limit_length(0.03)
+			var aq := ((a1 * a2.inverse()).normalized() * a1).normalized()
+			_op[i] = ap - t.origin
+			_ov[i] = Vector3.ZERO
+			_or[i] = InertialBlendModifier._to_vec((aq * tq.inverse()).normalized())
+			_orv[i] = Vector3.ZERO
+			settles += 1
+	_allow[i] = maxi(_allow[i] - 1, 0)
+	_raw2[i] = _raw1[i]
+	_raw1[i] = Transform3D(Basis(tq), t.origin)
+	# The offset settles (critically damped).
+	var y := 4.0 * 0.69314718 / SETTLE_HALFLIFE / 2.0
+	var e := exp(-y * maxf(delta, 0.0))
+	var j := _ov[i] + _op[i] * y
+	_op[i] = e * (_op[i] + j * delta)
+	_ov[i] = e * (_ov[i] - j * y * delta)
+	var jr := _orv[i] + _or[i] * y
+	_or[i] = e * (_or[i] + jr * delta)
+	_orv[i] = e * (_orv[i] - jr * y * delta)
+	var out := Transform3D(Basis(InertialBlendModifier._from_vec(_or[i]) * tq), t.origin + _op[i])
+	_app2[i] = _app1[i] if _hist[i] > 0 else out
+	_app1[i] = out
+	_hist[i] = mini(_hist[i] + 1, 2)
+	return out
+
 
 ## World basis for the hand bone so its fingers point along `fingers` and the palm faces
 ## `palm`. The palm direction in the bone's own frame is learned from the animated (curled)
@@ -200,6 +274,7 @@ func _process_modification_with_delta(delta: float) -> void:
 			var hp := sk.get_bone_global_pose(arm[2]).origin
 			var along := clampf((hp - t_sk.origin).dot(ld), g.line_range.x, g.line_range.y)
 			t_sk.origin = t_sk.origin + ld * along
+		t_sk = _settle(i, t_sk, w, delta)
 		# Out of reach? Roll the clavicle toward the target first (shoulders come forward when
 		# you push a pistol out), up to ~25°.
 		var clav := sk.get_bone_parent(arm[0]) if i < 2 else -1

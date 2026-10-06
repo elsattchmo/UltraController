@@ -73,6 +73,8 @@ var visual_feet := Vector3.ZERO
 const ROPE_CHEST_GAP := 0.16
 var _prev_pos := Vector3.ZERO
 var _glue_w := 0.0
+var _sprint_pose := false              ## presentation: sprinting fast enough to lower the gun
+const GLUE_LEAD := 0.08                ## rad: how far the drawn body may lead the sim toward the mouse
 ## Free-aim sway before the last tick (presentation interpolates it like the position).
 var prev_sway := Vector2.ZERO
 var _prev_yaw := 0.0
@@ -519,7 +521,11 @@ func _process(delta: float) -> void:
 		anim.aim_weight = 1.0 if faces_aim() else 0.0
 		anim.held_def = UltraGrab.CARRY_DEF if state.held_id != 0 else held_def()
 		anim.item_action = state.action
-		var sprinting := state.has(MotorState.F_SPRINTING) and Vector2(state.vel.x, state.vel.z).length() > profile.jog_speed * 0.9
+		# (With hysteresis: a speed hovering at the threshold - accelerating, a hurt leg's slower
+		# sprint, running into a slope - flipped the gun between raised and lowered.)
+		var hsp := Vector2(state.vel.x, state.vel.z).length()
+		_sprint_pose = state.has(MotorState.F_SPRINTING) and hsp > profile.jog_speed * (0.75 if _sprint_pose else 0.9)
+		var sprinting := _sprint_pose
 		anim.item_ready_pose = 0.0 if sprinting else smoothstep(0.2, 1.0, UltraActionLayer.raised(state))
 		# A melee weapon's "aim" pose is its block, held while blocking.
 		anim.blocking = state.has(MotorState.F_BLOCKING)
@@ -546,7 +552,10 @@ func _sync_visual(alpha: float) -> void:
 			and absf(angle_difference(state.body_yaw, last_input.yaw)) < 0.05
 	_glue_w = move_toward(_glue_w, 1.0 if glue else 0.0, get_process_delta_time() * 8.0)
 	if _glue_w > 0.0 and input_source:
-		yaw = lerp_angle(yaw, input_source.live_yaw, smoothstep(0.0, 1.0, _glue_w))
+		# Leading the sim toward the live mouse by a few degrees at most: the glue is decided on
+		# the last tick's aim, and a flick since then glued the whole body round to it in one
+		# frame (it then let go and slid back: the body and the first-person eye snapped).
+		yaw += clampf(angle_difference(yaw, input_source.live_yaw), -GLUE_LEAD, GLUE_LEAD) * smoothstep(0.0, 1.0, _glue_w)
 	visual_feet = p
 	_hit_frame = Transform3D(Basis(Vector3.UP, yaw), _prev_pos.lerp(state.pos, alpha))
 	yaw += ragdoll_yaw
