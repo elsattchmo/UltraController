@@ -10,7 +10,7 @@ const Id := MotorState.Id
 func enter(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 	s.vel = Vector3.ZERO
 	m.body.velocity = Vector3.ZERO
-	s.rm_clip = m.anim_set.rm_index(&"climb_up_1m") if m.anim_set and s.state != Id.VAULT else -1
+	s.rm_clip = m.anim_set.rm_index(&"climb_up_1m") if m.anim_set and s.state != Id.VAULT and s.trav_kind not in UltraTraversal.DOWN_MOVES else -1
 	s.rm_t = 0.0
 
 
@@ -21,13 +21,34 @@ func exit(_m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 
 func next(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 	if s.trav_t >= s.trav_dur:
+		if s.trav_kind in UltraTraversal.DOWN_MOVES:
+			UltraTraversal._face(s, s.trav_normal)      # the clip has turned round to the wall
+			s.set_flag(MotorState.F_AWAIT_NEUTRAL, i.move.length() >= 0.3)
+			s.trav_from = Vector3(i.move.x, i.move.y, i.yaw)      # (what's held: see UltraMotor.step)
+		match s.trav_kind:
+			UltraTraversal.Move.DROP_HANG:
+				s.trav_s = 1.0                       # (we came from up there: it climbs back up)
+				return Id.LEDGE_HANG
+			UltraTraversal.Move.DOWN_WALL:
+				return Id.WALL_CLIMB
+			UltraTraversal.Move.DOWN_LADDER:
+				var lad := UltraLadder.find(s.trav_id)
+				s.trav_s = clampf(lad.height_of(s.pos), 0.0, lad.height) if lad else 0.0
+				return Id.LADDER if lad else Id.FALL
 		return Id.MOVE if i.move.length() > 0.1 else Id.IDLE
 	return -1
 
 
-func tick(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
+func tick(m: UltraMotor, s: MotorState, i: InputFrame) -> void:
 	s.trav_t = minf(s.trav_t + m.dt, s.trav_dur)
 	var u := s.trav_t / maxf(s.trav_dur, 0.001)
+	if s.trav_kind in UltraTraversal.DOWN_MOVES:
+		# Lowering over an edge: the capsule waits where the body ends up (the clip's root is
+		# down there too - it plays the whole way from standing on the top).
+		m.body.global_position = s.trav_to
+		m.body.velocity = Vector3.ZERO
+		s.set_flag(MotorState.F_GROUNDED, false)
+		return
 	var from := s.trav_from
 	var to := s.trav_to
 	var p: Vector3
@@ -57,9 +78,13 @@ func tick(m: UltraMotor, s: MotorState, _i: InputFrame) -> void:
 	m.body.velocity = (p - prev) / m.dt
 	s.set_flag(MotorState.F_GROUNDED, u >= 1.0)
 	if u >= 1.0:
+		var fwd := Vector3(to.x - from.x, 0, to.z - from.z).normalized()
 		if s.state == Id.VAULT:
-			var fwd := Vector3(to.x - from.x, 0, to.z - from.z).normalized()
 			m.body.velocity = fwd * s.trav_s          # keep the run's momentum
+		elif s.state == Id.MANTLE and i.move.y > 0.3:
+			# Running over a waist-high wall: carry on at most of the run-in speed (stopping dead
+			# on top showed a slowed sprint frame and a walk-up to speed again).
+			m.body.velocity = fwd * s.trav_s * 0.75
 		else:
 			m.body.velocity = Vector3.ZERO
 		s.coyote_t = m.profile.coyote_time

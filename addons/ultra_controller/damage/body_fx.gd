@@ -383,11 +383,16 @@ func _make_gib(tris: Array, group: Array, center: Vector3, vel: Vector3, chunk: 
 	body.linear_velocity = vel
 	body.angular_velocity = Vector3(randf_range(-6, 6), randf_range(-6, 6), randf_range(-6, 6)) * (2.5 if chunk else 1.0)
 	body.add_to_group(&"ultra_gib")
+	# (Gibs free themselves after 30 s: drop the freed ones before counting - casting a freed
+	# object raised an error once the oldest had expired.)
+	for k in range(_gibs.size() - 1, -1, -1):
+		if not is_instance_valid(_gibs[k]):
+			_gibs.remove_at(k)
 	_gibs.append(body)
 	while _gibs.size() > MAX_GIBS:
-		var old := _gibs.pop_front() as Node
+		var old: Variant = _gibs.pop_front()
 		if is_instance_valid(old):
-			old.queue_free()
+			(old as Node).queue_free()
 	var life := Timer.new()
 	life.one_shot = true
 	life.wait_time = 30.0

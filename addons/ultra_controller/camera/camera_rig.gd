@@ -263,7 +263,7 @@ func _process(delta: float) -> void:
 		fp_pos.y = maxf(fp_pos.y, character.motor.water.surface_y(TickPlatform.current_tick) + 0.12)
 
 	# --- third-person shoulder
-	var pivot_target := character.visual_root.global_position + Vector3.UP * (character.state.height * 0.86)
+	var pivot_target := character.visual_root.global_position + Vector3.UP * (character.state.height * 0.86 + character.camera_lift())
 	_tp_pivot = _tp_pivot.lerp(pivot_target, 1.0 - exp(-cam_profile.tp_follow_sharpness * delta))
 	_tp_pivot.y = lerpf(_tp_pivot.y, pivot_target.y, 1.0 - exp(-cam_profile.tp_follow_sharpness * 0.6 * delta))
 	var rot := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch)
@@ -333,6 +333,12 @@ func _process(delta: float) -> void:
 		_down_p = Vector3.INF
 	global_position = fp_pos.lerp(tp_pos, t)
 	camera.global_transform = Transform3D(cam_basis.slerp(rot * Basis(Vector3.BACK, roll), t) if t > 0.0 else cam_basis, global_position)
+	# The first-person eye, whatever the view: third person holds the gun from it too, so it's
+	# first person seen from outside.
+	var eq_fp := _equipment()
+	if eq_fp:
+		eq_fp.fp_view = Transform3D(cam_basis, fp_pos)
+		eq_fp.fp_view_frame = Engine.get_process_frames()
 	# Shots start where we look from (UltraActionLayer.shot_origin): tell the sim where that is.
 	src.aim_from = global_position - (character.visual_feet + Vector3.UP * (character.state.height - 0.16))
 	var eq := _equipment()

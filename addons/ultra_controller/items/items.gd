@@ -35,10 +35,12 @@ static func drop_into_world(c: UltraCharacter, inst: ItemInstance, extra_vel: Ve
 	var def := inst.def()
 	if def == null or def.world_scene == null:
 		return null
-	var fwd := Vector3(-sin(c.last_input.yaw), 0, -cos(c.last_input.yaw))
-	var at := c.state.pos + Vector3.UP * (c.state.height * 0.7) + fwd * 0.55
-	var xf := Transform3D(Basis(Vector3.UP, c.last_input.yaw), at)
-	var vel := c.state.vel + fwd * 1.5 + Vector3.UP * 1.0 + extra_vel
+	# Let fall from the hands, just in front of the feet: it drops, tumbles and settles.
+	var fwd := Vector3(-sin(c.state.body_yaw), 0, -cos(c.state.body_yaw))
+	var at := c.state.pos + Vector3.UP * (c.state.height * 0.55) + fwd * 0.3
+	var tilt := Basis(Vector3.RIGHT, randf_range(-0.5, 0.5)) * Basis(Vector3.FORWARD, randf_range(-0.6, 0.6))
+	var xf := Transform3D(Basis(Vector3.UP, c.state.body_yaw) * tilt, at)
+	var vel := c.state.vel * 0.6 + fwd * 0.4 + extra_vel
 	return UltraNet.world.spawn(def.world_scene.resource_path, xf, {"item_id": inst.def_id, "count": inst.count, "item_data": inst.data}, vel)
 
 

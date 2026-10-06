@@ -200,9 +200,10 @@ func _rifle(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 	d.grip_offset = grip
 	d.support_offset = support
 	d.two_handed = true
-	# Support hand under the fore-end, fingers wrapped round its right side (WeaponPoseModifier).
-	d.support_fingers = Vector3(0.55, 0.0, -0.8)
-	d.support_palm = Vector3(0.2, 1.0, 0.0)
+	# Support hand under the fore-end, fingers across it and wrapped round its right side
+	# (HandIK wraps them round the handguard's box; pointing them along it sank the index in).
+	d.support_fingers = Vector3(0.85, 0.0, -0.5)
+	d.support_palm = Vector3(0.35, 1.0, 0.0)
 	# Back: UpperChest frame in an idle pose. Skeleton space: +Z forward, +Y up, +X = the
 	# character's left. Muzzle up over the left shoulder, sights against the back.
 	UltraPoseSampler.pose(lib.get_animation("Idle_A"), skel, 0.5)
@@ -412,6 +413,14 @@ func _melee(skel: Skeleton3D, lib: AnimationLibrary) -> void:
 				"clip": StringName(r + "_combo"), "seg": Vector2(w[0], w[3]), "contact": w[1]})
 		d.equip_time = 0.45
 		d.stats = {"melee": swings}
+		if spec[0] == "bat":
+			d.stats["two_hand_grip"] = 0.1          # (the left hand on the handle below the right)
+			d.stats["stance_yaw"] = 60.0           # (the club stance is authored 58 deg side-on)
+		else:
+			d.stats["stance_yaw"] = 8.0
+			d.stats["chest_yaw"] = 18.0           # (the clip twists its upper chest 20 deg right)
+			# The sword combo's first cut starts 41 deg side-on: turned in toward the front.
+			swings[0]["turn_in"] = 32.0
 		ResourceSaver.save(d, "res://assets/items/%s/%s_item.tres" % [spec[0], spec[0]])
 		print("saved melee weapon ", spec[0], " grip ", grip, " swings ", swings.map(func(x: Dictionary) -> String: return "%.2f/%.2f" % [x.hit_from, x.time]))
 

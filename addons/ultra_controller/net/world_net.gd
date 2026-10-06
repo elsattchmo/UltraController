@@ -287,8 +287,11 @@ func inventory_op(p: NetPlayer, op: String, args: Array) -> void:
 		"drop":
 			var slot := int(args[0])
 			var it := inv.get_slot(slot)
-			if it == null or it.uid == c.state.held_uid:
+			if it == null or it.def() == null or it.def().world_scene == null:
 				return
+			# What's in hand is let go of on the spot (its magazine goes with it).
+			if it.uid == c.state.held_uid:
+				UltraActionLayer.let_go(c, c.state)
 			var taken := inv.remove_slot(slot, int(args[1]) if args.size() > 1 else -1)
 			if taken:
 				UltraItems.drop_into_world(c, taken, Vector3.ZERO)

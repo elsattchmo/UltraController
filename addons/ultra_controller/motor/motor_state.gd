@@ -17,6 +17,7 @@ const F_SPRINTING := 1 << 3
 const F_ON_PLATFORM := 1 << 4
 const F_HARD_LANDING := 1 << 5
 const F_UNCONSCIOUS := 1 << 6      ## knocked out: limp on the ground until `ko_t` runs out
+const F_AWAIT_NEUTRAL := 1 << 7    ## lowered onto a hang / ladder / wall: the stick is ignored until let go
 
 var pos := Vector3.ZERO
 var vel := Vector3.ZERO

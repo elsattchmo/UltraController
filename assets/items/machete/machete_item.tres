@@ -38,7 +38,8 @@ stats = {
 "knockback": 1.2,
 "reach": 1.55,
 "seg": Vector2(0.45, 1.8),
-"time": 0.68
+"time": 0.68,
+"turn_in": 32.0
 }, {
 "clip": &"machete_combo",
 "contact": 2.0,
@@ -63,5 +64,7 @@ stats = {
 "reach": 1.7,
 "seg": Vector2(2.4, 4.05),
 "time": 0.93
-}]
+}],
+"stance_yaw": 8.0,
+"chest_yaw": 18.0
 }

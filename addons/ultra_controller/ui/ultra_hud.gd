@@ -31,6 +31,7 @@ var _msg: Label
 var _hotbar: HBoxContainer
 var _laid_out_for := Vector2.ZERO
 var _inv_panel: PanelContainer
+var _inv_press_ms := -1
 var _inv_grid: GridContainer
 var _hit_t := 0.0
 var _msg_t := 0.0
@@ -503,11 +504,21 @@ func _input(event: InputEvent) -> void:
 	var src := character.input_source as LocalInputSource
 	if not src.claims(dev):
 		return
-	if event.is_action_pressed(UltraInput.action(&"inventory")):
-		if _inv_panel.visible:
-			close_inventory()
-		else:
-			open_inventory()
+	# On a pad Back is also "hold to leave" (split screen): the inventory toggles when a short
+	# press is let go, so holding it to leave doesn't open the inventory first.
+	var inv := UltraInput.action(&"inventory")
+	if event.is_action(inv) and not event.is_echo():
+		var pad := dev.begins_with("joy")
+		if event.is_pressed():
+			_inv_press_ms = Time.get_ticks_msec()
+		var toggle := event.is_pressed() if not pad else (not event.is_pressed() and _inv_press_ms >= 0 and Time.get_ticks_msec() - _inv_press_ms < 450)
+		if not event.is_pressed():
+			_inv_press_ms = -1
+		if toggle:
+			if _inv_panel.visible:
+				close_inventory()
+			else:
+				open_inventory()
 		get_viewport().set_input_as_handled()
 		return
 	if not _inv_panel.visible:
@@ -611,7 +622,7 @@ func _activate(i: int) -> void:
 	_restyle()
 
 
-## Drop a slot into the world; what's in hand is holstered first (the server refuses to drop it).
+## Drop a slot into the world (what's in hand falls from the hand; nothing is drawn after).
 func _drop(i: int) -> void:
 	var it := character.inventory.get_slot(i) if i >= 0 else null
 	if it == null:
@@ -619,12 +630,7 @@ func _drop(i: int) -> void:
 	var src := character.input_source as LocalInputSource
 	if it.uid == character.state.held_uid and src:
 		src.want_slot = 0
-		var c := character
-		get_tree().create_timer(0.35).timeout.connect(func() -> void:
-			if is_instance_valid(c):
-				UltraNet.request_inventory(c.net_id, "drop", [i]))
-	else:
-		UltraNet.request_inventory(character.net_id, "drop", [i])
+	UltraNet.request_inventory(character.net_id, "drop", [i])
 
 
 func _inventory_hint() -> String:

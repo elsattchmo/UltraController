@@ -473,10 +473,16 @@ func test_arms_clear_the_body() -> void:
 	_bot().view_tp = true
 	var sk := c.skeleton
 	var res := []
-	for spec: Array in [["idle", 0, 0], ["reload", InputFrame.B_RELOAD, 150], ["walk", 0, 0]]:
+	# Reloading standing, walking, strafing, crouched and with the sprint held (a jog) - it broke
+	# depending on what you were doing.
+	for spec: Array in [["idle", 0, 0], ["reload", InputFrame.B_RELOAD, 150, Vector2.ZERO, 0], ["reload walking", InputFrame.B_RELOAD, 150, Vector2(0, 1), 0],
+			["reload strafing", InputFrame.B_RELOAD, 150, Vector2(1, 0), 0], ["reload crouched", InputFrame.B_RELOAD, 150, Vector2(0, 0.6), InputFrame.B_CROUCH],
+			["reload sprinting", InputFrame.B_RELOAD, 150, Vector2(0, 1), InputFrame.B_SPRINT], ["walk", 0, 0]]:
 		var steps := [{"ticks": 80, "slot": sl, "move": Vector2(0, 1) if spec[0] == "walk" else Vector2.ZERO}]
 		if spec[1] != 0:
-			steps = [{"ticks": 60, "slot": sl}, {"ticks": 2, "slot": sl, "tap": InputFrame.B_PRIMARY}, {"ticks": 10, "slot": sl}, {"ticks": 2, "slot": sl, "tap": spec[1]}, {"ticks": 200, "slot": sl}]
+			var mv: Vector2 = spec[3]
+			var bt: int = spec[4]
+			steps = [{"ticks": 60, "slot": sl, "buttons": bt}, {"ticks": 2, "slot": sl, "tap": InputFrame.B_PRIMARY, "buttons": bt}, {"ticks": 10, "slot": sl, "buttons": bt}, {"ticks": 2, "slot": sl, "tap": spec[1], "move": mv, "buttons": bt}, {"ticks": 200, "slot": sl, "move": mv, "buttons": bt}]
 		_bot().set_steps(steps)
 		await ticks(76 if spec[1] != 0 else 60)
 		if spec[1] != 0:

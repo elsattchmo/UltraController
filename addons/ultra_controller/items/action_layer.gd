@@ -10,7 +10,7 @@ enum Action { NONE, EQUIPPING, READY, RELOADING, HOLSTERING, USING, MELEE }
 ## States that need both hands: the item in hand is stowed while they last.
 const TWO_HANDED: Array[int] = [MotorState.Id.MANTLE, MotorState.Id.VAULT, MotorState.Id.LEDGE_HANG,
 	MotorState.Id.LEDGE_CLIMB, MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.ROPE,
-	MotorState.Id.SWIM, MotorState.Id.DIVE, MotorState.Id.CRAWL, MotorState.Id.ROOT_MOTION,
+	MotorState.Id.SWIM, MotorState.Id.DIVE, MotorState.Id.ROOT_MOTION,
 	MotorState.Id.RAGDOLL, MotorState.Id.DEAD, MotorState.Id.GET_UP]
 
 
@@ -27,11 +27,18 @@ static func step(c: UltraCharacter, s: MotorState, i: InputFrame, dt: float, rep
 			want_uid = it.uid
 	if UltraInjury.weapon_hand(s) == 0:
 		want_uid = 0                                     # no working arm to hold it with
-	var busy := s.state in [MotorState.Id.GET_UP, MotorState.Id.ROOT_MOTION, MotorState.Id.SLIDE, MotorState.Id.CRAWL, MotorState.Id.MANTLE, MotorState.Id.VAULT, MotorState.Id.LEDGE_HANG, MotorState.Id.LEDGE_CLIMB, MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.ROPE, MotorState.Id.SWIM, MotorState.Id.DIVE, MotorState.Id.RAGDOLL, MotorState.Id.DEAD]
+	var busy := s.state in [MotorState.Id.GET_UP, MotorState.Id.ROOT_MOTION, MotorState.Id.SLIDE, MotorState.Id.MANTLE, MotorState.Id.VAULT, MotorState.Id.LEDGE_HANG, MotorState.Id.LEDGE_CLIMB, MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB, MotorState.Id.ROPE, MotorState.Id.SWIM, MotorState.Id.DIVE, MotorState.Id.RAGDOLL, MotorState.Id.DEAD]
 	# Two-handed moves (climbing, hanging, ropes, swimming, crawling, rolling, down on the
 	# ground) stow what's in hand straight away; it comes back out once they're over (the
 	# selected slot is still wanted).
-	if s.state in TWO_HANDED:
+	# Prone (CRAWL) a weapon stays in hand - a gun aimed, fired and reloaded lying down, a
+	# melee weapon struck with lying still; anything else is put away to crawl.
+	if s.state == MotorState.Id.CRAWL and want_uid != 0:
+		var wd := inv.get_slot(inv.find_uid(want_uid)).def() if inv and inv.find_uid(want_uid) >= 0 else null
+		if wd == null or not prone_holdable(wd):
+			want_uid = 0
+	var prone_stow := s.state == MotorState.Id.CRAWL and s.held_uid != 0 and not prone_holdable(ItemDB.by_index(s.equipped))
+	if s.state in TWO_HANDED or prone_stow:
 		want_uid = 0
 		if s.held_uid != 0:
 			_store_mag(c, s, replaying)
@@ -105,6 +112,36 @@ static func _begin_equip(c: UltraCharacter, s: MotorState, uid: int) -> void:
 	_set_action(s, Action.EQUIPPING)
 
 
+## 0..1: how far the item in hand is up - drawing it rises through EQUIPPING; ready / striking
+## is 1. The draw blends into the ready pose, the facing and the shouldered gun as it goes,
+## instead of switching them on at READY (the gun went to one pose, then another).
+static func raised(s: MotorState) -> float:
+	if s.held_uid == 0:
+		return 0.0
+	if is_up(s.action):
+		return 1.0
+	if s.action == Action.EQUIPPING:
+		var d := ItemDB.by_index(s.equipped)
+		return clampf(s.action_t / maxf(d.equip_time if d else 0.4, 0.05), 0.0, 1.0)
+	return 0.0
+
+
+## Kept in hand lying down: weapons (guns and melee weapons).
+static func prone_holdable(d: ItemDefinition) -> bool:
+	return d != null and d.kind in [ItemDefinition.Kind.FIREARM, ItemDefinition.Kind.MELEE]
+
+
+## Authority, outside a step (dropping what's in hand): it's gone from the hand at once.
+static func let_go(c: UltraCharacter, s: MotorState) -> void:
+	_store_mag(c, s, false)
+	s.held_uid = 0
+	s.equipped = 0
+	s.mag = 0
+	s.melee_combo = 0
+	_set_action(s, Action.NONE)
+	c.emit_item_event(&"melee_cancel", {}, false)
+
+
 static func _store_mag(c: UltraCharacter, s: MotorState, replaying: bool) -> void:
 	if replaying or c.inventory == null or s.held_uid == 0:
 		return
@@ -126,6 +163,9 @@ static func _firearm(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemD
 		return
 	var edge := UltraMotor.pressed_edge(s, i, InputFrame.B_PRIMARY)
 	var pull := edge or (def.fire_mode == ItemDefinition.FireMode.AUTO and i.has(InputFrame.B_PRIMARY) and s.mag > 0)
+	# Crawling, the gun is down in the hands that pull you along: stop to shoot.
+	if s.state == MotorState.Id.CRAWL and Vector2(s.vel.x, s.vel.z).length() > 0.25:
+		pull = false
 	if pull and s.fire_cd <= 0.0:
 		if s.mag <= 0:
 			c.emit_item_event(&"dry_fire", {}, replaying)
@@ -367,6 +407,8 @@ const COMBO_LANDED := 0x40
 ## swing (the attack button). Starts Action.MELEE; true if it did.
 static func _melee_start(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemDefinition, replaying: bool) -> bool:
 	var go := false
+	if s.state == MotorState.Id.CRAWL and (def.kind != ItemDefinition.Kind.MELEE or Vector2(s.vel.x, s.vel.z).length() > 0.25):
+		return false                               # (lying down: a blade or club, lying still)
 	if def.kind == ItemDefinition.Kind.FIREARM:
 		go = UltraMotor.pressed_edge(s, i, InputFrame.B_MELEE)
 	elif def.kind == ItemDefinition.Kind.MELEE:

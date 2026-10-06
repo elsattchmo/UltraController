@@ -10,7 +10,13 @@ extends RefCounted
 ##   1.5..2.35  (or caught in the air) -> LEDGE_HANG (shimmy, climb up, drop)
 ## plus ladders / pipes (UltraLadder), climbable walls (CLIMBABLE layer) and ropes (UltraRope).
 
-enum Move { NONE, MANTLE, VAULT, LEDGE_CLIMB }
+enum Move { NONE, MANTLE, VAULT, LEDGE_CLIMB, DROP_HANG, DOWN_WALL, DOWN_LADDER }
+## Going down: the moves from DROP_HANG on lower over an edge (LEDGE_CLIMB state, the capsule
+## placed where it ends; Mixamo "Standing Drop To Freehang" plays the way down).
+const DOWN_MOVES: Array[int] = [Move.DROP_HANG, Move.DOWN_WALL, Move.DOWN_LADDER]
+const DROP_TIME := 1.25
+const DROP_HANG_MIN := 1.95       ## lowest drop that lowers you into a hang (walking off carefully)
+const HOP_UP := 2.2               ## m/s up when running off a short drop (a hop, not a slide off)
 
 const HANG_DROP := 2.06           ## feet below the ledge top while hanging (Ledge_Hang hands)
 const HANG_BACK := 0.33           ## capsule centre out from the wall face while hanging
@@ -107,6 +113,10 @@ static func hook(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 	var dir := wish.normalized() if wish.length() > 0.2 else fwd
 	var forward := i.move.y > 0.3
 	var jump := UltraMotor.pressed_edge(s, i, InputFrame.B_JUMP)
+	if s.state in [Id.IDLE, Id.MOVE, Id.LAND, Id.CROUCH] and s.is_grounded():
+		var down := _climb_down(m, s, i, dir)
+		if down >= 0:
+			return down
 	match s.state:
 		Id.IDLE, Id.MOVE, Id.LAND:
 			var lad := UltraLadder.find_enterable(s.pos, dir, i.move.y)
@@ -158,6 +168,132 @@ static func hook(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 	return -1
 
 
+## Going down from where we stand. Walking carefully (or crouched, or pressing crouch while
+## teetering on a lip) toward a drop: onto a ladder's top, down a climbable wall, or lowered
+## over the edge into a ledge hang if there's room for a hanging body. Running off a short drop:
+## a hop down (instead of sliding off the lip). -1: none of these - the edge balance / a plain
+## fall carry on as before.
+static func _climb_down(m: UltraMotor, s: MotorState, i: InputFrame, dir: Vector3) -> int:
+	var Id := MotorState.Id
+	var wish := m.horizontal(i.move_world(i.yaw))
+	var speed := m.horizontal(s.vel).length()
+	var teeter_drop := s.teeter > 0.05 and UltraMotor.pressed_edge(s, i, InputFrame.B_CROUCH)
+	var d := dir
+	if teeter_drop:
+		var td := m.horizontal(s.trav_from)               # (the teeter keeps the push over the edge)
+		if td.length() > 0.1:
+			d = td.normalized()
+	elif wish.length() < 0.2:
+		return -1
+	var careful := teeter_drop or s.stance == MotorState.Stance.CROUCH or i.has(InputFrame.B_WALK) \
+		or speed <= m.profile.walk_speed * 1.25
+	if careful:
+		var lad := _ladder_top(s, d)
+		if lad:
+			return _start_down_ladder(m, s, lad)
+	var l := _down_edge(m, s, d)
+	if l == null:
+		return -1
+	# Water below: step / run off into it and swim (no hanging over a pool).
+	var below := l.edge + l.normal * 0.4 + Vector3.DOWN * minf(l.height - 0.2, 1.5)
+	if not UltraWater.all.is_empty() and UltraWater.find(below, m.platform_tick) != null:
+		return -1
+	if not careful:
+		if s.state == Id.MOVE and l.height >= 0.5 and l.height <= 2.2 and speed > m.profile.jog_speed * 0.8:
+			m.body.velocity = m.horizontal(s.vel) + Vector3.UP * HOP_UP
+			s.vel = m.body.velocity
+			s.set_flag(MotorState.F_GROUNDED, false)
+			return Id.FALL
+		return -1
+	if l.climbable and l.height > 1.5:
+		return _start_down(m, s, l, Move.DOWN_WALL)
+	# From about 2 m (the hanging feet then just brush the floor; the drop was measured right
+	# under where they hang).
+	if l.height >= DROP_HANG_MIN:
+		return _start_down(m, s, l, Move.DROP_HANG)
+	return -1
+
+
+## The lip just ahead of the feet (nothing under the far side within a step) and the wall face
+## under it; Ledge.normal points out over the drop, height = the drop to the floor below.
+static func _down_edge(m: UltraMotor, s: MotorState, dir: Vector3) -> Ledge:
+	var space := m.body.get_world_3d().direct_space_state
+	var mask := UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC | UltraLayers.CLIMBABLE
+	var ex: Array[RID] = [m.body.get_rid()]
+	var out := s.pos + dir * 0.18
+	var q := PhysicsRayQueryParameters3D.create(out + Vector3.UP * 0.3, out + Vector3.DOWN * (m.profile.step_height + 0.1), mask, ex)
+	if not space.intersect_ray(q).is_empty():
+		return null                                    # the ground goes on
+	var past := s.pos + dir * (m.profile.radius + 0.25)
+	q = PhysicsRayQueryParameters3D.create(past + Vector3.UP * 0.3, past + Vector3.DOWN * 6.0, mask, ex)
+	var fl := space.intersect_ray(q)
+	var depth := s.pos.y - ((fl.position as Vector3).y if not fl.is_empty() else s.pos.y - 6.0)
+	# Back toward us a little under the lip: the face we'd hang on.
+	var probe := past + Vector3.DOWN * 0.25
+	q = PhysicsRayQueryParameters3D.create(probe, probe - dir * (m.profile.radius + 0.6), mask, ex)
+	var face := space.intersect_ray(q)
+	if face.is_empty() or face.collider is TickPlatform:
+		return null
+	var n := Vector3((face.normal as Vector3).x, 0.0, (face.normal as Vector3).z)
+	if n.length() < 0.5 or n.normalized().dot(dir) < 0.6:
+		return null
+	n = n.normalized()
+	var l := Ledge.new()
+	l.normal = n
+	l.edge = Vector3((face.position as Vector3).x, s.pos.y, (face.position as Vector3).z)
+	l.top = l.edge - n * 0.2
+	l.height = depth
+	l.standable = true
+	var co := face.collider as CollisionObject3D
+	l.climbable = co != null and (co.collision_layer & UltraLayers.CLIMBABLE) != 0
+	return l
+
+
+## A ladder whose top we're at (standing on what it leads up to) and walking toward.
+static func _ladder_top(s: MotorState, dir: Vector3) -> UltraLadder:
+	for lad in UltraLadder.all:
+		var rel := s.pos - lad.global_position
+		if absf(rel.y - lad.height) > 0.6:
+			continue
+		var n := lad.normal()
+		var flat := Vector3(rel.x, 0.0, rel.z)
+		var out := flat.dot(n)
+		var side := absf(flat.dot(n.cross(Vector3.UP)))
+		if out > 0.3 or out < -1.0 or side > lad.width * 0.5 + 0.3:
+			continue
+		if dir.dot(n) > 0.6:
+			return lad
+	return null
+
+
+static func _start_down(m: UltraMotor, s: MotorState, l: Ledge, kind: int) -> int:
+	s.platform_id = 0
+	s.trav_kind = kind
+	s.trav_from = s.pos
+	s.trav_point = l.edge
+	s.trav_normal = l.normal
+	s.trav_to = l.edge + l.normal * HANG_BACK + Vector3.DOWN * HANG_DROP
+	s.trav_t = 0.0
+	s.trav_dur = DROP_TIME
+	_face(s, -l.normal)               # facing out over the drop: the clip turns round to the wall
+	return MotorState.Id.LEDGE_CLIMB
+
+
+static func _start_down_ladder(m: UltraMotor, s: MotorState, lad: UltraLadder) -> int:
+	var h := maxf(lad.height - 0.95, 0.0)
+	s.platform_id = 0
+	s.trav_kind = Move.DOWN_LADDER
+	s.trav_id = lad.ladder_id
+	s.trav_from = s.pos
+	s.trav_point = lad.global_position + Vector3.UP * lad.height
+	s.trav_normal = lad.normal()
+	s.trav_to = lad.stand_point(h)
+	s.trav_t = 0.0
+	s.trav_dur = DROP_TIME
+	_face(s, -lad.normal())
+	return MotorState.Id.LEDGE_CLIMB
+
+
 static func _face(s: MotorState, n: Vector3) -> void:
 	s.body_yaw = atan2(n.x, n.z)          # facing -n
 
@@ -181,6 +317,7 @@ static func _start_move(m: UltraMotor, s: MotorState, kind: int, l: Ledge) -> in
 		_:
 			s.trav_to = l.top - l.normal * (m.profile.radius + 0.12)
 			s.trav_dur = 0.6 * clampf(sqrt(maxf(l.height, 0.3) / 0.9), 0.6, 1.3)
+			s.trav_s = m.horizontal(s.vel).length()          # (run-in speed, carried over the top)
 			if l.crouch_only:
 				s.stance = MotorState.Stance.CROUCH
 			return MotorState.Id.MANTLE

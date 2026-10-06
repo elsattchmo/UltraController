@@ -23,7 +23,7 @@ const SETTINGS := {
 	"stick_look_accel_time": [0.35, TYPE_FLOAT, PROPERTY_HINT_RANGE, "0,2,0.01"],
 	"stick_look_accel_boost": [1.6, TYPE_FLOAT, PROPERTY_HINT_RANGE, "1,3,0.05"],
 	"trigger_threshold": [0.3, TYPE_FLOAT, PROPERTY_HINT_RANGE, "0.05,0.95,0.01"],
-	"toggle_crouch": [false, TYPE_BOOL, PROPERTY_HINT_NONE, ""],
+	"toggle_crouch": [true, TYPE_BOOL, PROPERTY_HINT_NONE, ""],
 	"toggle_sprint": [true, TYPE_BOOL, PROPERTY_HINT_NONE, ""],
 	"toggle_ads": [false, TYPE_BOOL, PROPERTY_HINT_NONE, ""],
 	"aim_assist_enabled": [false, TYPE_BOOL, PROPERTY_HINT_NONE, ""],

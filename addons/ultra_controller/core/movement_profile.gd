@@ -14,7 +14,7 @@ enum View { FIRST_PERSON, THIRD_PERSON }
 @export var default_view := View.FIRST_PERSON
 @export var allow_view_toggle := true
 ## Body rotation in first person is always FACE_AIM; this applies to third person.
-@export var tp_rotation := Rotation.FACE_MOVE_UNTIL_AIM
+@export var tp_rotation := Rotation.FACE_AIM
 @export var camera: UltraCameraProfile = UltraCameraProfile.new()
 
 enum Gait { WALK, JOG }

@@ -131,6 +131,12 @@ func setup(p_player: AnimationPlayer, p_skeleton: Skeleton3D) -> void:
 	hand_ik = HandIKModifier.new()
 	hand_ik.name = "HandIK"
 	skeleton.add_child(hand_ik)
+	# Hand targets can pull an elbow back into the chest (a reload, a gun held close): swing it
+	# out round the shoulder->wrist line, hands left where they are.
+	arm_out = UltraArmClear.new()
+	arm_out.name = "ArmClearPost"
+	arm_out.keep_hands = true
+	skeleton.add_child(arm_out)
 	look = LookModifier.new()
 	look.name = "Look"
 	skeleton.add_child(look)
@@ -148,6 +154,12 @@ const BRISK_RATE := 1.75
 ## so its bad leg is the left; Injured_Walk_Back the other way round).
 ## Lose_Balance: the stretch where the arms windmill (before the walk-off).
 const TEETER_SEG := Vector2(3.3, 4.4)
+## "Standing Drop To Freehang": standing at the lip facing out .. turned round, hanging still;
+## and the fit onto our hang (the body faces out while it plays: its ledge is 0.24 m higher over
+## its root than HANG_DROP, its hands end 0.37 m short of the wall behind).
+const DROP_SEG := Vector2(0.15, 1.95)
+const DROP_CLIP_FIT := Vector3(0.0, -0.24, -0.37)
+var trav_kind := 0                       ## UltraTraversal.Move of the scripted move under way
 ## Mixamo "Running Jump" (from a sprint): take-off .. touchdown, and its apex in that segment.
 const RUN_JUMP_SEG := Vector2(0.04, 0.62)
 const RUN_JUMP_APEX := 0.28
@@ -389,6 +401,50 @@ func _build() -> AnimationNodeBlendTree:
 		bt.connect_node("output", 0, "mix")
 		loco.add_node(spec[0], bt, Vector2(200, 0))
 
+	# --- prone with a firearm (Mixamo rifle prone set): lying still / crawling forward / back,
+	# rolling to either side (the left roll mirrored), pivoting (turn clip, the right one
+	# mirrored). The aimed / firing / reloading upper body is the item layer's prone roles.
+	if _role_anim(&"prone_idle"):
+		var pr := AnimationNodeBlendTree.new()
+		var pbs := AnimationNodeBlendSpace2D.new()
+		pbs.min_space = Vector2(-1, -1)
+		pbs.max_space = Vector2(1, 1)
+		pbs.add_blend_point(_anim(&"prone_idle"), Vector2.ZERO, -1, &"idle")
+		pbs.add_blend_point(_anim(&"prone_fwd"), Vector2(0, 1), -1, &"fwd")
+		pbs.add_blend_point(_anim(&"prone_back"), Vector2(0, -1), -1, &"back")
+		var roll := _anim(&"prone_roll_r")
+		pbs.add_blend_point(roll, Vector2(1, 0), -1, &"right")
+		var roll_l := _anim(&"prone_roll_r")
+		roll_l.animation = _mirrored(_clip(&"prone_roll_r"))
+		pbs.add_blend_point(roll_l, Vector2(-1, 0), -1, &"left")
+		pr.add_node("dirs", pbs, Vector2(0, 0))
+		pr.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
+		pr.connect_node("rate", 0, "dirs")
+		var tl := _anim(&"prone_turn_l")
+		var tr2 := _anim(&"prone_turn_l")
+		tr2.animation = _mirrored(_clip(&"prone_turn_l"))
+		pr.add_node("turn_l", tl, Vector2(0, 200))
+		pr.add_node("turn_r", tr2, Vector2(0, 300))
+		pr.add_node("turn_side", AnimationNodeBlend2.new(), Vector2(200, 250))
+		pr.connect_node("turn_side", 0, "turn_l")
+		pr.connect_node("turn_side", 1, "turn_r")
+		pr.add_node("turn", AnimationNodeBlend2.new(), Vector2(400, 100))
+		pr.connect_node("turn", 0, "rate")
+		pr.connect_node("turn", 1, "turn_side")
+		pr.connect_node("output", 0, "turn")
+		loco.add_node("prone", pr, Vector2(200, 100))
+	# Getting down to prone / back up to a crouch (Mixamo, played over PRONE_TRANSITION).
+	for spec: Array in [["prone_down", &"prone_down"], ["prone_up", &"prone_up"]]:
+		if _role_anim(spec[1]):
+			var tb := AnimationNodeBlendTree.new()
+			tb.add_node("clip", _anim(spec[1], false), Vector2(0, 0))
+			tb.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+			tb.add_node("speed", AnimationNodeTimeScale.new(), Vector2(400, 0))
+			tb.connect_node("seek", 0, "clip")
+			tb.connect_node("speed", 0, "seek")
+			tb.connect_node("output", 0, "speed")
+			loco.add_node(spec[0], tb, Vector2(200, 200))
+
 	# --- air
 	var air := AnimationNodeStateMachine.new()
 	air.add_node("start", _anim(&"jump_start", false), Vector2(0, 0))
@@ -470,6 +526,21 @@ func _build() -> AnimationNodeBlendTree:
 	climb.connect_node("speed", 0, "seek")
 	climb.connect_node("output", 0, "speed")
 	loco.add_node("climb", climb, Vector2(800, 400))
+	# Lowering over an edge (UltraTraversal DOWN_MOVES): Mixamo "Standing Drop To Freehang", its
+	# root on the floor below like the capsule (which waits where the body ends up), so it plays
+	# the whole way from standing on the top. Its ledge sits DROP_CLIP_FIT higher and its hands
+	# end nearer the body than ours: the hips are shifted to fit.
+	if _role_anim(&"drop_hang"):
+		var dh := AnimationNodeBlendTree.new()
+		var da := AnimationNodeAnimation.new()
+		da.animation = _offset_hips(_segment(_clip(&"drop_hang"), DROP_SEG.x, DROP_SEG.y), DROP_CLIP_FIT)
+		dh.add_node("clip", da, Vector2(0, 0))
+		dh.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		dh.add_node("speed", AnimationNodeTimeScale.new(), Vector2(400, 0))
+		dh.connect_node("seek", 0, "clip")
+		dh.connect_node("speed", 0, "seek")
+		dh.connect_node("output", 0, "speed")
+		loco.add_node("drop_hang", dh, Vector2(800, 450))
 	loco.add_node("vault", _anim_from(&"run_jump", 0.15), Vector2(800, 500))
 	for spec: Array in [["hang", &"ledge_hang"], ["ladder", &"ladder_climb"], ["pipe", &"pipe_climb"], ["wall", &"wall_climb"], ["rope", &"pipe_climb"]]:
 		var bt := AnimationNodeBlendTree.new()
@@ -532,10 +603,10 @@ func _build() -> AnimationNodeBlendTree:
 		loco.add_node(n, a, Vector2(800, 200))
 
 	# Fully connected so travel() always crossfades directly.
-	var names := ["ground", "crouch", "crawl", "air", "air_run", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b", "climb", "vault", "hang", "ladder", "pipe", "wall", "rope", "swim", "dive", "getup", "getup_front"]
+	var names := ["ground", "crouch", "crawl", "prone", "prone_down", "prone_up", "drop_hang", "air", "air_run", "fall", "land", "land_heavy", "slide", "rm_a", "rm_b", "climb", "vault", "hang", "ladder", "pipe", "wall", "rope", "swim", "dive", "getup", "getup_front"]
 	for a_name in names:
 		for b_name in names:
-			if a_name == b_name:
+			if a_name == b_name or not loco.has_node(a_name) or not loco.has_node(b_name):
 				continue
 			var t := AnimationNodeStateMachineTransition.new()
 			t.xfade_time = _xfade(a_name, b_name)
@@ -670,7 +741,21 @@ func _build() -> AnimationNodeBlendTree:
 	root.connect_node("swing", 1, "swing_src_ts")
 	root.connect_node("swing_full", 0, "swing")
 	root.connect_node("swing_full", 1, "swing_full_src_ts")
-	out_node = "swing_full"
+	# Lying down only the arms strike (the clip's spine would sit the prone body up).
+	var sa := AnimationNodeBlend2.new()
+	sa.filter_enabled = true
+	for b in _arm_bones():
+		sa.set_filter_path(NodePath("%GeneralSkeleton:" + b), true)
+	root.add_node("swing_arms", sa, Vector2(720, 50))
+	var asrc := _anim(&"hit_chest", false)
+	root.add_node("swing_arms_src", asrc, Vector2(420, 330))
+	root.add_node("swing_arms_src_seek", AnimationNodeTimeSeek.new(), Vector2(480, 330))
+	root.add_node("swing_arms_src_ts", AnimationNodeTimeScale.new(), Vector2(540, 330))
+	root.connect_node("swing_arms_src_seek", 0, "swing_arms_src")
+	root.connect_node("swing_arms_src_ts", 0, "swing_arms_src_seek")
+	root.connect_node("swing_arms", 0, "swing_full")
+	root.connect_node("swing_arms", 1, "swing_arms_src_ts")
+	out_node = "swing_arms"
 	# Throwing a carried prop: a two-handed push from the chest (upper body).
 	if _role_anim(&"push_throw"):
 		var push := AnimationNodeOneShot.new()
@@ -710,6 +795,8 @@ func _build() -> AnimationNodeBlendTree:
 static func _xfade(a: String, b: String) -> float:
 	if b == "air_run":
 		return 0.1
+	if b == "drop_hang":
+		return 0.12                       # (it starts from a standing pose)
 	if b.begins_with("land"):
 		return 0.12
 	if a.begins_with("land") or b == "air":
@@ -718,6 +805,10 @@ static func _xfade(a: String, b: String) -> float:
 		return 0.22
 	if b == "slide" or a == "slide":
 		return 0.18
+	if b in ["prone_down", "prone_up"] or a in ["prone_down", "prone_up"]:
+		return 0.15                       # (the transition clips start / end in the poses)
+	if a in ["prone", "crawl"] or b in ["prone", "crawl"]:
+		return 0.55                       # (getting down / up takes a moment)
 	return 0.3
 
 
@@ -777,6 +868,7 @@ func _process(delta: float) -> void:
 	# sprinting legs as the move handed back to the ground.
 	if state in TRAVERSING:
 		local_v = Vector2.ZERO
+		_gait = Vector2(-1.0, 0.0)        # (the gait picks up from the real speed on the hand-back)
 	_drive_ground(local_v, local_v.length(), delta)
 	_drive_swing(speed, delta)
 	if _push_t > 0.0:
@@ -804,8 +896,20 @@ func _drive_state(speed: float) -> void:
 			want = "air_run" if _run_jump else "air"
 		Id.FALL:
 			# Brief ungrounded moments (a kerb, a ledge lip) aren't a fall worth showing.
-			if air_time < 0.15 and _cur_loco in ["ground", "crouch", "crawl", "land"]:
+			var hop := _cur_loco == "ground" and velocity.y > 1.0 and Vector2(velocity.x, velocity.z).length() > RUN_JUMP_SPEED and _role_anim(&"leap") != null
+			if air_time < 0.15 and _cur_loco in ["ground", "crouch", "crawl", "land"] and not hop:
 				want = _cur_loco
+			elif hop:
+				# Running off a short drop: the motor hops you down - the running leap shows it.
+				_run_jump = true
+				_jump_vy0 = 0.0
+				want = "air_run"
+			elif _cur_loco == "rope":
+				# Letting go of a rope: the limbs leap (the running jump, timed by the vertical
+				# speed) if it flings you, or the jump clip from a near standstill.
+				_run_jump = Vector2(velocity.x, velocity.z).length() > 1.5 and _role_anim(&"leap") != null
+				_jump_vy0 = 0.0
+				want = "air_run" if _run_jump else "air"
 			elif _cur_loco == "air_run" and air_time < 1.3:
 				want = "air_run"
 			else:
@@ -817,11 +921,11 @@ func _drive_state(speed: float) -> void:
 		Id.CROUCH:
 			want = "crouch"
 		Id.CRAWL:
-			want = "crawl"
+			want = "prone" if prone_armed() else "crawl"
 		Id.ROOT_MOTION:
 			want = "rm"
 		Id.MANTLE, Id.LEDGE_CLIMB:
-			want = "climb"
+			want = "drop_hang" if trav_kind in UltraTraversal.DOWN_MOVES and _role_anim(&"drop_hang") else "climb"
 		Id.VAULT:
 			want = "vault"
 		Id.LEDGE_HANG:
@@ -857,6 +961,26 @@ func _drive_state(speed: float) -> void:
 	_cur_rm = -1
 	if want == "land" and stance != MotorState.Stance.STAND:
 		want = "crouch"
+	# Down to prone from a crouch / standing, and back up: the transition clip plays first.
+	var lying := want in ["prone", "crawl"]
+	var was_lying := _cur_loco in ["prone", "crawl"]
+	if lying and _cur_loco in ["ground", "crouch", "land"] and _role_anim(&"prone_down"):
+		_prone_trans = PRONE_TRANSITION_TIME
+		_prone_trans_to = want
+		want = "prone_down"
+		tree.set(LOCO + "prone_down/seek/seek_request", 0.0)
+		tree.set(LOCO + "prone_down/speed/scale", _clip_len(&"prone_down", 1.8) / PRONE_TRANSITION_TIME)
+	elif was_lying and want in ["ground", "crouch"] and _role_anim(&"prone_up"):
+		_prone_trans = PRONE_TRANSITION_TIME
+		_prone_trans_to = want
+		want = "prone_up"
+		tree.set(LOCO + "prone_up/seek/seek_request", 0.0)
+		tree.set(LOCO + "prone_up/speed/scale", _clip_len(&"prone_up", 1.8) / PRONE_TRANSITION_TIME)
+	elif _cur_loco in ["prone_down", "prone_up"] and _prone_trans > 0.0 and want in ["prone", "crawl", "ground", "crouch"]:
+		want = _cur_loco                  # (let it finish)
+	if want == "drop_hang" and _cur_loco != "drop_hang":
+		tree.set(LOCO + "drop_hang/seek/seek_request", 0.0)
+		tree.set(LOCO + "drop_hang/speed/scale", (DROP_SEG.y - DROP_SEG.x) / maxf(climb_duration, 0.2))
 	if want == "climb" and _cur_loco != "climb":
 		# A ledge climb-up starts with the hands already high (about a third into the clip).
 		tree.set(LOCO + "climb/seek/seek_request", 0.22 if state == MotorState.Id.LEDGE_CLIMB else 0.0)
@@ -916,7 +1040,9 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 		rate = np[2]
 		if _eight_way:
 			var bpt := _ring_point(theta, gs, moving)
-			wn = lerp_angle(wn, bpt[0], _stance_w)
+			# (The rifle sprint runs the plain sprint's legs - its hips turn with them, or a
+			# sprint on an angle skated under the rifle stance's small diagonal turn.)
+			wn = lerp_angle(wn, bpt[0], _stance_w * (1.0 - smoothstep(0.0, 1.0, sprint_carry)))
 			tree.set(LOCO + "ground/move_b/blend_position", bpt[1])
 			tree.set(LOCO + "ground/rate_b/scale", bpt[2])
 		# (The limp clips play their own direction: no clip-snapping hip turn under them.)
@@ -1038,9 +1164,53 @@ func _drive_ground(local_v: Vector2, speed: float, delta: float) -> void:
 	tree.set(LOCO + "crawl/rate/scale", crawl_rate)
 	tree.set(LOCO + "crawl/idle_rate/scale", 0.0)
 	tree.set(LOCO + "crawl/mix/blend_amount", 1.0)
-	if state in [MotorState.Id.CROUCH, MotorState.Id.CRAWL] and moving:
+	if state in [MotorState.Id.CROUCH, MotorState.Id.CRAWL] and moving and not prone_armed():
 		var rel2 := angle_difference(PI if backwards else 0.0, theta)
 		_warp = lerp_angle(_warp, clampf(rel2, -1.2, 1.2), 1.0 - exp(-10.0 * delta))
+	_drive_prone(local_v, speed, moving, delta)
+
+
+## Prone with a firearm in hand: the directional crawl / roll set and the prone item roles.
+func prone_armed() -> bool:
+	return state == MotorState.Id.CRAWL and UltraActionLayer.prone_holdable(held_def) and _role_anim(&"prone_idle") != null
+
+
+const PRONE_TRANSITION_TIME := 0.8      ## = UltraMotor.PRONE_TRANSITION
+var _prone_trans := 0.0
+var _prone_trans_to := ""
+var _prone_dir := Vector2.ZERO
+var _prone_axis := Vector2.ZERO
+var _prev_body_yaw := 0.0
+var _prone_turn := 0.0
+var prone_moving := 0.0                ## 0..1 crawling (the item layer gives the arms over to it)
+
+
+func _drive_prone(local_v: Vector2, speed: float, moving: bool, delta: float) -> void:
+	_prone_trans = maxf(_prone_trans - delta, 0.0)
+	var yaw_rate := angle_difference(_prev_body_yaw, body_yaw) / maxf(delta, 0.001)
+	_prev_body_yaw = body_yaw
+	if not prone_armed():
+		prone_moving = 0.0
+		return
+	_warp = lerp_angle(_warp, 0.0, 1.0 - exp(-10.0 * delta))      # (the clips move each way)
+	# Nearest of the four directions, with a little hysteresis (mixing a crawl with a roll on a
+	# diagonal looked like neither).
+	if moving:
+		var d := local_v.normalized()
+		var axis := Vector2(signf(d.x), 0.0) if absf(d.x) > absf(d.y) + 0.15 else Vector2(0.0, signf(d.y))
+		if _prone_axis == Vector2.ZERO or absf(d.dot(_prone_axis)) < 0.55:
+			_prone_axis = axis
+	var target := _prone_axis * (1.0 if moving else 0.0)
+	_prone_dir = _prone_dir.move_toward(target, delta * 4.0)
+	tree.set(LOCO + "prone/dirs/blend_position", _prone_dir)
+	tree.set(LOCO + "prone/rate/scale", clampf(speed / maxf(_crawl_speed, 0.1), 0.5, 1.8) if moving else 1.0)
+	prone_moving = _ease_w(&"prone_move", 1.0 if moving else 0.0, delta)
+	# Pivoting while lying still: the turn clip, its side from the turn's direction.
+	var turning := absf(yaw_rate) > 0.35 and not moving
+	_prone_turn = move_toward(_prone_turn, 1.0 if turning else 0.0, delta * 5.0)
+	tree.set(LOCO + "prone/turn/blend_amount", smoothstep(0.0, 1.0, _prone_turn))
+	if turning:
+		tree.set(LOCO + "prone/turn_side/blend_amount", 1.0 if yaw_rate < 0.0 else 0.0)
 
 
 ## The gait speed on a spring (half-life GAIT_HALFLIFE); it starts from the real speed.
@@ -1658,10 +1828,14 @@ func _drive_body(delta: float) -> void:
 
 
 func _drive_item(delta: float) -> void:
-	if held_def != _held_roles_for or item_left != _item_left_for:
+	var prone := prone_armed()
+	if held_def != _held_roles_for or item_left != _item_left_for or prone != _prone_roles:
 		_held_roles_for = held_def
 		_item_left_for = item_left
-		if held_def and not held_def.anim_roles.is_empty():
+		_prone_roles = prone
+		if held_def and prone:
+			_set_item_clips(PRONE_ROLES)
+		elif held_def and not held_def.anim_roles.is_empty():
 			_set_item_clips(held_def.anim_roles)
 		elif modifier:
 			modifier.item_hips_yaw = NAN
@@ -1671,8 +1845,12 @@ func _drive_item(delta: float) -> void:
 		match item_action:
 			UltraActionLayer.Action.EQUIPPING, UltraActionLayer.Action.READY, UltraActionLayer.Action.RELOADING, UltraActionLayer.Action.MELEE:
 				want = 1.0
-	if state in [MotorState.Id.ROOT_MOTION, MotorState.Id.SLIDE, MotorState.Id.CRAWL]:
+	if state in [MotorState.Id.ROOT_MOTION, MotorState.Id.SLIDE] or (state == MotorState.Id.CRAWL and not prone):
 		want = 0.0
+	elif prone:
+		want *= 1.0 - prone_moving            # crawling, the arms pull you along
+	if _cur_loco in ["prone_down", "prone_up"]:
+		want = 0.0                            # (the transition clips carry the gun themselves)
 	# Eased (springs, ~0.3 s): raising / lowering the weapon moves the arms, the stance and the
 	# shouldered gun pose together - a linear ramp started and stopped them with a jolt.
 	_item_w = _ease_w(&"item", want, delta)
@@ -1694,12 +1872,16 @@ func _drive_item(delta: float) -> void:
 	tree.set("parameters/carry_chest_seek/seek_request", 0.0)
 	tree.set("parameters/carry_chest_hold/scale", 0.0)
 	if modifier:
-		modifier.weapon_aim = _item_w * _pose_w * (1.0 - smoothstep(0.0, 1.0, swing_w))
+		modifier.weapon_aim = _item_w * _pose_w * (1.0 - smoothstep(0.0, 1.0, swing_w)) * (0.35 if prone else 1.0)
 		# A held item's static upper body on running legs: steady the torso against the swing
 		# (a little less with a one-handed item: the pistol run looked frozen).
 		# Unarmed, part of it too: the sprint clip rocks the shoulders and head side to side.
 		var steady := lerpf(UNARMED_STEADY, 0.85 if _stance_w > 0.5 else ITEM_STEADY, smoothstep(0.0, 1.0, _item_w))
 		modifier.torso_steady = steady * smoothstep(1.5, 4.0, gsp) if state in [MotorState.Id.MOVE, MotorState.Id.IDLE, MotorState.Id.CROUCH] else 0.0
+
+
+const PRONE_ROLES := {"idle": "prone_idle", "aim": "prone_idle", "fire": "prone_fire", "reload": "prone_reload"}
+var _prone_roles := false
 
 
 func _set_item_clips(roles: Dictionary) -> void:
@@ -1708,7 +1890,17 @@ func _set_item_clips(roles: Dictionary) -> void:
 	for node_name: String in pairs:
 		var role := StringName(roles.get(pairs[node_name], ""))
 		if role != &"":
-			(item.get_node(node_name) as AnimationNodeAnimation).animation = _mirrored(_clip(role)) if item_left else _clip(role)
+			var clip := _clip(role)
+			# A weapon stance authored side-on (the two-handed club stance: 58 deg) is turned
+			# back toward the front by the item's stat "stance_yaw" (degrees).
+			var sy := float(held_def.stat("stance_yaw", 0.0)) if held_def and node_name in ["low", "aim"] else 0.0
+			if sy != 0.0:
+				clip = _yawed(clip, sy)
+			# ... and one whose chest twists away inside the clip by "chest_yaw" (UpperChest).
+			var cy := float(held_def.stat("chest_yaw", 0.0)) if held_def and node_name in ["low", "aim"] else 0.0
+			if cy != 0.0:
+				clip = _twisted(clip, "UpperChest", cy)
+			(item.get_node(node_name) as AnimationNodeAnimation).animation = _mirrored(clip) if item_left else clip
 	if modifier:
 		modifier.item_hips_yaw = _hips_yaw((item.get_node("aim") as AnimationNodeAnimation).animation)
 		# The bladed stance stands on the item's own aiming legs.
@@ -1862,6 +2054,75 @@ func _reversed(clip: StringName, from: float, to: float) -> StringName:
 	return StringName((lib + "/" if lib != "" else "") + rname)
 
 
+## A copy of `clip` turned `deg` about the vertical (Hips rotation and position: the whole body),
+## easing to its own facing by `fade_to` seconds when that's > 0. Made once.
+## A copy of `clip` with `bone` turned `deg` about its parent's up axis (every key), made once.
+func _twisted(clip: StringName, bone: String, deg: float) -> StringName:
+	var s := String(clip)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var clip_name := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	if l == null or not l.has_animation(clip_name):
+		return clip
+	var out := "%s_tw_%s_%d" % [clip_name, bone, int(deg)]
+	if not l.has_animation(out):
+		var a := (l.get_animation(clip_name) as Animation).duplicate(true) as Animation
+		var rt := _bone_track(a, bone, Animation.TYPE_ROTATION_3D)
+		if rt >= 0:
+			for i in a.track_get_key_count(rt):
+				var q := Quaternion(Vector3.UP, deg_to_rad(deg)) * (a.track_get_key_value(rt, i) as Quaternion)
+				a.track_set_key_value(rt, i, q.normalized())
+		l.add_animation(out, a)
+	return StringName((lib + "/" if lib != "" else "") + out)
+
+
+func _yawed(clip: StringName, deg: float, fade_to := -1.0) -> StringName:
+	var s := String(clip)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var clip_name := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	if l == null or not l.has_animation(clip_name):
+		return clip
+	var out := "%s_yaw_%d_%d" % [clip_name, int(deg), int(fade_to * 100)]
+	if not l.has_animation(out):
+		var a := (l.get_animation(clip_name) as Animation).duplicate(true) as Animation
+		var k := func(t: float) -> float:
+			return deg_to_rad(deg) * (1.0 - smoothstep(0.0, fade_to, t) if fade_to > 0.0 else 1.0)
+		var rt := _bone_track(a, "Hips", Animation.TYPE_ROTATION_3D)
+		if rt >= 0:
+			for i in a.track_get_key_count(rt):
+				var q := Quaternion(Vector3.UP, k.call(a.track_get_key_time(rt, i))) * (a.track_get_key_value(rt, i) as Quaternion)
+				a.track_set_key_value(rt, i, q.normalized())
+		var pt := _bone_track(a, "Hips", Animation.TYPE_POSITION_3D)
+		if pt >= 0:
+			for i in a.track_get_key_count(pt):
+				var p: Vector3 = a.track_get_key_value(pt, i)
+				var flat := Basis(Vector3.UP, k.call(a.track_get_key_time(pt, i))) * Vector3(p.x, 0.0, p.z)
+				a.track_set_key_value(pt, i, Vector3(flat.x, p.y, flat.z))
+		l.add_animation(out, a)
+	return StringName((lib + "/" if lib != "" else "") + out)
+
+
+## A copy of `clip` with its Hips moved by `off` (metres, model space: +Z forward), made once.
+func _offset_hips(clip: StringName, off: Vector3) -> StringName:
+	var s := String(clip)
+	var lib := s.get_slice("/", 0) if s.contains("/") else ""
+	var clip_name := s.get_slice("/", 1) if s.contains("/") else s
+	var l := player.get_animation_library(lib)
+	if l == null or not l.has_animation(clip_name):
+		return clip
+	var out := "%s_off_%d_%d_%d" % [clip_name, int(off.x * 100), int(off.y * 100), int(off.z * 100)]
+	if not l.has_animation(out):
+		var a := (l.get_animation(clip_name) as Animation).duplicate(true) as Animation
+		var t := _bone_track(a, "Hips", Animation.TYPE_POSITION_3D)
+		if t >= 0:
+			var k := off / maxf(skeleton.motion_scale, 0.001)      # (position tracks are normalised)
+			for i in a.track_get_key_count(t):
+				a.track_set_key_value(t, i, (a.track_get_key_value(t, i) as Vector3) + k)
+		l.add_animation(out, a)
+	return StringName((lib + "/" if lib != "" else "") + out)
+
+
 ## A left/right mirrored copy of a clip, made once and kept in the same library.
 ## For an upper-body one-shot: a copy of `clip` whose Spine also carries `share` of the clip's
 ## hip lean. (Upper-body layers ride on the locomotion's hips: a clip that leans the whole body
@@ -1927,6 +2188,8 @@ func play_hit(head: bool) -> void:
 	var root := tree.tree_root as AnimationNodeBlendTree
 	var src := root.get_node("hit_src") as AnimationNodeAnimation
 	var want := _clip(&"hit_head" if head else &"hit_chest")
+	if state == MotorState.Id.CRAWL and _role_anim(&"prone_hit"):
+		want = _clip(&"prone_hit")            # (lying down: the prone flinch)
 	if src.animation != want:
 		src.animation = want
 	tree.set("parameters/hit/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
@@ -1944,15 +2207,24 @@ func play_swing(sw: Dictionary) -> void:
 	var contact := float(sw.get("contact", seg.x + float(sw.hit_from)))
 	var rate := clampf((contact - seg.x) / maxf(float(sw.hit_from), 0.05), 0.4, 3.0)
 	var clip := _segment(_clip(role), seg.x, seg.y)
+	# A swing that starts side-on is turned toward the front at first, its own way by contact.
+	var ti := float(sw.get("turn_in", 0.0))
+	if ti != 0.0:
+		clip = _yawed(clip, ti, contact - seg.x)
+	if item_left:
+		clip = _mirrored(clip)                # (the weapon in the left hand: a lost right arm)
 	var root := tree.tree_root as AnimationNodeBlendTree
 	var up := root.get_node("swing_src") as AnimationNodeAnimation
 	var full := root.get_node("swing_full_src") as AnimationNodeAnimation
+	var arms := root.get_node("swing_arms_src") as AnimationNodeAnimation
 	var lean := _upper_lean(clip, 0.6)
 	if up.animation != lean:
 		up.animation = lean
 	if full.animation != clip:
 		full.animation = clip
-	for k: String in ["swing_src", "swing_full_src"]:
+	if arms.animation != clip:
+		arms.animation = clip
+	for k: String in ["swing_src", "swing_full_src", "swing_arms_src"]:
 		tree.set("parameters/%s_seek/seek_request" % k, 0.0)
 		tree.set("parameters/%s_ts/scale" % k, rate)
 	_swing_left = float(sw.time)
@@ -1964,6 +2236,7 @@ func play_swing(sw: Dictionary) -> void:
 
 var _swing_left := 0.0
 var _swing_len := 0.0
+var arm_out: UltraArmClear              ## the post-IK arm clearing (EquipmentVisual sets hand_give)
 ## First person with a camera-placed gun (EquipmentVisual): its strikes are procedural.
 var fp_gun := false
 ## 0..1: how much a strike is showing (EquipmentVisual lets the procedural aim / gun pose go).
@@ -1991,8 +2264,10 @@ func _drive_swing(speed: float, delta: float) -> void:
 	swing_w = move_toward(swing_w, 1.0 if on else 0.0, delta / (SWING_IN if on else SWING_OUT))
 	_stand_w = move_toward(_stand_w, _swing_stand_target(), delta * 3.0)
 	var w := smoothstep(0.0, 1.0, swing_w)
-	tree.set("parameters/swing/blend_amount", w)
-	tree.set("parameters/swing_full/blend_amount", w * smoothstep(0.0, 1.0, _stand_w))
+	var lying := 1.0 if state == MotorState.Id.CRAWL else 0.0
+	tree.set("parameters/swing/blend_amount", w * (1.0 - lying))
+	tree.set("parameters/swing_full/blend_amount", w * smoothstep(0.0, 1.0, _stand_w) * (1.0 - lying))
+	tree.set("parameters/swing_arms/blend_amount", w * lying)
 
 
 func item_event(kind: StringName, data := {}) -> void:
@@ -2005,7 +2280,8 @@ func item_event(kind: StringName, data := {}) -> void:
 		&"fire":
 			tree.set("parameters/upper_src/fire/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 		&"reload":
-			tree.set("parameters/upper_src/reload/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+			if not (fp_gun and held_def and String(held_def.stat("reload_mode", "")) != "shell"):
+				tree.set("parameters/upper_src/reload/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 		&"reload_cancel":
 			tree.set("parameters/upper_src/reload/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
 		&"throw":

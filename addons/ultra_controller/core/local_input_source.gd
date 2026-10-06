@@ -12,7 +12,7 @@ const TRACKED: Array[StringName] = [
 	&"jump", &"crouch", &"sprint", &"walk", &"interact", &"primary", &"secondary",
 	&"throw", &"drop", &"reload", &"lean_left", &"lean_right", &"toggle_view", &"dodge", &"leave",
 	&"hotbar_1", &"hotbar_2", &"hotbar_3", &"hotbar_4", &"hotbar_5", &"hotbar_6", &"hotbar_7", &"hotbar_8", &"hotbar_9",
-	&"hotbar_next", &"hotbar_prev", &"inventory", &"respawn",
+	&"hotbar_next", &"hotbar_prev", &"inventory", &"respawn", &"melee",
 ]
 
 ## Empty = accept every device (single local player).
@@ -74,6 +74,19 @@ func _input(event: InputEvent) -> void:
 			live_pitch = clampf(live_pitch - mm.screen_relative.y * s * inv, -1.5, 1.5)
 			_set_device(dev)
 		return
+	# A click that captures the pointer isn't a shot.
+	if event is InputEventMouseButton and require_mouse_capture and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		return
+	# The wheel sends press and release in the same frame (_process never saw it held):
+	# a mouse button on hotbar next / previous cycles straight from the event.
+	if event is InputEventMouseButton:
+		for dir in [[&"hotbar_next", 1], [&"hotbar_prev", -1]]:
+			var wa := UltraInput.action(dir[0])
+			if InputMap.has_action(wa) and event.is_action(wa):
+				if event.is_pressed() and enabled:
+					want_slot = _cycle(want_slot, int(dir[1]))
+					_set_device(dev)
+				return
 	var bucket: Dictionary = _strength.get(dev, {})
 	var touched := false
 	for sem in TRACKED:

@@ -76,6 +76,7 @@ var _glue_w := 0.0
 ## Free-aim sway before the last tick (presentation interpolates it like the position).
 var prev_sway := Vector2.ZERO
 var _prev_yaw := 0.0
+var _prev_trav_s := 0.0
 var _prev_vel := Vector3.ZERO
 var _accel := Vector3.ZERO
 var _shape: CollisionShape3D
@@ -330,6 +331,7 @@ func _physics_process(delta: float) -> void:
 func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	_prev_pos = state.pos
 	_prev_yaw = state.body_yaw
+	_prev_trav_s = state.trav_s
 	prev_sway = state.sway
 	var old := state.state
 	motor.apply_pushes = net_role != ROLE_PREDICTED and not replaying   # only the authority shoves props
@@ -484,22 +486,26 @@ func _process(delta: float) -> void:
 				anim.climb_speed = state.vel.y
 				var lad := UltraLadder.find(state.trav_id)
 				anim.climb_kind = 1 if lad and lad.kind == UltraLadder.Kind.PIPE else 0
+			# Climbing clips run at the speed actually moved last tick - not the input, which kept
+			# them going in place at a rope's end, a ledge's end or against a wall.
 			MotorState.Id.WALL_CLIMB:
-				anim.climb_speed = state.vel.y
+				var side := Vector2(state.vel.x, state.vel.z).length()
+				anim.climb_speed = state.vel.y if absf(state.vel.y) >= side else side
 			MotorState.Id.ROPE:
-				# Climb ropes: hand over hand at the climbing speed; swing ropes: just hold on.
-				var rope := UltraRope.find(state.trav_id)
-				anim.climb_speed = UltraRope.climb_input(rope, last_input) * 1.1
+				anim.climb_speed = (_prev_trav_s - state.trav_s) / motor.dt
 			MotorState.Id.LEDGE_HANG:
-				anim.climb_speed = last_input.move.x * 0.5 if absf(last_input.move.x) > 0.2 else 0.0
+				var right := Vector3(cos(state.body_yaw), 0.0, -sin(state.body_yaw))
+				var lat := (state.pos - _prev_pos).dot(right) / motor.dt
+				anim.climb_speed = lat if absf(lat) > 0.05 else 0.0
 			_:
 				anim.climb_speed = 0.0
 		anim.climb_duration = state.trav_dur
+		anim.trav_kind = state.trav_kind
 		anim.aim_weight = 1.0 if faces_aim() else 0.0
 		anim.held_def = UltraGrab.CARRY_DEF if state.held_id != 0 else held_def()
 		anim.item_action = state.action
 		var sprinting := state.has(MotorState.F_SPRINTING) and Vector2(state.vel.x, state.vel.z).length() > profile.jog_speed * 0.9
-		anim.item_ready_pose = 0.0 if sprinting or not UltraActionLayer.is_up(state.action) else 1.0
+		anim.item_ready_pose = 0.0 if sprinting else smoothstep(0.2, 1.0, UltraActionLayer.raised(state))
 		if state.held_id != 0:
 			anim.item_action = UltraActionLayer.Action.READY
 			anim.item_ready_pose = 1.0
@@ -712,9 +718,18 @@ func held_def() -> ItemDefinition:
 
 
 ## Does the body turn to face the aim right now? (first person, or TP aiming modes)
+## Third-person camera: lowering over an edge the capsule is already down where the body ends
+## up; the view follows the body down instead.
+func camera_lift() -> float:
+	if state.state != MotorState.Id.LEDGE_CLIMB or state.trav_kind not in UltraTraversal.DOWN_MOVES:
+		return 0.0
+	var u := state.trav_t / maxf(state.trav_dur, 0.001)
+	return maxf(state.trav_from.y - state.pos.y, 0.0) * (1.0 - smoothstep(0.15, 0.85, u))
+
+
 func faces_aim() -> bool:
-	if state.equipped != 0 and UltraActionLayer.is_up(state.action):
-		return true                       # holding a weapon ready: always face the aim
+	if state.equipped != 0 and UltraActionLayer.raised(state) >= 0.35:
+		return true                       # holding a weapon up (or coming up): face the aim
 	if not last_input.has(InputFrame.B_VIEW_TP):
 		return true
 	match profile.tp_rotation:

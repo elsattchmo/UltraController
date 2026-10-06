@@ -419,6 +419,94 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   sets `broken` (NetObject `net_state`), spills `drops`; everyone hides the body and throws
   local debris boxes cut from its mesh AABB (`ultra_debris`, <= 140, 9 s). Playground
   BREAKABLES (marker `breakables`): crates (health 75), barrels, bottles, a window.
+- **Prone with a gun** (CRAWL state; firearms stay in hand, melee weapons / tools are put away):
+  fire / reload lying still, no firing while crawling (> 0.25 m/s) or melee. Body pivots at
+  `UltraMotor.PRONE_TURN_RATE` (110 deg/s). AnimDriver loco "prone" (when `prone_armed()`):
+  Mixamo rifle prone set - BlendSpace2D idle / crawl fwd / back / roll right (left mirrored),
+  nearest axis with hysteresis, plus a turn clip (right mirrored) when pivoting; the item
+  layer swaps to PRONE_ROLES (idle/aim/fire/reload) and fades out while crawling. Roles
+  prone_* and drop_hang live in mannequin_animset.tres (tree-build time: item-provided roles
+  arrive after the tree is built). Unarmed prone keeps the old "crawl" node.
+- **Climbing down** (`UltraTraversal._climb_down`, hook for IDLE/MOVE/LAND/CROUCH): probe
+  `_down_edge` 0.18 m past the feet (no ground) + the wall face under the lip. Careful
+  (walking, crouched, B_WALK, or crouch while teetering) -> ladder top (`_ladder_top`) =
+  DOWN_LADDER, CLIMBABLE face = DOWN_WALL, a drop >= DROP_HANG_MIN (1.95 m) = DROP_HANG
+  (all LEDGE_CLIMB state + trav_kind; the capsule waits at the end position, Mixamo
+  "Standing Drop To Freehang" plays from standing - its root is on the floor below too;
+  DROP_CLIP_FIT shifts its hips onto our hang; `camera_lift` eases the TP view down).
+  Running (> 0.8 jog) off a 0.5-2.2 m drop: a hop (HOP_UP 2.2 m/s) shown with the leap clip.
+  After a down move `F_AWAIT_NEUTRAL` (1<<7) ignores the stick on the hang / ladder / wall
+  until it changes from what was held (trav_from = held move + yaw) - else holding forward
+  climbed straight back out. Hang input is camera-relative (`ledge_hang_state._push`).
+- Climb clips run at the speed actually moved (rope: trav_s change, hang: lateral pos change,
+  wall: |vel| incl. sideways) - they used to play the input in place at a rope's / ledge's end.
+- Leaving a rope at speed plays the running leap (`air_run`); slow, the jump clip.
+- Mantle at a run carries 75 % of the run-in speed on (MANTLE trav_s); the anim gait spring
+  restarts from the real speed after any traversal (it showed a stale sprint frame).
+- Drawing a weapon blends into its ready state as it comes up (`UltraActionLayer.raised(s)`,
+  0..1 over equip_time): body turns to the aim from 0.35, item pose / TP shouldered pose /
+  FP camera-placed gun follow it (they used to switch on at READY: one pose, then another).
+  `EquipmentVisual._aim_fix` is kept per item.
+- Dropping: the item in hand drops at once (`UltraActionLayer.let_go` on the server; the HUD
+  no longer holsters first - it raced the holster time), falling from the hands at the feet.
+- Third person, sprinting faces the travel direction even with a gun up (it crab-sprinted);
+  rifle sprint carry uses the plain sprint's hip warp (the bladed ring's tiny diagonal turn
+  made angled sprints skate).
+- Input: `melee` is in LocalInputSource.TRACKED (it never fired from real input); mouse buttons
+  on hotbar next/prev cycle on the event (the wheel's press+release in one frame was never
+  seen held); the click that captures the mouse isn't a shot; a pad Back toggles the
+  inventory on release of a short press (hold = split-screen leave). Crouch is a toggle by
+  default (`toggle_crouch`), double tap = prone.
+- **Third person is first person seen from outside** (`EquipmentVisual.view_xf`): the
+  first-person path (camera-placed gun, arms IK'd, WeaponPose FP mode, ADS, recoil, sway,
+  procedural gun-butt, shell loading, the reload's hands moved out in front) runs for every
+  view, posed from the first-person eye - the camera rig publishes it every frame in any view
+  (`fp_view`); characters without a rig use a virtual eye (sim eye height along the aim,
+  prone: the Head bone's clip pose). The neck isn't pulled to that eye in third person (only
+  a real FP camera: it jolted the head, m1 transitions flow). Tour `fp_tp_compare` films
+  both views from one outside camera. The FP gun weight `_fp_w` is linear: up at 5/s, down
+  at 3/s (holstering jolted the head), 5/s into a sprint carry (a spring broke sprint sway).
+  Reload hand shift: forward 0.24 + 0.18 to the gun side (crossing to the off side put the
+  right upper arm through the chest); `ArmClearPost.hand_give` lets reloading hands give way.
+- Muzzle effects use the gun's own frame (-Z = barrel) at the M_Muzzle marker: the marker's
+  Blender basis sent the smoke back down the barrel.
+- `ArmClearPost` (UltraArmClear `keep_hands`, after HandIK): an elbow the hand IK left inside
+  the torso swings out round the shoulder->wrist line (hand untouched); m4 test_arms_clear
+  covers reloads standing / walking / strafing / crouched / sprint-held.
+- Third person faces the aim by default (`MovementProfile.tp_rotation` FACE_AIM; adventure.tres
+  keeps FACE_MOVE): one set of movement animations for both views.
+- Prone: weapons (guns + melee, `UltraActionLayer.prone_holdable`) stay in hand; a melee weapon
+  strikes lying still, arms only (`swing_arms` layer). Getting down / up: Mixamo "Crouching
+  To Laying Prone" / "Transition From Prone To Crouch" (roles prone_down / prone_up, loco
+  nodes of the same name) over `UltraMotor.PRONE_TRANSITION` 0.8 s, during which the capsule
+  height eases and you can't move (`prone_transitioning`). Hit while prone: "Rifle Prone Hit
+  Reaction" (role prone_hit).
+- Free hand (`EquipmentVisual._drive_free_hand`): a one-handed melee weapon - loose guard in
+  front of the chest, counter-swinging against the weapon hand; a club with stat
+  "two_hand_grip" (bat 0.1 m) - the other hand on the handle; a one-handed gun prone - braced
+  on the ground. Never with a lost / crippled arm (UltraInjury.two_hands); the weapon hand
+  then is the left (`item_left`: melee swing clips mirrored).
+- Drop to hang: the body faces OUT over the drop while "Standing Drop To Freehang" plays (the
+  clip turns round to the wall), then faces the wall for the hang (DROP_CLIP_FIT 0,-0.24,-0.37).
+- Support-hand grip (tour `grip_review`, `--cam=left|right|below`, `--quick`; prints slide /
+  jerk / finger depth per state): HandIK `set_wrap(hand, part, box, half)` - curled fingers
+  bend joint by joint only until the rest of the finger (straight) touches the part's box
+  (`_wrap_angle`); EquipmentVisual `_wrap_on` picks the thickest mesh at M_SupportGrip (not a
+  groove ring) and clears wraps each frame. A fixed curl sank the index 23 mm into the
+  handguard. Rifle fingers point across the fore-end (0.85, 0, -0.5), palm (0.35, 1, 0).
+  `_within_reach` reads the shoulder from `HandIK.pre_shoulder` (the pose as it reached
+  HandIK last frame, after the inertial blend): read in _process it jumped ~10 cm at a clip
+  change and flicked the hand 2 cm along the handguard; the slide is a critically damped spring.
+- Gun-butt (`EquipmentVisual.melee_offset`): long guns a horizontal butt stroke (cocked back,
+  then the stock swung forward and across, muzzle out right); pistol whip butt-first. The
+  shouldered body (WeaponPose) keeps only a quarter of the strike - chasing the stock threw
+  the torso over.
+- Magazine reload by hand (`mag_reload` / `_drive_mag_reload`): the gun stays shouldered (rolled
+  22 deg to the off hand); the left hand takes the Magazine node (rides `_mag_hand`) down to a
+  belt pouch and back, keyed off action_t / reload_commit; the reload clip isn't played.
+- Melee stance: item stat `stance_yaw` turns the idle/aim clip's hips back toward the front
+  (bat 60), `chest_yaw` its UpperChest (machete 18: the clip twists it 20 deg right).
+  Tour `stance_probe` prints each bone's facing per item (unarmed = baseline).
 - Tours run in real time and frame grabs stall them: film fast moves in slow motion
   (`Engine.time_scale`, see melee_review); a tour "tap" is held for at least one tick.
 

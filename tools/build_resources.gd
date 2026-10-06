@@ -47,7 +47,7 @@ func _profiles() -> void:
 	var dir := "res://addons/ultra_controller/profiles/"
 	var fps := MovementProfile.new()
 	fps.default_view = MovementProfile.View.FIRST_PERSON
-	fps.tp_rotation = MovementProfile.Rotation.FACE_MOVE_UNTIL_AIM
+	fps.tp_rotation = MovementProfile.Rotation.FACE_AIM      # (third person moves like first person)
 	fps.accel = 11.0
 	fps.brake_decel = 20.0
 	fps.turn_rate_sprint = 220.0
@@ -82,7 +82,7 @@ func _profiles() -> void:
 
 	var tps := MovementProfile.new()
 	tps.default_view = MovementProfile.View.THIRD_PERSON
-	tps.tp_rotation = MovementProfile.Rotation.FACE_MOVE_UNTIL_AIM
+	tps.tp_rotation = MovementProfile.Rotation.FACE_AIM
 	tps.camera = UltraCameraProfile.new()
 	tps.camera.tp_distance = 2.6
 	tps.camera.tp_shoulder = Vector3(0.55, 0.15, 0)

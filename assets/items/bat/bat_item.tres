@@ -63,5 +63,7 @@ stats = {
 "reach": 1.8,
 "seg": Vector2(3.3, 4.8),
 "time": 0.81
-}]
+}],
+"stance_yaw": 60.0,
+"two_hand_grip": 0.1
 }

@@ -85,8 +85,14 @@ func _process(delta: float) -> void:
 	# --- held item
 	var side := -1 if UltraInjury.weapon_hand(s) == -1 else 1
 	if s.held_uid != _held_uid or side != _side:
+		# The aim trim is the clip's own error for that item: keep one per item, so a draw
+		# starts from its own (the last item's pulled the new gun off for a moment).
+		if held_def:
+			_aim_fix_of[held_def.id] = _aim_fix
 		_held_uid = s.held_uid
 		_side = side
+		var nd := ItemDB.by_index(s.equipped)
+		_aim_fix = _aim_fix_of.get(nd.id, Vector2.ZERO) if nd else Vector2.ZERO
 		if held_node:
 			held_node.queue_free()
 			held_node = null
@@ -110,8 +116,15 @@ func _process(delta: float) -> void:
 		_drive_barrel_smoke(delta)
 		var mag := held_node.find_child("Magazine", true, false) as Node3D
 		if mag:
-			var hide := s.action == UltraActionLayer.Action.RELOADING and s.action_t > 0.35 and s.action_t < float(held_def.stat("reload_commit", 1.5)) - 0.2
-			mag.visible = not hide
+			if not mag.has_meta("rest"):
+				mag.set_meta("rest", mag.transform)
+			if mag_reload() and _mag_hand != Transform3D():
+				mag.global_transform = _mag_hand      # (in the left hand while it's out)
+				mag.visible = true
+			else:
+				mag.transform = mag.get_meta("rest")
+				var hide := s.action == UltraActionLayer.Action.RELOADING and s.action_t > 0.35 and s.action_t < float(held_def.stat("reload_commit", 1.5)) - 0.2
+				mag.visible = not hide
 	if _melee_t >= 0.0:
 		# Simulated characters show the strike where the sim has it (the event can arrive a
 		# frame late); remote ones run their own clock from the event.
@@ -162,7 +175,7 @@ func sway_rotation() -> Basis:
 ## modifier for this frame; the skeleton applies it at the end of the frame.
 func _aim_body() -> void:
 	var anim := character.anim
-	if anim == null or anim.modifier == null or camera != null:
+	if anim == null or anim.modifier == null or camera != null or _fp_w > 0.001:
 		return
 	# (Breathing - a few hundredths of a degree - isn't worth twisting the spine for at this
 	# distance: only what's past a 0.25 deg deadband turns the body.)
@@ -203,6 +216,7 @@ func _aim_body() -> void:
 ## Third person: spine turn (yaw right +, pitch up +) that brings the drawn barrel onto the
 ## gun direction, learnt from the gun as drawn (see _aim_body).
 var _aim_fix := Vector2.ZERO
+var _aim_fix_of := {}
 
 
 func _update_stowed() -> void:
@@ -392,19 +406,31 @@ func _drive_hands(delta: float) -> void:
 	_recoil.target = Vector3.ZERO
 	_recoil.step(delta)
 	var gun := held_node.global_transform if held_node else Transform3D()
+	# (Fingers wrap a part of the held item only while a hand is on it - set below.)
+	anim.hand_ik.set_wrap(HandIKModifier.Hand.LEFT, null)
+	anim.hand_ik.set_wrap(HandIKModifier.Hand.RIGHT, null)
 	# First person: the gun pose comes from the camera (the real arms follow by IK), so it
 	# always points at the crosshair. Hip pose low-right, ADS puts the sights on the view ray.
 	# Loading a tube a shell at a time, first person: the gun comes up in front of you, rolled
 	# so the loading port faces you.
-	var shell_fp := camera != null and held_node != null and held_def != null and held_def.kind == ItemDefinition.Kind.FIREARM 		and String(held_def.stat("reload_mode", "")) == "shell" and s.action == UltraActionLayer.Action.RELOADING
+	var shell_fp := has_view() and held_node != null and held_def != null and held_def.kind == ItemDefinition.Kind.FIREARM 		and String(held_def.stat("reload_mode", "")) == "shell" and s.action == UltraActionLayer.Action.RELOADING
 	_shell_fp_w = move_toward(_shell_fp_w, 1.0 if shell_fp else 0.0, delta * 4.0)
-	var fp_drive := camera != null and held_node != null and ready and held_def.kind == ItemDefinition.Kind.FIREARM 		and anim.sprint_carry < 0.5          # (sprinting with a rifle the body carries it, as others see it)
+	# Drawing, the gun rises from the hand onto the camera pose with the draw (it used to
+	# ride the clip's low hand and only slide to the camera once ready).
+	var rise := smoothstep(0.15, 1.0, UltraActionLayer.raised(s))
+	if mag_reload():
+		rise = 1.0                            # (the gun stays where it's held: the left hand reloads)
+	var fp_drive := has_view() and held_node != null and rise > 0.0 and held_def.kind == ItemDefinition.Kind.FIREARM 		and anim.sprint_carry < 0.5          # (sprinting with a rifle the body carries it, as others see it)
 	fp_drive = fp_drive or shell_fp
 	anim.fp_gun = fp_drive
-	_fp_w = move_toward(_fp_w, 1.0 if fp_drive else 0.0, delta * 4.0)
-	if camera and held_node and _fp_w > 0.001:
+	var fp_target := (1.0 if shell_fp else rise) if fp_drive else 0.0
+	# (Let go of a little slower than it's taken up - holstering jolted the head - but quickly
+	# into a sprint carry, where the body takes the gun.)
+	var fp_rate := 5.0 if fp_target > _fp_w or anim.sprint_carry > 0.05 else 3.0
+	_fp_w = move_toward(_fp_w, fp_target, delta * fp_rate)
+	if held_node and _fp_w > 0.001:
 		var rear := UltraPoseSampler.marker(held_node, "M_RearSight")
-		var cam := camera.global_transform
+		var cam := view_xf()
 		var fwd := -cam.basis.z
 		var right := cam.basis.x
 		var cup := cam.basis.y
@@ -426,8 +452,14 @@ func _drive_hands(delta: float) -> void:
 		target_gun.origin += target_gun.basis * (_recoil.value as Vector3) * lerpf(1.0, 0.5, e)
 		# Racking the pump jolts the gun back and down a touch.
 		target_gun.origin += target_gun.basis * Vector3(0.0, -0.012, 0.022) * pump_amount()
-		# A gun-butt strike.
-		target_gun = target_gun * melee_offset()
+		# A gun-butt strike (the arms make it: the shouldered body keeps a quarter of it).
+		var strike_off := melee_offset()
+		target_gun = target_gun * strike_off
+		# Reloading: rolled a little toward the off hand, nose up a touch, brought in a bit.
+		var rw := _mag_w
+		if rw > 0.0:
+			var roll := Basis(Vector3.BACK, deg_to_rad(-22.0) * rw * float(_side)) * Basis(Vector3.RIGHT, deg_to_rad(8.0) * rw)
+			target_gun = target_gun * Transform3D(roll, Vector3(0.0, -0.03 * rw, 0.06 * rw))
 		# Free aim: turn the gun onto the simulated gun direction - about the rear sight at the
 		# hip, about the eye when aiming (so the sights stay in line with the eye and the dot).
 		var rot := sway_rotation()
@@ -443,7 +475,8 @@ func _drive_hands(delta: float) -> void:
 			anim.hand_ik.release(other, 8.0)
 			_owns[other] = false
 		gun = gun.interpolate_with(target_gun, w)
-		_shoulder_gun(target_gun, w * (1.0 - smoothstep(0.0, 1.0, _shell_fp_w)))      # (not shouldered while loading)
+		var body_gun := target_gun * Transform3D.IDENTITY.interpolate_with(strike_off, 0.75).affine_inverse()
+		_shoulder_gun(body_gun, w * (1.0 - smoothstep(0.0, 1.0, _shell_fp_w)))      # (not shouldered while loading)
 	else:
 		_shoulder_gun(Transform3D(), 0.0)
 		for h in [HandIKModifier.Hand.RIGHT, HandIKModifier.Hand.LEFT]:
@@ -461,12 +494,15 @@ func _drive_hands(delta: float) -> void:
 		anim.hand_ik.follow_hand(HandIKModifier.Hand.LEFT, HandIKModifier.Hand.RIGHT, gun * grip().affine_inverse())
 		if held_def.support_fingers != Vector3.ZERO:
 			anim.hand_ik.set_curl(HandIKModifier.Hand.LEFT, 1.0)
+			_wrap_on(HandIKModifier.Hand.LEFT, gun * UltraPoseSampler.marker(held_node, "M_SupportGrip").origin)
 		_owns[HandIKModifier.Hand.LEFT] = true
-	elif _side == 1 and _owns[HandIKModifier.Hand.LEFT]:
+	elif _side == 1 and _owns[HandIKModifier.Hand.LEFT] and not mag_reload():
 		anim.hand_ik.release(HandIKModifier.Hand.LEFT, 8.0)
 		_owns[HandIKModifier.Hand.LEFT] = false
+	_drive_mag_reload(gun, delta)
 	_drive_reload(delta)
 	_drive_shells()
+	_drive_free_hand(delta)
 
 
 ## A gun with a stock is held shouldered (WeaponPoseModifier). First person: the body comes to
@@ -487,14 +523,16 @@ func _shoulder_gun(fp_target: Transform3D, fp_w: float) -> void:
 	wp.stock = stock.origin
 	wp.side = _side
 	wp.eye_offset_sk = to_sk * character.body_profile.eye_offset / maxf(sk.global_basis.get_scale().x, 0.001)
-	if camera != null:
+	if camera != null or _fp_w > 0.001:
 		wp.from_body = false
 		wp.weight = fp_w
 		wp.gun = fp_target
-		wp.eye_target = camera.global_position
+		wp.eye_target = camera.global_position if camera else Vector3.INF
 		return
 	# Third person: weapon up, two working hands, not reloading / sprinting (the clips do those).
-	var up := UltraActionLayer.is_up(s.action) and _side == 1 and UltraInjury.two_hands(s)
+	var rise := UltraActionLayer.raised(s)
+	# (Prone the clips hold the gun to the shoulder lying down.)
+	var up := rise > 0.0 and _side == 1 and UltraInjury.two_hands(s) and s.state != MotorState.Id.CRAWL
 	wp.from_body = true
 	# Eased: reloading / holstering / lowering used to drop the shouldered pose (hands, stance,
 	# cheek) in a frame.
@@ -502,7 +540,7 @@ func _shoulder_gun(fp_target: Transform3D, fp_w: float) -> void:
 	# (A reload lets go quickly - the clip's hands have to get to the magazine.)
 	# (So does a strike played from a clip.)
 	var reloading := s.action == UltraActionLayer.Action.RELOADING or anim.swing_w > 0.0
-	_tp_w = move_toward(_tp_w, anim.modifier.weapon_aim if up and anim.modifier else 0.0, dt * (6.0 if reloading else 2.2))
+	_tp_w = move_toward(_tp_w, anim.modifier.weapon_aim * smoothstep(0.2, 1.0, rise) if up and anim.modifier else 0.0, dt * (6.0 if reloading else 3.5))
 	_tp_ads = move_toward(_tp_ads, ads, dt * 2.5)
 	wp.weight = smoothstep(0.0, 1.0, _tp_w)
 	wp.extra = melee_offset() if anim.swing_w <= 0.0 else Transform3D.IDENTITY
@@ -531,6 +569,32 @@ func _support_under(gun: Transform3D) -> Transform3D:
 	return Transform3D(b, contact - f * 0.065 - (p - f * p.dot(f)).normalized() * 0.03)
 
 
+## Curl `hand`'s fingers round the held item's part at `at` (world): the thickest mesh whose
+## box (grown 1.2 cm) holds the point - not a groove ring or a rail on it.
+func _wrap_on(hand: int, at: Vector3) -> void:
+	var key := "%d:%d" % [held_node.get_instance_id(), hand]
+	if not _wrap_parts.has(key):
+		var best: MeshInstance3D = null
+		var best_v := INF
+		for m in held_node.find_children("*", "MeshInstance3D", true, false):
+			var mi := m as MeshInstance3D
+			if mi.mesh == null or mi.name.begins_with("M_"):
+				continue
+			var a := mi.get_aabb()
+			var q := mi.global_transform.affine_inverse() * at
+			var thick := minf(minf(a.size.x, a.size.y), a.size.z)
+			if a.grow(0.012).has_point(q) and -thick < best_v:
+				best = mi
+				best_v = -thick
+		_wrap_parts[key] = best
+	var part := _wrap_parts[key] as MeshInstance3D
+	if part == null or not is_instance_valid(part):
+		return
+	var box := part.get_aabb()
+	character.anim.hand_ik.set_wrap(hand, part, Transform3D(Basis(), box.get_center()), box.size * 0.5)
+
+
+var _wrap_parts := {}
 var _left_reach := 0.0
 var _tp_w := 0.0
 var _tp_ads := 0.0
@@ -551,7 +615,8 @@ func _within_reach(t: Transform3D, dir: Vector3, max_slide: float) -> Transform3
 		_left_reach *= sk.global_basis.get_scale().x
 	# (The shoulder as animated, before IK: HandIK rolls the clavicle forward a little more
 	# when the arm comes up short, worth a few cm.)
-	var shoulder := sk.global_transform * sk.get_bone_global_pose(ua).origin
+	var pre: Vector3 = character.anim.hand_ik.pre_shoulder[HandIKModifier.Hand.LEFT]
+	var shoulder := sk.global_transform * (pre if pre != Vector3.INF else sk.get_bone_global_pose(ua).origin)
 	var r := _left_reach + 0.03
 	var o := t.origin - shoulder
 	var want := 0.0
@@ -562,13 +627,24 @@ func _within_reach(t: Transform3D, dir: Vector3, max_slide: float) -> Transform3
 		want = -od - sqrt(disc) if disc >= 0.0 else -od
 		want = clampf(want, 0.0, max_slide)
 	var dt := get_process_delta_time()
-	_left_slide = want if _left_slide < 0.0 else lerpf(_left_slide, want, 1.0 - exp(-12.0 * dt))
+	# (A critically damped spring: the shoulder is read before the inertial blend smooths a
+	# change of clip, so `want` can jump ~10 cm in a frame - a plain ease flicked the hand 2 cm.)
+	if _left_slide < 0.0:
+		_left_slide = want
+		_left_slide_v = 0.0
+	else:
+		var om := 14.0
+		var h := minf(dt, 0.05)
+		var acc := om * om * (want - _left_slide) - 2.0 * om * _left_slide_v
+		_left_slide_v += acc * h
+		_left_slide = clampf(_left_slide + _left_slide_v * h, 0.0, max_slide)
 	var out := t
 	out.origin += dir * _left_slide
 	return out
 
 
 var _left_slide := -1.0
+var _left_slide_v := 0.0
 
 
 ## Reload. Third person: the clip as authored (with the fitted grip it reads right: gun up by
@@ -578,10 +654,12 @@ var _left_slide := -1.0
 func _drive_reload(delta: float) -> void:
 	var anim := character.anim
 	var s := character.state
-	var reloading := held_node != null and held_def != null and held_def.kind == ItemDefinition.Kind.FIREARM 		and s.action == UltraActionLayer.Action.RELOADING and camera != null 		and String(held_def.stat("reload_mode", "")) != "shell"      # (a tube is loaded by _drive_shells)
+	var reloading := held_node != null and held_def != null and held_def.kind == ItemDefinition.Kind.FIREARM 		and s.action == UltraActionLayer.Action.RELOADING and has_view() and not mag_reload() 		and String(held_def.stat("reload_mode", "")) != "shell"      # (a tube is loaded by _drive_shells)
 	var was := _reload_w > 0.001
-	_reload_w = move_toward(_reload_w, 1.0 if reloading else 0.0, delta * 5.0)
+	_reload_w = move_toward(_reload_w, 1.0 if reloading else 0.0, delta * 3.5)
 	if _reload_w <= 0.001:
+		if anim.arm_out:
+			anim.arm_out.hand_give = 0.0
 		if was:
 			for h in [HandIKModifier.Hand.LEFT, HandIKModifier.Hand.RIGHT]:
 				if _owns[h] and not (h == HandIKModifier.Hand.LEFT and ready_support()):
@@ -589,12 +667,14 @@ func _drive_reload(delta: float) -> void:
 					_owns[h] = false
 		return
 	var sk := character.skeleton
-	var cam := camera.global_transform
+	var cam := view_xf()
 	var flat := Vector3(-cam.basis.z.x, 0, -cam.basis.z.z)
 	flat = flat.normalized() if flat.length() > 0.1 else -character.visual_root.global_basis.z
 	var left := Vector3.UP.cross(flat).normalized()
-	var shift := flat * 0.18 + Vector3.DOWN * 0.08 + left * 0.07 * _side
+	var shift := flat * 0.24 - left * 0.18 * _side       # (forward and a little to the gun side: the right arm crossing to the off side went through the chest)
 	var w := smoothstep(0.0, 1.0, _reload_w)
+	if anim.arm_out:
+		anim.arm_out.hand_give = w             # (the reloading hands may give way to the chest)
 	# Bone poses read in _process are the clip's (before IK), so this follows the animation.
 	for h in [HandIKModifier.Hand.LEFT, HandIKModifier.Hand.RIGHT]:
 		var b := anim.hand_ik.hand_bone(h)
@@ -604,6 +684,202 @@ func _drive_reload(delta: float) -> void:
 		xf.origin += shift
 		anim.hand_ik.set_goal(h, xf, w, true, 20.0)
 		_owns[h] = true
+
+
+## Every view holds the gun the same way: first person from the camera, third person (and other
+## players) from a virtual eye at the simulated eye height looking along the aim. (Third person
+## used the item clips plus a shouldered pass: it looked worse than first person, and the rifle
+## reload's arms went through the body; the gun-butt is the first-person strike too.)
+func has_view() -> bool:
+	return character != null and character.visual_root != null and character.anim != null
+
+
+## The first-person eye from this character's camera rig (set every frame, any view).
+var fp_view := Transform3D()
+var fp_view_frame := -1
+
+
+func view_xf() -> Transform3D:
+	if camera:
+		return camera.global_transform
+	if fp_view_frame >= Engine.get_process_frames() - 1:
+		return fp_view
+	var yaw := character.anim.aim_yaw
+	var pitch := clampf(character.anim.aim_pitch, -1.45, 1.45)
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var eye := character.visual_root.global_position + Vector3.UP * (character.state.height - 0.14) + fwd * 0.08
+	# Lying down the head is ~0.8 m ahead of the capsule: the eye is the head's (its clip pose -
+	# read here, before the modifiers, so the gun pose can't feed back into it).
+	if character.state.state == MotorState.Id.CRAWL and character.skeleton:
+		var hb := character.skeleton.find_bone("Head")
+		if hb >= 0:
+			eye = (character.skeleton.global_transform * character.skeleton.get_bone_global_pose(hb)).origin + Vector3.UP * 0.06
+	return Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch), eye)
+
+
+## The hand that isn't holding anything. A one-handed melee weapon: up in a loose guard in front
+## of the chest, swinging against the strike for balance (it flailed with the clip's sword arm).
+## A club held in both hands (stat "two_hand_grip": metres below the gun hand): on the handle.
+## Prone with a one-handed gun: braced on the ground under the chin. Never for a lost / crippled
+## arm (UltraInjury.two_hands).
+func _drive_free_hand(delta: float) -> void:
+	var anim := character.anim
+	var s := character.state
+	var free := HandIKModifier.Hand.LEFT if _side == 1 else HandIKModifier.Hand.RIGHT
+	var want := 0
+	var target := Transform3D()
+	var rotate := false
+	var ok := held_node != null and held_def != null and UltraInjury.two_hands(s) and has_view() \
+		and s.state not in UltraActionLayer.TWO_HANDED and UltraActionLayer.raised(s) > 0.0
+	var vr := character.visual_root.global_transform if character.visual_root else Transform3D()
+	var fwd := -vr.basis.z
+	var side := vr.basis.x * float(-_side)          # (toward the free hand's side)
+	if ok and held_def.kind == ItemDefinition.Kind.MELEE and s.state != MotorState.Id.CRAWL:
+		var grip2 := float(held_def.stat("two_hand_grip", 0.0))
+		if grip2 > 0.0:
+			# Both hands on the club: the free hand just below the gun hand on the handle,
+			# wrapped round it from the other side, fingers closed - and locked to the gun
+			# hand's final pose (a spring on its own trailed a fast swing off the handle).
+			var tip := UltraPoseSampler.marker(held_node, "M_Tip")
+			var g := held_node.global_transform
+			var axis := (g * tip.origin - g.origin).normalized() if tip != Transform3D.IDENTITY else g.basis.y.normalized()
+			var hand_r := g * grip().affine_inverse()          # the gun hand, as the club implies
+			var fr := hand_r.basis.y.normalized()               # its fingers
+			var pr := (hand_r.basis.orthonormalized() * _palm_dir(HandIKModifier.Hand.RIGHT if _side == 1 else HandIKModifier.Hand.LEFT)).normalized()
+			var fl := (fr - axis * fr.dot(axis)).normalized()
+			var b := anim.hand_ik.hand_basis(free, fl, -pr)
+			var on := g.origin - axis * grip2
+			target = Transform3D(b if b != Basis() else hand_r.basis, on - fl * 0.065 + pr * 0.03)
+			rotate = b != Basis()
+			want = 2
+		else:
+			# Guard, swung against the weapon hand's travel (chest space).
+			var chest := character.skeleton.global_transform * character.skeleton.get_bone_global_pose(_chest_bone())
+			var hand_now := g_hand_pos()
+			var lat := (hand_now - _prev_weapon_hand).dot(side) / maxf(delta, 0.001) if _prev_weapon_hand != Vector3.INF else 0.0
+			_prev_weapon_hand = hand_now
+			_counter = lerpf(_counter, clampf(-lat * 0.06, -0.18, 0.18), 1.0 - exp(-8.0 * delta))
+			target = Transform3D(Basis(), chest.origin + fwd * 0.26 + side * (0.1 + _counter) + Vector3.DOWN * 0.08 - fwd * absf(_counter) * 0.5)
+			want = 1
+	elif ok and s.state == MotorState.Id.CRAWL and not held_def.two_handed and held_def.kind == ItemDefinition.Kind.FIREARM:
+		var chest2 := character.skeleton.global_transform * character.skeleton.get_bone_global_pose(_chest_bone())
+		target = Transform3D(Basis(), chest2.origin + fwd * 0.3 + side * 0.12 + Vector3.DOWN * 0.22)
+		want = 1
+	var guard_w := 1.0 if want > 0 else 0.0
+	if held_def and held_def.kind == ItemDefinition.Kind.MELEE and float(held_def.stat("two_hand_grip", 0.0)) <= 0.0:
+		guard_w *= lerpf(0.55, 1.0, anim.swing_w)       # (a looser guard between strikes)
+	_free_w = move_toward(_free_w, guard_w, delta * 4.0)
+	if want == 2:
+		_free_w = 1.0                      # (on the handle at once: no easing on and off it)
+	if _free_w > 0.001 and want > 0:
+		anim.hand_ik.set_goal(free, target, smoothstep(0.0, 1.0, _free_w), rotate, 40.0 if want == 2 else 12.0)
+		if want == 2:
+			var gun_hand := HandIKModifier.Hand.RIGHT if _side == 1 else HandIKModifier.Hand.LEFT
+			anim.hand_ik.follow_hand(free, gun_hand, held_node.global_transform * grip().affine_inverse())
+			anim.hand_ik.set_curl(free, 1.0)
+			_wrap_on(free, target.origin + target.basis.y.normalized() * 0.065)
+		_owns[free] = true
+		_free_owned = true
+	elif _free_owned:
+		anim.hand_ik.release(free, 6.0)
+		_owns[free] = false
+		_free_owned = false
+		_prev_weapon_hand = Vector3.INF
+
+
+var _free_w := 0.0
+var _free_owned := false
+
+
+## The palm's direction in the hand bone's frame (HandIK learns it from the curled fingers).
+func _palm_dir(h: int) -> Vector3:
+	var hik := character.anim.hand_ik
+	var v: Vector3 = hik._palm_local[h] if hik._palm_local[h] != Vector3.ZERO else Vector3.ZERO
+	if v == Vector3.ZERO:
+		hik.hand_basis(h, Vector3.FORWARD, Vector3.DOWN)     # (learns it)
+		v = hik._palm_local[h]
+	return v if v != Vector3.ZERO else Vector3.BACK
+var _counter := 0.0
+var _prev_weapon_hand := Vector3.INF
+var _chest_b := -1
+
+
+func _chest_bone() -> int:
+	if _chest_b < 0:
+		_chest_b = character.skeleton.find_bone("UpperChest")
+	return _chest_b
+
+
+## Where the weapon hand is (world).
+func g_hand_pos() -> Vector3:
+	var sk := character.skeleton
+	var b := sk.find_bone("RightHand" if _side == 1 else "LeftHand")
+	return (sk.global_transform * sk.get_bone_global_pose(b)).origin if b >= 0 else Vector3.ZERO
+
+
+## A magazine reload done by hand: the gun stays up, the left hand swaps the magazine.
+func mag_reload() -> bool:
+	var s := character.state
+	return s.action == UltraActionLayer.Action.RELOADING and held_node != null and held_def != null \
+		and held_def.kind == ItemDefinition.Kind.FIREARM and String(held_def.stat("reload_mode", "")) != "shell" \
+		and has_view() and _side == 1 and UltraInjury.two_hands(s) and s.state != MotorState.Id.CRAWL \
+		and held_node.find_child("Magazine", true, false) != null
+
+
+var _mag_w := 0.0
+var _mag_hand := Transform3D()
+
+
+## The magazine swap, keyed off the sim's reload clock (action_t, reload_commit / reload_time):
+## to the magazine, pull it out and down to a pouch at the belt, a fresh one up, seated in the
+## well, back to the handguard. The magazine rides in the hand meanwhile.
+func _drive_mag_reload(gun: Transform3D, delta: float) -> void:
+	var on := mag_reload()
+	_mag_w = move_toward(_mag_w, 1.0 if on else 0.0, delta * 4.0)
+	if character.anim.arm_out and (on or _mag_w > 0.0):
+		character.anim.arm_out.hand_give = smoothstep(0.0, 1.0, _mag_w)
+	if not on:
+		_mag_hand = Transform3D()
+		return
+	var anim := character.anim
+	var s := character.state
+	var commit := float(held_def.stat("reload_commit", 1.5))
+	var t := s.action_t
+	var mag := held_node.find_child("Magazine", true, false) as Node3D
+	var mag_rest: Transform3D = mag.get_meta("rest") if mag.has_meta("rest") else mag.transform
+	var g := gun.orthonormalized()
+	# Where the magazine sits in the gun (its rest pose, taken into the gun's own frame).
+	var par := mag.get_parent() as Node3D
+	var mag_in_gun := held_node.global_transform.affine_inverse() * par.global_transform * mag_rest if par != held_node else mag_rest
+	var in_well := gun * mag_in_gun
+	var vr := character.visual_root.global_transform
+	var fwd := -vr.basis.z
+	var left := -vr.basis.x * float(_side)
+	var chest := character.skeleton.global_transform * character.skeleton.get_bone_global_pose(_chest_bone())
+	# (Out in front of the hip, clear of the waist: at the belt itself the hand went through it.)
+	var pouch := Transform3D(g.basis, chest.origin + fwd * 0.26 + left * 0.2 + Vector3.DOWN * 0.34)
+	var below := Transform3D(g.basis, in_well.origin + g.basis.y * -0.18 + left * 0.05)
+	# Key poses of the magazine (world) over the reload; the hand holds it from below.
+	var keys := [[0.0, in_well], [0.3, in_well], [0.5, below], [0.75, pouch], [commit - 0.55, pouch],
+		[commit - 0.3, below], [commit - 0.12, in_well]]
+	var mag_at := in_well
+	var holding := t > 0.25 and t < commit - 0.1
+	for k in range(keys.size() - 1):
+		var a: Array = keys[k]
+		var b: Array = keys[k + 1]
+		if t >= float(a[0]) and t <= float(b[0]):
+			var u := smoothstep(float(a[0]), float(b[0]), t)
+			mag_at = (a[1] as Transform3D).interpolate_with(b[1], u)
+	_mag_hand = mag_at if holding else Transform3D()
+	# The hand: under the magazine, palm up (back on the handguard outside the swap).
+	var palm_up := anim.hand_ik.hand_basis(HandIKModifier.Hand.LEFT, (g.basis * Vector3.FORWARD).normalized(), Vector3.UP)
+	var grip_mag := Transform3D(palm_up if palm_up != Basis() else g.basis, mag_at.origin + Vector3.DOWN * 0.07 - (g.basis * Vector3.FORWARD) * 0.05)
+	var sup := _support_under(gun) if held_def.support_fingers != Vector3.ZERO else gun * held_def.support_offset
+	var reach := smoothstep(0.0, 0.25, t) * (1.0 - smoothstep(commit - 0.1, commit + 0.15, t))
+	var goal := sup.interpolate_with(grip_mag, reach)
+	anim.hand_ik.set_goal(HandIKModifier.Hand.LEFT, goal, smoothstep(0.0, 1.0, _mag_w), true, 18.0)
+	anim.hand_ik.set_curl(HandIKModifier.Hand.LEFT, 0.7)
+	_owns[HandIKModifier.Hand.LEFT] = true
 
 
 func ready_support() -> bool:
@@ -652,7 +928,7 @@ func _drive_barrel_smoke(delta: float) -> void:
 		pm.damping_max = 0.6
 		_wisps.emitting = false
 		held_node.add_child(_wisps)
-		_wisps.transform = UltraPoseSampler.marker(held_node, "M_Muzzle")
+		_wisps.transform = Transform3D(Basis(), UltraPoseSampler.marker(held_node, "M_Muzzle").origin)      # (gun frame, not the marker's)
 	_wisps.emitting = _heat > 0.2
 	_wisps.speed_scale = 0.8 + minf(_heat, 1.5) * 0.3
 
@@ -809,10 +1085,25 @@ func melee_offset() -> Transform3D:
 	var k := melee_amount()
 	if k == 0.0:
 		return Transform3D.IDENTITY
+	# Turned during the wind-up so what strikes leads, then driven forward through the blow;
+	# both ease back after it. (Gun frame, about the grip: -Z the barrel, +Y up.)
+	var h: float = _melee_sw.hit_from
+	var T: float = _melee_sw.time
+	var t := _melee_t
+	var back := 1.0 - smoothstep(h, T, t)
+	var turn := smoothstep(0.0, h * 0.75, t) * back
+	var thrust := smoothstep(h * 0.45, h, t) * back
 	if _long_gun():
-		var b := Basis(Vector3.UP, -0.85 * k) * Basis(Vector3.BACK, 0.4 * k)
-		return Transform3D(b, Vector3(-0.10 * k, 0.06 * k, -0.36 * k))
-	return Transform3D(Basis(Vector3.RIGHT, -1.0 * k), Vector3(0.0, -0.04 * k, -0.24 * k))
+		# A horizontal butt stroke: cocked back with the muzzle a little left, then the stock
+		# swung forward and across from the shoulder (the muzzle goes out to the right) - the
+		# butt and the side of the stock hit. (Tipping the barrel up over the shoulder threw the
+		# whole body over after the stock.)
+		var wind := smoothstep(0.0, h * 0.6, t) * (1.0 - smoothstep(h * 0.45, h, t))
+		var strike := smoothstep(h * 0.45, h, t) * back
+		var b := Basis(Vector3.UP, 0.3 * wind - 1.35 * strike) * Basis(Vector3.BACK, -0.25 * strike)
+		return Transform3D(b, Vector3(-0.14 * strike, 0.02 * strike, 0.06 * wind - 0.32 * strike))
+	# A pistol whip: muzzle tipped up so the base of the grip leads, hammered forward and down.
+	return Transform3D(Basis(Vector3.RIGHT, 1.75 * turn), Vector3(0.0, -0.1 * thrust + 0.05 * turn, -0.3 * thrust))
 
 
 ## Held item in first person: same layers as the body so it's never culled.
@@ -821,10 +1112,13 @@ func _set_layers(n: Node) -> void:
 		(c as VisualInstance3D).layers = 1
 
 
+## The muzzle: at the M_Muzzle marker, -Z along the barrel (the gun's own frame - the marker's
+## basis comes from Blender and pointed the muzzle smoke back down the barrel).
 func muzzle_transform() -> Transform3D:
 	if held_node == null:
 		return character.visual_root.global_transform
-	return held_node.global_transform * UltraPoseSampler.marker(held_node, "M_Muzzle")
+	var g := held_node.global_transform
+	return Transform3D(g.basis.orthonormalized(), g * UltraPoseSampler.marker(held_node, "M_Muzzle").origin)
 
 
 ## World direction out of the ejection port: whichever side of the gun the port marker is on

@@ -15,6 +15,12 @@ const WAIST_HALF_WIDTH := 0.165
 const WAIST_HALF_DEPTH := 0.15
 ## At most this much turn per joint and pass (degrees).
 @export var max_turn_deg := 25.0
+## After the hand IK (whose targets win): swing an elbow that ended up inside the torso out
+## round the shoulder->wrist line instead - the hand stays exactly where the IK put it.
+@export var keep_hands := false
+## keep_hands: when the swing can't get the arm out, this much of the full clearing (hands move)
+## follows - set while the hands' exact place doesn't matter (a reload).
+var hand_give := 0.0
 var amount := 1.0
 
 var _b := {}
@@ -46,6 +52,18 @@ func _process_modification_with_delta(_delta: float) -> void:
 		if _b.is_empty() or (_b.values() as Array).has(-1):
 			return
 	var sc := maxf(sk.global_basis.get_scale().x, 0.001)
+	if keep_hands:
+		for side in ["Left", "Right"]:
+			_swing_out(sk, sc, _b[side + "UpperArm"], _b[side + "LowerArm"], _b[side + "Hand"])
+			if hand_give > 0.001:
+				var keep := amount
+				amount = hand_give
+				for _i in 3:
+					_clear(sk, sc, _b[side + "UpperArm"], [_b[side + "LowerArm"]], 0.55)
+				for _i in 2:
+					_clear(sk, sc, _b[side + "LowerArm"], [_b[side + "Hand"]], 0.5)
+				amount = keep
+		return
 	for side in ["Left", "Right"]:
 		# Elbow (and the middle of the upper arm, which crosses the chest when the elbow is
 		# pulled across): turn the upper arm about the shoulder.
@@ -88,6 +106,42 @@ func _clear(sk: Skeleton3D, sc: float, bone: int, children: Array, mid: float) -
 	var g := sk.get_bone_global_pose(bone)
 	g.basis = Basis(axis.normalized(), ang) * g.basis
 	sk.set_bone_global_pose(bone, g)
+
+
+## Turn the whole arm about the shoulder->wrist line by the smallest angle (either way, up to
+## 100 deg) that gets the elbow and the middle of the upper arm out of the torso.
+func _swing_out(sk: Skeleton3D, sc: float, ua: int, la: int, hand: int) -> void:
+	var f := _torso_frame(sk)
+	var s := sk.get_bone_global_pose(ua).origin
+	var e := sk.get_bone_global_pose(la).origin
+	var hx := sk.get_bone_global_pose(hand)
+	var worst := minf(float(_inside(f, e, sc)[0]), float(_inside(f, s.lerp(e, 0.55), sc)[0]))
+	if worst >= 1.0:
+		return
+	var u := hx.origin - s
+	if u.length() < 1e-3:
+		return
+	u = u.normalized()
+	var best := 0.0
+	var best_q := worst
+	for k in range(1, 11):
+		for sgn in [1.0, -1.0]:
+			var ang: float = deg_to_rad(10.0 * k) * sgn
+			var r := Basis(u, ang)
+			var e2 := s + r * (e - s)
+			var q := minf(float(_inside(f, e2, sc)[0]), float(_inside(f, s.lerp(e2, 0.55), sc)[0]))
+			if q > best_q + 0.01:
+				best_q = q
+				best = ang
+		if best_q >= 1.0:
+			break
+	if best == 0.0:
+		return
+	var rot := Basis(u, best * amount)
+	var g := sk.get_bone_global_pose(ua)
+	g.basis = rot * g.basis
+	sk.set_bone_global_pose(ua, g)
+	sk.set_bone_global_pose(hand, hx)          # (the hand: where and how the IK left it)
 
 
 ## [hips, axis (unit), length, right, fwd] in skeleton space.

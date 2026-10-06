@@ -125,6 +125,12 @@ func step(s: MotorState, input: InputFrame, p_dt: float) -> void:
 	else:
 		s.jump_buf_t = maxf(s.jump_buf_t - dt, 0.0)
 
+	# Lowered over an edge onto a hang / ladder / wall, the stick is still held toward the drop
+	# (which reads as "up" / "climb out" there): it counts again once let go.
+	# (trav_from holds the stick and view yaw as they were: a new push - or the view turned - counts.)
+	if s.has(MotorState.F_AWAIT_NEUTRAL) and (input.move.length() < 0.3 			or input.move.distance_to(Vector2(s.trav_from.x, s.trav_from.y)) > 0.6 			or absf(angle_difference(input.yaw, s.trav_from.z)) > 0.8):
+		s.set_flag(MotorState.F_AWAIT_NEUTRAL, false)
+
 	# Transitions: hooks first (traversal, water...), then the state's own rules.
 	for _i in 3:
 		var nxt := -1
@@ -134,7 +140,7 @@ func step(s: MotorState, input: InputFrame, p_dt: float) -> void:
 				break
 			nxt = -1
 		if nxt < 0:
-			nxt = handler(s.state).next(self, s, input)
+			nxt = handler(s.state).next(self, s, _gated(s, input))
 		if nxt < 0 or nxt == s.state:
 			break
 		change_state(s, input, nxt)
@@ -147,7 +153,7 @@ func step(s: MotorState, input: InputFrame, p_dt: float) -> void:
 		body.collision_mask &= ~UltraLayers.WORLD_DYNAMIC
 	else:
 		body.collision_mask |= UltraLayers.WORLD_DYNAMIC
-	handler(s.state).tick(self, s, input)
+	handler(s.state).tick(self, s, _gated(s, input))
 
 	s.pos = body.global_position
 	s.vel = body.velocity
@@ -174,6 +180,28 @@ func horizontal(v: Vector3) -> Vector3:
 	return Vector3(v.x, 0.0, v.z)
 
 
+## The input a hang / ladder / wall sees: no stick while F_AWAIT_NEUTRAL.
+func _gated(s: MotorState, input: InputFrame) -> InputFrame:
+	if not s.has(MotorState.F_AWAIT_NEUTRAL) or s.state not in [MotorState.Id.LEDGE_HANG, MotorState.Id.LADDER, MotorState.Id.WALL_CLIMB]:
+		return input
+	var f := input.copy()
+	f.move = Vector2.ZERO
+	return f
+
+
+## Seconds to get down to prone from a crouch, or back up (no moving meanwhile).
+const PRONE_TRANSITION := 0.8
+
+
+## Getting down to prone or back up: between the crawl and crouch heights.
+func prone_transitioning(s: MotorState) -> bool:
+	return s.height < profile.crouch_height - 0.05 and s.height > profile.crawl_height + 0.05
+
+
+## Degrees per second a prone body pivots round.
+const PRONE_TURN_RATE := 110.0
+
+
 ## Body yaw rules shared by ground states. Returns the yaw error that remains (for turn anims).
 func update_body_yaw(s: MotorState, input: InputFrame, moving: bool) -> void:
 	var mode := MovementProfile.Rotation.FACE_AIM
@@ -184,9 +212,15 @@ func update_body_yaw(s: MotorState, input: InputFrame, moving: bool) -> void:
 		mode = profile.tp_rotation
 		if mode == MovementProfile.Rotation.FACE_MOVE_UNTIL_AIM:
 			mode = MovementProfile.Rotation.FACE_AIM if input.has(InputFrame.B_SECONDARY) else MovementProfile.Rotation.FACE_MOVE
+	# Prone the whole body pivots on the ground, slowly (elbows and knees walk it round).
+	var prone := s.stance == MotorState.Stance.CRAWL
 	if mode == MovementProfile.Rotation.FACE_AIM:
 		var err := angle_difference(s.body_yaw, input.yaw)
-		if moving or s.held_id != 0 or not profile.enable_turn_in_place:
+		if prone:
+			s.body_yaw = rotate_toward_angle(s.body_yaw, input.yaw, deg_to_rad(PRONE_TURN_RATE) * dt)
+			s.set_flag(F_TURNING, false)
+			s.turn_v = 0.0
+		elif moving or s.held_id != 0 or not profile.enable_turn_in_place:
 			# Moving: feet follow the aim, slightly smoothed so the hips swing rather than snap.
 			s.body_yaw = rotate_toward_angle(s.body_yaw, input.yaw, deg_to_rad(900.0) * dt)
 			s.set_flag(F_TURNING, false)
@@ -225,13 +259,13 @@ func update_body_yaw(s: MotorState, input: InputFrame, moving: bool) -> void:
 		if hv.length() > 0.3:
 			var target := atan2(-hv.x, -hv.z)
 			var speed_k := clampf(hv.length() / maxf(profile.sprint_speed, 0.1), 0.0, 1.0)
-			var rate := deg_to_rad(profile.body_turn_rate) * lerpf(1.0, 0.55, speed_k)
+			var rate := deg_to_rad(PRONE_TURN_RATE if prone else profile.body_turn_rate) * lerpf(1.0, 0.55, speed_k)
 			s.body_yaw = rotate_toward_angle(s.body_yaw, target, rate * dt)
 
 
 ## A firearm in hand, up and ready (it faces the aim, and turns in place sooner).
 static func gun_up(s: MotorState) -> bool:
-	if s.held_uid == 0 or not UltraActionLayer.is_up(s.action):
+	if UltraActionLayer.raised(s) < 0.35:        # (turning to the aim starts during the draw)
 		return false
 	var d := ItemDB.by_index(s.equipped)
 	return d != null and d.kind == ItemDefinition.Kind.FIREARM
@@ -251,7 +285,7 @@ func _sample_water(s: MotorState) -> void:
 ## Ground speed the player is asking for this tick.
 func target_ground_speed(s: MotorState, input: InputFrame) -> float:
 	var mag := minf(input.move.length(), 1.0)
-	if mag < 0.05:
+	if mag < 0.05 or prone_transitioning(s):
 		return 0.0
 	var speed: float
 	match s.stance:
@@ -720,6 +754,9 @@ func update_stance(s: MotorState, want: int) -> void:
 			s.stance = want
 	var target := stance_height(s.stance)
 	var rate := (profile.stand_height - profile.crouch_height) / maxf(profile.stance_transition, 0.01)
+	# Getting down to / up from prone takes a moment (the transition clips play over it).
+	if s.stance == MotorState.Stance.CRAWL or s.height < profile.crouch_height - 0.02:
+		rate = (profile.crouch_height - profile.crawl_height) / PRONE_TRANSITION
 	s.height = move_toward(s.height, target, rate * dt)
 	_apply_capsule(s.height)
 

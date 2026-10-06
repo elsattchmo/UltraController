@@ -33,9 +33,19 @@ class Goal:
 	## pose took the goal over with the current one.)
 	var rel_hand := -1
 	var rel := Transform3D()
+	## Curled fingers wrap this box (`wrap_box` centre / orientation and `wrap_half` extents in
+	## `wrap_node`'s frame), each joint bending only until it touches: a fixed curl sized for
+	## a 4 cm bar sank the fingers 2 cm into a handguard.
+	var wrap_node: Node3D = null
+	var wrap_box := Transform3D()
+	var wrap_half := Vector3.ZERO
 
 var goals := [Goal.new(), Goal.new(), Goal.new(), Goal.new()]
 var last_error := [0.0, 0.0, 0.0, 0.0]
+## Each arm's shoulder (upper arm head, skeleton space) as the pose reached this modifier last
+## frame - after the inertial blend, before any IK. (Read in _process the shoulder is the raw
+## clip pose, which jumps where the blend smooths a change of clip.)
+var pre_shoulder := [Vector3.INF, Vector3.INF]
 
 var _arms := []
 
@@ -111,6 +121,15 @@ func set_curl(hand: int, amount: float) -> void:
 	(goals[hand] as Goal).curl = clampf(amount, 0.0, 1.0)
 
 
+## Wrap `hand`'s curled fingers round a box: `local` (centre / orientation) and `half` extents
+## in `node`'s frame, followed as the node moves. `node` null = the fixed curl.
+func set_wrap(hand: int, node: Node3D, local := Transform3D(), half := Vector3.ZERO) -> void:
+	var g: Goal = goals[hand]
+	g.wrap_node = node
+	g.wrap_box = local
+	g.wrap_half = half
+
+
 func release(hand: int, speed := 6.0) -> void:
 	var g: Goal = goals[hand]
 	g.want_weight = 0.0
@@ -154,6 +173,8 @@ func _process_modification_with_delta(delta: float) -> void:
 	if sk == null or _arms.size() < 2:
 		return
 	var inv := sk.global_transform.affine_inverse()
+	for i in 2:
+		pre_shoulder[i] = sk.get_bone_global_pose(_arms[i][0]).origin
 	# Hands that follow the other hand go after it.
 	var order: Array[int] = []
 	for i in mini(goals.size(), _arms.size()):
@@ -206,14 +227,24 @@ func _process_modification_with_delta(delta: float) -> void:
 				var cur := sk.get_bone_pose_rotation(fb)
 				sk.set_bone_pose_rotation(fb, cur.slerp(rest, g.open * w * 0.85))
 		if g.curl > 0.0 and i < 2:
-			_close_fingers(sk, i, g.curl * w)
+			var box := Transform3D()
+			var half := Vector3.ZERO
+			if g.wrap_node and is_instance_valid(g.wrap_node) and g.wrap_node.is_inside_tree():
+				box = (inv * g.wrap_node.global_transform * g.wrap_box).affine_inverse()
+				half = g.wrap_half
+			_close_fingers(sk, i, g.curl * w, box, half)
 
 
 ## Fingers straightened, then bent toward the palm joint by joint (a grip round a ~4 cm bar).
 const CURL_DEG := {"Proximal": 48.0, "Intermediate": 62.0, "Distal": 38.0}
 
 
-func _close_fingers(sk: Skeleton3D, hand: int, amount: float) -> void:
+## Wrapping a box: a joint bends only until the next joint (or the fingertip) is a finger's
+## half thickness off the box's surface.
+const FINGER_R := 0.009
+
+
+func _close_fingers(sk: Skeleton3D, hand: int, amount: float, to_box := Transform3D(), half := Vector3.ZERO) -> void:
 	if _palm_local[hand] == Vector3.ZERO:
 		hand_basis(hand, Vector3.FORWARD, Vector3.UP)       # learns the palm direction
 		if _palm_local[hand] == Vector3.ZERO:
@@ -235,5 +266,56 @@ func _close_fingers(sk: Skeleton3D, hand: int, amount: float) -> void:
 		var axis := dir.cross(palm)
 		if axis.length() < 1e-4:
 			continue
-		g.basis = Basis(axis.normalized(), deg_to_rad(deg) * amount) * g.basis
+		var ang := deg_to_rad(deg) * amount
+		if half != Vector3.ZERO:
+			ang = _wrap_angle(sk, fb, g, axis.normalized(), ang, to_box, half)
+		g.basis = Basis(axis.normalized(), ang) * g.basis
 		sk.set_bone_global_pose(fb, g)
+
+
+## The largest bend <= `full` about `axis` that keeps the rest of the finger, held straight,
+## out of the box (`to_box`: skeleton space -> box frame) - the next joints then bend on round
+## it. Full when even that is clear; 0 when the finger is inside the box anyway.
+func _wrap_angle(sk: Skeleton3D, fb: int, g: Transform3D, axis: Vector3, full: float, to_box: Transform3D, half: Vector3) -> float:
+	# The rest of the finger in this joint's frame, straight (the joints' rest rotations).
+	var pts := PackedVector3Array()
+	var xf := Transform3D()
+	var b := fb
+	var last := 0.02
+	while true:
+		var kids := sk.get_bone_children(b)
+		if kids.is_empty():
+			pts.append(xf * Vector3(0.0, last * 0.8, 0.0))       # (the fingertip)
+			break
+		var k: int = kids[0]
+		var local := Transform3D(sk.get_bone_rest(k).basis, sk.get_bone_pose(k).origin)
+		last = local.origin.length()
+		xf = xf * local
+		pts.append(xf.origin)
+		b = k
+	var hb := half + Vector3.ONE * FINGER_R
+	if not _chain_in_box(pts, to_box, g, axis, full, hb):
+		return full
+	if _chain_in_box(pts, to_box, g, axis, 0.0, hb):
+		return 0.0
+	var lo := 0.0
+	var hi := full
+	for k in 8:
+		var m := (lo + hi) * 0.5
+		if _chain_in_box(pts, to_box, g, axis, m, hb):
+			hi = m
+		else:
+			lo = m
+	return lo
+
+
+func _chain_in_box(pts: PackedVector3Array, to_box: Transform3D, g: Transform3D, axis: Vector3, ang: float, hb: Vector3) -> bool:
+	var bb := Basis(axis, ang) * g.basis
+	for q in pts:
+		if _in_box(to_box * (g.origin + bb * q), hb):
+			return true
+	return false
+
+
+func _in_box(p: Vector3, hb: Vector3) -> bool:
+	return absf(p.x) < hb.x and absf(p.y) < hb.y and absf(p.z) < hb.z
