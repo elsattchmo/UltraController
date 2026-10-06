@@ -24,6 +24,7 @@ var locals: UltraLocalPlayers
 var menu: CanvasLayer
 var player: UltraCharacter          ## first local player (tours, single-player tools)
 var effects: UltraEffects
+var bars: UltraWorldBars
 var headless := false
 var _title_t := 0.0
 var _pause: Node
@@ -61,6 +62,9 @@ func _ready() -> void:
 	effects = UltraEffects.new()
 	effects.name = "Effects"
 	add_child(effects)
+	bars = UltraWorldBars.new()
+	bars.name = "WorldBars"
+	add_child(bars)
 	UltraNet.session_ended.connect(func(reason: String) -> void:
 		push_warning("session ended: " + reason)
 		if args.has("quit-on-end"):
@@ -141,6 +145,8 @@ func _reserve_devices(n: int) -> void:
 
 
 func _make_character(np: NetPlayer) -> UltraCharacter:
+	if ZombieFactory.is_zombie(np):
+		return ZombieFactory.make(np, not headless)
 	var c := UltraCharacter.new()
 	c.profile = (load(PROFILES.get(UltraArgs.get_str("profile", "fps"), PROFILES["fps"])) as MovementProfile).duplicate(true)
 	c.body_profile = load(BODY)
@@ -183,7 +189,9 @@ func _on_player_added(p: NetPlayer) -> void:
 		effects.watch(p.character)
 	if p.is_local():
 		effects.local_ids.append(p.id)
-	if UltraNet.is_server():
+	if ZombieFactory.is_zombie(p):
+		ZombieFactory.dress(p.character)
+	elif UltraNet.is_server():
 		_give_starting_kit(p.character)
 	if p.is_local() and player == null:
 		player = p.character

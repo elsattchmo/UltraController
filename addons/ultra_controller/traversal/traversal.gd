@@ -104,6 +104,8 @@ static func scan(m: UltraMotor, feet: Vector3, dir: Vector3, max_h := 2.4, reach
 ## Motor transition hook (registered in UltraMotor). Returns a state id or -1.
 static func hook(m: UltraMotor, s: MotorState, i: InputFrame) -> int:
 	var Id := MotorState.Id
+	if not m.profile.enable_traversal:
+		return -1
 	if s.held_id != 0 or s.equipped != 0 and s.action == UltraActionLayer.Action.RELOADING:
 		return -1
 	if not UltraInjury.can_climb(s):

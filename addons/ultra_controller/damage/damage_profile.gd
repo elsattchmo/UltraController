@@ -26,6 +26,14 @@ enum Gore { OFF, NO_BLOOD, FULL }
 ## opens the belly and throws the body.
 @export var halve_range := 3.0
 @export var halve_reach := 0.13
+## The undead: a close blast (summed buckshot / explosion >= `halve_alive_min`, within `halve_range`) or a
+## blade blow (>= `halve_blade_min`) through the waist cuts the body in two WITHOUT killing it: both
+## legs come off with the lower half, health is capped at `halved_hp_cap`, and the upper half
+## (MotorState.F_HALVED) knocks down, then crawls on its arms.
+@export var halve_survives := false
+@export var halve_alive_min := 70.0
+@export var halve_blade_min := 55.0
+@export var halved_hp_cap := 45.0
 ## Bitmask of regions that can come off (bit = UltraLimbs.Region); torso never does.
 @export_flags("Head", "Torso", "Upper arm L", "Forearm L", "Upper arm R", "Forearm R", "Thigh L", "Shin L", "Thigh R", "Shin R", "Hand L", "Hand R", "Foot L", "Foot R")
 var severable := 0b11111111111101
@@ -47,6 +55,8 @@ var severable := 0b11111111111101
 @export_range(1, 3, 0.05) var injured_arm_reload := 1.5
 ## A hit this heavy (after the region multiplier) knocks you down.
 @export var knockdown_damage := 45.0
+## A shove (UltraCombat.DamageInfo.shove, m/s: shotgun blasts) this big knocks you off your feet.
+@export var shove_knockdown := 3.5
 ## Knockouts (blunt trauma: clubs, gun-butts, thrown props): a hit to the head of at least
 ## `ko_head`, or a blunt blow anywhere of at least `ko_heavy` after the region multiplier.
 @export var ko_head := 18.0

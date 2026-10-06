@@ -333,7 +333,7 @@ func _process(delta: float) -> void:
 		# (Up again - the get-up done, or respawned - while the down view fades out: fully handed
 		# back. It dropped to 0 the moment GET_UP ended, and for a few frames the view lurched
 		# back to the head's before fading to the aim.)
-		var handback := smoothstep(0.1, 0.75, character.state.state_time / UltraAnimDriver.GETUP_TIME) if getting_up else (0.0 if is_down else 1.0)
+		var handback := smoothstep(0.1, 0.75, character.state.state_time / character.profile.get_up_time) if getting_up else (0.0 if is_down else 1.0)
 		head_q = head_q.slerp(cam_basis.get_rotation_quaternion(), handback)
 		if _down_w < 0.02 or _down_p == Vector3.INF:
 			_down_q = head_q

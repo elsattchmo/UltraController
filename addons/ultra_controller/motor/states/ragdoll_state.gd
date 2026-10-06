@@ -5,7 +5,7 @@ extends MotorStateHandler
 
 const Id := MotorState.Id
 const LIE_HEIGHT := 0.5
-const GET_UP_TIME := 2.8
+const GET_UP_TIME := 2.8                 ## (the default: MovementProfile.get_up_time)
 ## Lying still this long (on the ground, barely moving) before getting up.
 const STILL_TIME := 1.0
 
@@ -35,7 +35,7 @@ func next(m: UltraMotor, s: MotorState, _i: InputFrame) -> int:
 		if (s.state_time > 1.4 and s.trav_t >= STILL_TIME) or s.state_time > 8.0:
 			return Id.GET_UP
 		return -1
-	if s.state_time >= GET_UP_TIME:
+	if s.state_time >= m.profile.get_up_time:
 		if UltraInjury.must_crawl(s):
 			s.stance = MotorState.Stance.CRAWL
 			return Id.CRAWL

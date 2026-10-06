@@ -196,7 +196,8 @@ var _climb_look := 0.0
 ## Face-down get-up: Death_A from where it lies on its front (3.85 s) back to standing (1.6 s).
 const FRONT_GETUP_FROM := 1.6
 const FRONT_GETUP_LEN := 2.25
-const GETUP_TIME := 2.8          ## keep in step with ragdoll_state.gd GET_UP_TIME
+const GETUP_TIME := 2.8          ## the default; MovementProfile.get_up_time (set by the character) rules
+var get_up_time := GETUP_TIME
 ## Face-down get-up from the Mixamo clip: from the start of the push-up to standing (s).
 const FRONT_GETUP_SEG := Vector2(1.4, 5.3)
 var _front_len := FRONT_GETUP_LEN
@@ -1015,8 +1016,8 @@ func _drive_state(speed: float) -> void:
 		tree.set(LOCO + "climb/seek/seek_request", 0.22 if state == MotorState.Id.LEDGE_CLIMB else 0.0)
 		tree.set(LOCO + "climb/speed/scale", 0.6 / maxf(climb_duration, 0.2))
 	if want.begins_with("getup") and _cur_loco != want:
-		var dur := GETUP_TIME
-		tree.set(LOCO + "getup/speed/scale", maxf(_clip_len(&"get_up", 1.5), GETUP_TIME) / dur)
+		var dur := get_up_time
+		tree.set(LOCO + "getup/speed/scale", maxf(_clip_len(&"get_up", 1.5), get_up_time) / dur)
 		tree.set(LOCO + "getup_front/speed/scale", _front_len / dur)
 		_loco.start(want, true)
 		_cur_loco = want

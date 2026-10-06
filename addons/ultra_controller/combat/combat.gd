@@ -15,7 +15,7 @@ class DamageInfo:
 	var shape := 0
 	var region := -1                ## UltraLimbs.Region, -1 = work it out from the point
 	## Knock-back (m/s, world): a shotgun blast's shove on the whole body - past
-	## UltraCharacter.SHOVE_KNOCKDOWN it knocks you over, a lighter one rocks you back.
+	## DamageProfile.shove_knockdown it knocks you over, a lighter one rocks you back.
 	var shove := Vector3.ZERO
 	## A melee blow (a swing, a gun-butt): a held block stops most of it.
 	var melee := false

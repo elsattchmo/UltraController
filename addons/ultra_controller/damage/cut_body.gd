@@ -10,7 +10,9 @@ extends RefCounted
 ## shown; nothing is scaled away, so the skin round a cut stays exactly where it was.
 ## All pieces skin to the character's own skeleton with the body's bind poses (by bone name).
 
-enum Torso { WHOLE, OPEN, HALVED }
+## HALVED: the torso in two, both halves shown (a body killed that way). UPPER: cut in two and still
+## alive (MotorState.F_HALVED) - only the upper half shows, the lower half and the legs are gone.
+enum Torso { WHOLE, OPEN, HALVED, UPPER }
 
 const R := UltraLimbs.Region
 const PARENT := {
@@ -18,6 +20,7 @@ const PARENT := {
 	R.FOREARM_L: R.ARM_L, R.FOREARM_R: R.ARM_R, R.HAND_L: R.FOREARM_L, R.HAND_R: R.FOREARM_R,
 	R.SHIN_L: R.THIGH_L, R.SHIN_R: R.THIGH_R, R.FOOT_L: R.SHIN_L, R.FOOT_R: R.SHIN_R,
 }
+const LEGS := [R.THIGH_L, R.SHIN_L, R.FOOT_L, R.THIGH_R, R.SHIN_R, R.FOOT_R]
 
 static var _sets := {}                    ## cut scene -> {part name: [ArrayMesh, Skin]}
 
@@ -81,6 +84,12 @@ func activate() -> void:
 	var hm := character.head_mesh
 	var body_mat := bm.get_active_material(0)
 	var head_mat := hm.get_active_material(0) if hm else body_mat
+	# A model with several materials (a Mixamo body: skin, clothes): the pieces carry them by name.
+	var live := {}
+	for si in bm.mesh.get_surface_count():
+		var sm := bm.mesh.surface_get_material(si)
+		if sm and sm.resource_name != "":
+			live[sm.resource_name] = bm.get_active_material(si)
 	var pieces := _set_of(character.body_profile.cut_scene)
 	for name: String in pieces:
 		var src_mesh := pieces[name][0] as ArrayMesh
@@ -102,7 +111,7 @@ func activate() -> void:
 				"CutMeat": use = UltraCharacter._near_fade_mat(UltraWoundMesh.meat_mat())
 				"CutBone": use = UltraCharacter._near_fade_mat(UltraWoundMesh.bone_mat())
 				"CutMarrow": use = UltraCharacter._near_fade_mat(UltraWoundMesh.marrow_mat())
-				_: use = head_mat if is_head else body_mat
+				_: use = live.get(mn, head_mat if is_head else body_mat)
 			mi.set_surface_override_material(si, use)
 		mi.visible = false
 		sk.add_child(mi)
@@ -145,13 +154,20 @@ func update() -> void:
 		return
 	for mi: MeshInstance3D in parts.values():
 		mi.visible = false
-	var t: String = {Torso.WHOLE: "Seg_TORSO", Torso.OPEN: "Seg_TORSO_OPEN", Torso.HALVED: ""}[torso]
-	if t != "":
-		_show(t)
-	else:
-		for n in ["Seg_WAIST_UP", "Seg_WAIST_DOWN", "Cap_WAIST_up", "Cap_WAIST_down"]:
-			_show(n)
+	match torso:
+		Torso.WHOLE:
+			_show("Seg_TORSO")
+		Torso.OPEN:
+			_show("Seg_TORSO_OPEN")
+		Torso.HALVED:
+			for n in ["Seg_WAIST_UP", "Seg_WAIST_DOWN", "Cap_WAIST_up", "Cap_WAIST_down"]:
+				_show(n)
+		Torso.UPPER:
+			_show("Seg_WAIST_UP")
+			_show("Cap_WAIST_up")
 	for r: int in PARENT:
+		if torso == Torso.UPPER and r in LEGS:
+			continue                     # (they went with the lower half)
 		var nm := region_name(r)
 		if not gone(r):
 			_show("Seg_" + nm)
@@ -186,6 +202,22 @@ func gib_parts(cut: int) -> Array[MeshInstance3D]:
 		var top: bool = not (cut >> int(PARENT.get(r, R.TORSO))) & 1
 		if top and part("Cap_%s_end" % region_name(r)):
 			out.append(part("Cap_%s_end" % region_name(r)))
+	return out
+
+
+## What is about to leave with the lower half when the body is cut in two alive: the belly down
+## to the hips with its sealed end, and whatever of the legs is still on (pieces, stumps).
+## Call before switching `torso` to UPPER (it reads what is shown now).
+func lower_half_parts() -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	for n in ["Seg_WAIST_DOWN", "Cap_WAIST_down"]:
+		if part(n):
+			out.append(part(n))
+	for r: int in LEGS:
+		for n in ["Seg_" + region_name(r), "Cap_%s_stump" % region_name(r)]:
+			var mi := part(n)
+			if mi and mi.visible:
+				out.append(mi)
 	return out
 
 

@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="DamageProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/damage/damage_profile.gd" id="1_uee5i"]
+
+[resource]
+script = ExtResource("1_uee5i")
+region_hp = PackedFloat32Array(60, 100, 45, 40, 45, 40, 70, 60, 70, 60, 25, 25, 32, 32)
+region_mult = PackedFloat32Array(0.6, 0.3, 0.1, 0.08, 0.1, 0.08, 0.12, 0.1, 0.12, 0.1, 0.04, 0.04, 0.05, 0.05)
+sever_overkill = 30.0
+halve_survives = true
+bleed_rate = PackedFloat32Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+cripple_bleed_rate = 0.0
+injured_leg_speed = 0.75
+crippled_leg_speed = 0.55
+knockdown_damage = 12.0
+ko_head = 9999.0
+ko_heavy = 9999.0
+heart_radius = 0.0
+heart_bleed_rate = 0.0

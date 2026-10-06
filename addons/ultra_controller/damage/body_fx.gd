@@ -77,6 +77,13 @@ func _process(delta: float) -> void:
 		_apply_mask(s.severed)
 	if cuts and cuts.active:
 		cuts.sync_layers()
+	# Cut in two and alive, but the event's presentation never came (joined late): show the upper half.
+	if cuts and s.has(MotorState.F_HALVED) and cuts.torso != UltraCutBody.Torso.UPPER and cuts.torso != UltraCutBody.Torso.HALVED:
+		_halved_silent_t += delta
+		if _halved_silent_t > 0.5:
+			cuts.activate()
+			cuts.torso = UltraCutBody.Torso.UPPER
+			_apply_mask(s.severed)
 	var S := UltraLimbs.Status
 	injury.dangle_l = 1.0 if UltraLimbs.status(s, R.ARM_L) == S.CRIPPLED or UltraLimbs.status(s, R.FOREARM_L) == S.CRIPPLED else 0.0
 	injury.dangle_r = 1.0 if UltraLimbs.status(s, R.ARM_R) == S.CRIPPLED or UltraLimbs.status(s, R.FOREARM_R) == S.CRIPPLED else 0.0
@@ -591,10 +598,13 @@ func _spill_guts(dir: Vector3) -> void:
 ## The torso blown in two at the waist (a close blast through the middle that kills): the
 ## pieces switch to the two halves, the ragdoll's spine lets go between them (each half
 ## flops on its own), the blast throws the upper half, guts hang out of both, lots of blood.
-func _on_halve(net_id: int, dir := Vector3.ZERO, point := Vector3.ZERO) -> void:
+func _on_halve(net_id: int, dir := Vector3.ZERO, point := Vector3.ZERO, alive := false) -> void:
 	if character == null or net_id != character.net_id or cuts == null:
 		return
-	if cuts.torso == UltraCutBody.Torso.HALVED:
+	if alive:
+		_halve_alive_fx(dir, point)
+		return
+	if cuts.torso == UltraCutBody.Torso.HALVED or cuts.torso == UltraCutBody.Torso.UPPER:
 		return
 	cuts.torso = UltraCutBody.Torso.HALVED
 	_apply_mask(character.state.severed)
@@ -627,6 +637,53 @@ func _on_halve(net_id: int, dir := Vector3.ZERO, point := Vector3.ZERO) -> void:
 			upper.append([a2, e2, randi_range(14, 22) if not loop else randi_range(12, 16)])
 		_hang_guts("Spine", ends[0][0], lower, dir * 0.5 + Vector3.UP * 1.2)
 		_hang_guts("Chest", ends[1][0], upper, dir * 2.0 + Vector3.DOWN * 0.5)
+
+
+## The undead cut in two at the waist (MotorState.F_HALVED): the lower half and both legs fly off as
+## one gib, the upper half stays with its sealed end and the guts hanging, blood everywhere. The body
+## itself falls and crawls on (the sim: UltraCharacter._halve_alive).
+func _halve_alive_fx(dir: Vector3, point: Vector3) -> void:
+	if cuts.torso == UltraCutBody.Torso.UPPER or cuts.torso == UltraCutBody.Torso.HALVED:
+		return
+	_halved_silent_t = 0.0
+	if not cuts.active:
+		cuts.activate()
+	var lower := cuts.lower_half_parts()
+	var ends := _waist_ends()
+	var tris: Array = []
+	for mi: MeshInstance3D in lower:
+		_collect_tris(mi, -1, tris)
+	if not tris.is_empty():
+		var c := Vector3.ZERO
+		for t: Array in tris:
+			c += (t[0] + t[1] + t[2]) / 3.0
+		c /= tris.size()
+		var vel := character.state.vel * 0.3 + dir * 3.5 + Vector3.UP * 2.0
+		_make_gib(tris, range(tris.size()), c, vel, false, true)
+	cuts.torso = UltraCutBody.Torso.UPPER
+	_apply_mask(character.state.severed)
+	var fx := UltraEffects.instance()
+	if fx and fx.blood_fx and character.damage_profile.blood_on():
+		fx.blood_fx.spray(point + dir * 0.2, dir + Vector3.UP * 0.2, 120, 6.5, 35.0, 0.009, character)
+		fx.blood_fx.spray(point, Vector3.UP, 50, 3.5, 50.0, 0.008, character)
+		fx.blood_fx.spray(point, -dir + Vector3.UP * 0.4, 30, 2.5, 50.0, 0.008, character)
+		for i in 8:
+			fx.blood_fx.splat_body(character, point + Vector3(randf_range(-0.25, 0.25), randf_range(-0.4, 0.3), randf_range(-0.25, 0.25)), randf_range(0.12, 0.22))
+	for i in 5:
+		_flesh_blob(point, dir * randf_range(2.0, 5.0) + Vector3(randf_range(-1.5, 1.5), randf_range(0.5, 2.5), randf_range(-1.5, 1.5)))
+	if ends.size() == 2:
+		var side := character.visual_root.global_basis.x
+		var fwd := -character.visual_root.global_basis.z
+		var upper := []
+		for k in 6:
+			var loop := k % 3 == 1
+			var a2 := side * randf_range(-0.07, 0.07) + fwd * randf_range(-0.02, 0.06)
+			var e2: Vector3 = side * randf_range(-0.07, 0.07) + fwd * 0.03 if loop else Vector3.INF
+			upper.append([a2, e2, randi_range(14, 22) if not loop else randi_range(12, 16)])
+		_hang_guts("Chest", ends[1][0], upper, dir * 1.0 + Vector3.DOWN * 0.5)
+
+
+var _halved_silent_t := 0.0                ## s the F_HALVED flag has been up without the `halve` event's presentation
 
 
 ## Lengths of gut hanging out of `at` (world), riding `bone`: specs [[start offset, end offset

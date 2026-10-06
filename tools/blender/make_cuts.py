@@ -103,7 +103,12 @@ def run(src, bone_map_path, out_path):
     head_of = lambda prof: inv @ (arm.matrix_world @ arm.data.bones[src_name(prof)].head_local)
     vg_index = {vg.name: vg.index for vg in body.vertex_groups}
 
-    mats = {"Main": body.data.materials[0] if body.data.materials else mat("Main", (0.8, 0.65, 0.5))}
+    # The model's own materials (a Mixamo body has two: skin and clothes) ride on every piece of skin,
+    # in their own slots; the pieces' cut materials follow them. The game swaps the Main ones for the
+    # live body's by name.
+    main_mats = [m for m in body.data.materials if m] or [mat("Main", (0.8, 0.65, 0.5))]
+    OFF = len(main_mats) - 1                 # (cut material k of a piece list [Main, Fat, ...] sits at k + OFF)
+    mats = {"Main": main_mats[0]}
     mats["CutFat"] = mat("CutFat", (0.86, 0.62, 0.45), 0.6)
     mats["CutMeat"] = mat("CutMeat", (0.55, 0.06, 0.07), 0.3)
     mats["CutBone"] = mat("CutBone", (0.9, 0.86, 0.76), 0.5)
@@ -160,7 +165,8 @@ def run(src, bone_map_path, out_path):
         me = bpy.data.meshes.new(obj_name)
         b2.to_mesh(me)
         b2.free()
-        me.materials.append(mats["Main"])
+        for m in main_mats:
+            me.materials.append(m)
         ob = bpy.data.objects.new(obj_name, me)
         bpy.context.scene.collection.objects.link(ob)
         for vg in body.vertex_groups:
@@ -341,7 +347,11 @@ def run(src, bone_map_path, out_path):
         b.to_mesh(me)
         b.free()
         for m_name in mat_names:
-            me.materials.append(mats[m_name])
+            if m_name == "Main":
+                for m in main_mats:
+                    me.materials.append(m)
+            else:
+                me.materials.append(mats[m_name])
         ob = bpy.data.objects.new(obj_name, me)
         bpy.context.scene.collection.objects.link(ob)
         for g in body.vertex_groups:
@@ -432,14 +442,12 @@ def run(src, bone_map_path, out_path):
             for g in list(v[dl].keys()):
                 del v[dl][g]
             v[dl][vg_index[head_bone]] = 1.0
-        for f in b.faces:
-            f.material_index = 0
         rim = [e for e in b.edges if len(e.link_faces) == 1]
         cc = sum((v.co for v in b.verts), Vector()) / len(b.verts)
         inner = cc.lerp(centre, 0.55)
         # Skull (bone, ~7 mm in), then meat to the middle.
         faces = rings_in(b, dl, rim, inner, Vector(), hw, [(0.12, 0.0), (0.2, 0.0), (0.6, 0.0)],
-                         lambda ring: 2 if ring == 1 else (1 if ring == 0 else 3))
+                         lambda ring: OFF + (2 if ring == 1 else (1 if ring == 0 else 3)))
         skinned("Chunk_HEAD_%d" % k, b, ["Main", "CutFat", "CutBone", "CutMeat"])
     log("head chunks:", len(seeds))
 
@@ -475,7 +483,7 @@ def run(src, bone_map_path, out_path):
     deep = -fwd
     faces = rings_in(tb, dl, rim, rim_c, deep, onehot(src_name("Spine")),
                      [(0.1, 0.012), (0.3, 0.05), (0.6, 0.085), (0.85, 0.1)],
-                     lambda ring: 1 if ring == 0 else 2)
+                     lambda ring: OFF + (1 if ring == 0 else 2))
     skinned("Seg_TORSO_OPEN", tb, ["Main", "CutFat", "CutMeat"])
     log("belly cavity:", len(hole), "faces opened,", len(rim), "rim edges at", tuple(round(x, 3) for x in hole_c))
 
@@ -542,6 +550,14 @@ def run(src, bone_map_path, out_path):
 
     bm.free()
     bpy.data.objects.remove(body, do_unlink=True)
+    # The game puts the live body's materials on the pieces by name: the textures riding along in this
+    # file are dead weight (a Mixamo body's are 2048 x 2048). Keep the image nodes (the exporter writes
+    # UVs for textured materials) but make the images tiny.
+    for m in main_mats:
+        if m.use_nodes:
+            for n in m.node_tree.nodes:
+                if n.type == "TEX_IMAGE" and n.image and n.image.size[0] > 8:
+                    n.image.scale(8, 8)
     bpy.ops.object.select_all(action="DESELECT")
     arm.select_set(True)
     for ob in made:

@@ -143,6 +143,12 @@ enum Gait { WALK, JOG }
 @export var enable_roll := true
 @export var enable_lean := true
 @export var enable_turn_in_place := true
+## Mantle / vault / ledge hang / ladder / wall climb / climb-down / hop (UltraTraversal). NPCs
+## (zombies) turn it off: they never press jump, and a walk toward a drop must not start a climb-down.
+@export var enable_traversal := true
+## Seconds the get-up after a knock-down takes (the sim, UltraRagdoll's hand-over and the clip all
+## follow it). A zombie takes longer.
+@export_range(1.0, 10.0, 0.1) var get_up_time := 2.8
 
 
 func get_accel_mult(speed_ratio: float) -> float:

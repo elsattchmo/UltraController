@@ -751,3 +751,54 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   lasts 5 min, fetch it with curl. Export FBX, no skin, 30 fps, not in-place.
 - Tools that touch autoload-dependent scripts run through `res://tools/tool_runner.tscn -- --tool=...`
   (a `--script` SceneTree has no autoloads). Builders: build_items.gd, build_playground.gd, intake.gd.
+
+## Zombies (Resident Evil-style enemies; plan: `C:\Users\Lappy\.claude\plans\eventual-snacking-comet.md`)
+- **A zombie is an ordinary bot**: `UltraNet.spawn_bot("Z:<archetype>:<nn>", ...)` -> `main._make_character`
+  dispatches on the `Z:` prefix to `ZombieFactory.make(np, visuals)` (demo/zombies/) -> a server-simulated
+  UltraCharacter driven through its BotInputSource. Player ids are u8 and never reused: **pool, park,
+  respawn in place** (`respawn_character` puts a bot back at its `home` meta), never spawn/despawn churn.
+  `ZombieFactory.dress(c)` (main `_on_player_added`) applies the maimed spawn state (crawler: both thighs
+  severed; limper: a ruined leg), tint and scale; NPCs get no starting kit. `ZombieArchetype.get_arch(&"walker")`
+  is a code table: walker, shambler, limper, runner, brute, crawler (speeds, toughness, senses, attacks).
+- **Visual tiers** (`BodyProfile.visual_tier`): FULL = the player's stack; **LITE** = `UltraLiteAnimDriver`
+  (~15-node AnimationTree: idle/walk/run/limp ground blend, crawl <-> held lie pose, two get-ups, one-shots
+  atk / emote / hit; FootIK only - no BodyDynamics / ArmClear / WeaponPose / HandIK / Look / inertial blend,
+  no EquipmentVisual / TraversalVisual, no near-fade materials) + BodyFX + ragdoll. Missing roles fall back
+  to idle. `BodyProfile.cap_meshes` off for Romero (eye / mouth loops would be fanned over); no Root bone on a
+  Mixamo skeleton -> no `root_motion_track`. `MovementProfile.enable_traversal` (off for zombies) and
+  `get_up_time` (4 s) are per profile; `DamageProfile.shove_knockdown` replaced the SHOVE_KNOCKDOWN const.
+- **Assets**: `tools/blender/import_mixamo.py` (`import-mixamo`: Mixamo character FBX -> GLB, bones
+  `mixamorig_*`, albedo + normal only, WebP, 2048) -> `assets/characters/zombie/zombie.glb` (+ `.import` with
+  the Mixamo bone map, `character_post_import.gd`). Raw FBX stays in `art_src/zombie/` (gitignored, 110 MB).
+  Clips: `intake/mixamo/Z_*.fbx` -> `mixamo.res`. Resources: `godot --headless --path . res://tools/tool_runner.tscn
+  -- --tool=res://tools/build_zombie.gd` writes zombie_animset / body_profile (LITE, baked hit capsules, cut set) /
+  movement / damage. Measured: Quaternius Zombie_Walk 1.12 m/s, Mixamo Z_Walk 0.36 (very slow), Z_Run 3.15,
+  Injured_Walk 1.26, Z_Crawl 0.43 (hands). Strike clips + contact times: `ZombieArchetype.CLIPS`
+  (`tools/measure_zombie.gd`). Zombie cut set: `blender --background --python tools/blender/ultra_blender.py --
+  make-cuts --src assets/characters/zombie/zombie.glb --bone-map addons/ultra_controller/import/bone_maps/mixamo_humanoid.tres
+  --out assets/characters/zombie/zombie_cuts.glb` (+ `zombie_cuts.glb.import`; textures shrunk to 8x8 in it:
+  `UltraCutBody.activate` maps piece materials to the live body's BY NAME - Romero has two - cut materials
+  Cut*; `make_cuts.py` keeps all the body's materials per piece, cut materials after them).
+  Rebuild order after a model / clip change: import-mixamo -> `--import` -> make-cuts -> `--import` -> build_zombie.
+- **Undead damage**: `zombie_damage.tres` - head `region_hp` 60 with region_mult 0.6 (two pistol / carbine
+  headshots kill: the HEAD LIMB hp reaching 0 kills, not overall hp), torso mult 0.3 (~10 pistol / 12 carbine body
+  shots), limbs 0.04-0.12, no bleeding (bleed / cripple / heart rates 0, `heart_radius` 0), no knockouts
+  (ko_* 9999), crippled leg slowdown 0.55 (so `ZombieFactory` sets profile crawl speed = archetype crawl /
+  0.55: every crawl is on ruined legs). `hp_mult` scales `region_hp` (brute 2.4), `shove_knockdown` 7 for it.
+- **Cut in half and still alive**: `DamageProfile.halve_survives` (zombies) - a close (<= 3 m) buckshot / blast
+  >= `halve_alive_min` 70 or a blade >= `halve_blade_min` 55 at the waist (`_at_waist`) -> `UltraCharacter._halve_alive`:
+  `MotorState.F_HALVED` (flag bit 9; bits 0-7 motor_state.gd, 8 F_TURNING, 10/11 blocking / heart), both thigh
+  chains severed (so crawling, no climbing, limb rules all follow), hp capped at `halved_hp_cap` 45, knock-down
+  (normal ragdoll, NOT split: the hidden lower half just rides along), event `halve` with `alive = true`.
+  Presentation (`UltraBodyFX._halve_alive_fx`): `UltraCutBody.Torso.UPPER` shows only `Seg_WAIST_UP + Cap_WAIST_up`
+  + arms / head, the lower half (`Seg_WAIST_DOWN`, its cap, the visible leg pieces and stumps =
+  `lower_half_parts()`) flies off as ONE gib, blood + guts hang from the upper end. Hit volume: the torso capsule
+  starts at the waist (`UltraHitboxes.WAIST_T` 0.72; live and baked paths). Late joiners: `F_HALVED` up 0.5 s
+  without the event -> silent UPPER. Respawn clears the flag; BodyFX's respawn path restores WHOLE.
+  Tests: `z1_body` (lite build, speeds, crawler, limper, damage matrix, limbs, no bleeding, no KO, halve alive).
+- **Health bars**: `UltraWorldBars` (addons/ui): ONE MultiMeshInstance3D, billboarded in `world_bar.gdshader`
+  (per-instance custom data = fill, opacity); a character with meta `health_bar` (MODE_DAMAGED / MODE_ALWAYS)
+  shows a bar for 4.5 s after its hp last changed (fades), the dead fade out. Reads replicated `state.hp`.
+- Tours: `zombie_look` (archetypes, gaits, attack clips, hit, get-up), `zombie_gore` (gore_review on zombies),
+  `crawl_review` (halve -> crawl -> claw -> headshot). The playground's sun renders the Romero albedo near
+  black: `ZombieFactory.BRIGHTEN` 1.8 lifts every zombie material (then tinted per archetype).

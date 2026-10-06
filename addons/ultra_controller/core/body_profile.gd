@@ -4,6 +4,14 @@ extends Resource
 ## Everything specific to one character model. Swap this (and its AnimationSet) to use a
 ## different humanoid; the controller code never names a mesh, clip or bone directly.
 
+## How much of the animation / presentation stack the character gets: FULL is the player's (IK,
+## aim spread, equipment and traversal visuals, ~1.5 ms a frame); LITE is an NPC's - the small
+## UltraLiteAnimDriver tree, foot IK for stairs, body gore and a ragdoll, nothing for items.
+enum Tier { FULL, LITE }
+@export var visual_tier := Tier.FULL
+## Close the open loops of the body mesh with skin-coloured fans (the neck opening the first
+## person head hide leaves, ...). Off for a model whose mouth / eye holes would be fanned over.
+@export var cap_meshes := true
 @export var body_scene: PackedScene
 @export var anim_set: AnimationSet
 @export var library: AnimationLibrary

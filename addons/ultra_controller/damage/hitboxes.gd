@@ -7,6 +7,8 @@ extends RefCounted
 ## capsules baked from the idle pose, bent to the stance. Severed regions can't be hit.
 
 const Id := MotorState.Id
+## Where the waist is along the hips -> chest capsule (UltraCharacter._at_waist: 72 %).
+const WAIST_T := 0.72
 
 
 ## Region capsules in world space for character `c` standing at `pos`.
@@ -25,11 +27,16 @@ static func capsules(c: UltraCharacter, pos: Vector3) -> Array[Dictionary]:
 	var stand := c.profile.stand_height if c.profile else 1.8
 	var k := clampf(s.height / stand, 0.3, 1.0)
 	var prone := s.state in [Id.CRAWL, Id.DIVE, Id.DEAD, Id.RAGDOLL] or (s.state == Id.SWIM and Vector2(s.vel.x, s.vel.z).length() > 0.6)
+	var halved := s.has(MotorState.F_HALVED)
+	var torso_seen := false
 	for h: Dictionary in bp.hitboxes:
 		if (s.severed >> int(h.region)) & 1:
 			continue
 		var a: Vector3 = h.a
 		var b: Vector3 = h.b
+		if halved and int(h.region) == UltraLimbs.Region.TORSO and not torso_seen:
+			torso_seen = true                        # (the first torso capsule is hips -> chest)
+			a = a.lerp(b, WAIST_T)
 		if prone:
 			# Lying along the facing direction, hips at the capsule's middle height.
 			a = _lay(a, s.height * 0.5)
@@ -44,7 +51,8 @@ static func capsules(c: UltraCharacter, pos: Vector3) -> Array[Dictionary]:
 ## The region capsules from bone positions: `p.call(bone_name) -> Vector3` in character space
 ## (feet at the origin, -Z forward); `head_up` the head bone's up axis (crown direction).
 ## Shared by the baking tool and the live pose.
-static func build(p: Callable, head_up := Vector3.ZERO) -> Array[Dictionary]:
+## `halved`: cut in two at the waist (MotorState.F_HALVED) - the torso capsule starts there.
+static func build(p: Callable, head_up := Vector3.ZERO, halved := false) -> Array[Dictionary]:
 	var R := UltraLimbs.Region
 	var boxes: Array[Dictionary] = []
 	var cap := func(region: int, a: Vector3, b: Vector3, r: float) -> void:
@@ -53,7 +61,10 @@ static func build(p: Callable, head_up := Vector3.ZERO) -> Array[Dictionary]:
 	var neck: Vector3 = p.call("Neck")
 	var up := head_up.normalized() if head_up != Vector3.ZERO else Vector3.UP
 	cap.call(R.HEAD, head + up * 0.06, head + up * 0.17, 0.11)
-	cap.call(R.TORSO, p.call("Hips"), p.call("Chest"), 0.16)
+	var low: Vector3 = p.call("Hips")
+	if halved:
+		low = low.lerp(p.call("Chest"), WAIST_T)
+	cap.call(R.TORSO, low, p.call("Chest"), 0.16)
 	cap.call(R.TORSO, p.call("Chest"), neck, 0.17)
 	for side: String in ["Left", "Right"]:
 		var l: bool = side == "Left"

@@ -133,16 +133,19 @@ func _build_visual() -> void:
 	skeleton = body_node.find_child(body_profile.skeleton_name, true, false) as Skeleton3D
 	if skeleton:
 		skeleton.skeleton_updated.connect(_capture_hitboxes)
-	head_mesh = body_node.find_child(body_profile.head_mesh_name, true, false) as MeshInstance3D
+	head_mesh = body_node.find_child(body_profile.head_mesh_name, true, false) as MeshInstance3D if body_profile.head_mesh_name != "" else null
+	var lite := body_profile.visual_tier == BodyProfile.Tier.LITE
 	# First person hides the head: close the neck opening it leaves in the body.
 	var bm := body_node.find_child(body_profile.body_mesh_name, true, false) as MeshInstance3D
-	for capme: MeshInstance3D in [bm, head_mesh]:
-		if capme and capme.mesh is ArrayMesh:
-			capme.mesh = UltraMeshCap.capped(capme.mesh as ArrayMesh)
+	if body_profile.cap_meshes:
+		for capme: MeshInstance3D in [bm, head_mesh]:
+			if capme and capme.mesh is ArrayMesh:
+				capme.mesh = UltraMeshCap.capped(capme.mesh as ArrayMesh)
 	# Anything of the body closer to a camera than a few cm dissolves (dithered), so no view
 	# ever looks into the body: inside the neck or shoulders, through a lying body's face...
+	# (An NPC is never looked out of: it keeps its plain materials.)
 	for mi: MeshInstance3D in [bm, head_mesh]:
-		if mi == null or mi.mesh == null:
+		if lite or mi == null or mi.mesh == null:
 			continue
 		for si in mi.mesh.get_surface_count():
 			var m := mi.get_active_material(si) as BaseMaterial3D
@@ -152,22 +155,25 @@ func _build_visual() -> void:
 			mi.set_surface_override_material(si, nm)
 	var player := body_node.find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if player and skeleton:
-		anim = UltraAnimDriver.new()
+		anim = UltraLiteAnimDriver.new() if lite else UltraAnimDriver.new()
 		anim.name = "AnimDriver"
 		anim.anim_set = body_profile.anim_set
 		anim.library = body_profile.library
 		anim.extra_libraries = body_profile.extra_libraries
+		anim.get_up_time = profile.get_up_time
 		add_child(anim)
 		anim.setup(player, skeleton)
-		anim.foot_ik.exclude = [get_rid()]
-		var eq := UltraEquipmentVisual.new()
-		eq.name = "Equipment"
-		add_child(eq)
-		eq.setup(self)
-		var tv := UltraTraversalVisual.new()
-		tv.name = "TraversalHands"
-		add_child(tv)
-		tv.setup(self)
+		if anim.foot_ik:
+			anim.foot_ik.exclude = [get_rid()]
+		if not lite:
+			var eq := UltraEquipmentVisual.new()
+			eq.name = "Equipment"
+			add_child(eq)
+			eq.setup(self)
+			var tv := UltraTraversalVisual.new()
+			tv.name = "TraversalHands"
+			add_child(tv)
+			tv.setup(self)
 		item_event.connect(func(kind: StringName, d: Dictionary) -> void: anim.item_event(kind, d))
 		body_fx = UltraBodyFX.new()
 		body_fx.name = "BodyFX"
@@ -267,7 +273,7 @@ func _capture_hitboxes() -> void:
 	var bones := _hit_bones
 	var sk := skeleton
 	var head_up := to_char.basis * sk.get_bone_global_pose(bones["Head"]).basis.y
-	live_hitboxes = UltraHitboxes.build(func(b: String) -> Vector3: return to_char * sk.get_bone_global_pose(bones[b]).origin, head_up)
+	live_hitboxes = UltraHitboxes.build(func(b: String) -> Vector3: return to_char * sk.get_bone_global_pose(bones[b]).origin, head_up, state.has(MotorState.F_HALVED))
 	_live_hit_frame = Engine.get_process_frames()
 
 
@@ -679,6 +685,9 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 			UltraNet.world.broadcast(&"halve", [net_id, info.dir, info.point], true)
 		UltraNet.world.broadcast(&"died", [net_id, info.attacker_id], true)
 		died.emit()
+	elif dp.halve_survives and not blocked and not state.has(MotorState.F_HALVED) and _halves_alive(info, r):
+		# The undead cut in two: the lower half and both legs come off, the upper half crawls on.
+		_halve_alive(info)
 	elif blocked:
 		pass                                    # (held off: no knockout or knock-down)
 	elif _knocks_out(info, r, mult):
@@ -688,7 +697,7 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 		var over := info.amount * mult - (dp.ko_head if r == R.HEAD else dp.ko_heavy)
 		knock_out(push2 + Vector3.UP * 1.0, clampf(5.0 + over * 0.25, 5.0, 12.0))
 	elif info.amount * mult >= dp.knockdown_damage or info.kind == &"blast" or (cut & legs) != 0 \
-			or info.shove.length() >= SHOVE_KNOCKDOWN:
+			or info.shove.length() >= dp.shove_knockdown:
 		var push := info.dir * clampf(info.amount * 0.08, 2.0, 8.0)
 		if info.shove.length() > push.length():
 			push = info.shove.limit_length(10.0)
@@ -696,6 +705,36 @@ func apply_damage(info: UltraCombat.DamageInfo) -> void:
 	elif info.shove != Vector3.ZERO and state.state not in [MotorState.Id.RAGDOLL, MotorState.Id.GET_UP]:
 		# A lighter blast: rocked back a step.
 		state.vel += Vector3(info.shove.x, 0.0, info.shove.z) * 0.7
+
+
+## A blow that cuts this (undead) body in two without killing it: a close blast or a blade through
+## the waist, hard enough (DamageProfile.halve_alive_min / halve_blade_min).
+func _halves_alive(info: UltraCombat.DamageInfo, r: int) -> bool:
+	var dp := damage_profile
+	if r != UltraLimbs.Region.TORSO or not dp.dismemberment or not dp.gore_on() or not _at_waist(info.point):
+		return false
+	if info.kind == &"blade":
+		return info.amount >= dp.halve_blade_min
+	return info.kind in [&"buckshot", &"blast"] and info.amount >= dp.halve_alive_min and info.dist <= dp.halve_range
+
+
+## Authority: the body in two. Both legs go with the lower half (so every limb rule - crawling, no
+## climbing - already follows from the severed mask), health drops to the cap, the body falls
+## (RAGDOLL, then GET_UP on its arms) and every machine shows it (`halve` with alive = true).
+func _halve_alive(info: UltraCombat.DamageInfo) -> void:
+	var R := UltraLimbs.Region
+	var cut := (UltraLimbs.sever_mask(R.THIGH_L) | UltraLimbs.sever_mask(R.THIGH_R)) & ~state.severed
+	state.severed |= cut
+	for k in UltraLimbs.COUNT:
+		if cut & (1 << k):
+			state.limb_hp[k] = 0
+	state.set_flag(MotorState.F_HALVED, true)
+	state.hp = minf(state.hp, damage_profile.halved_hp_cap)
+	UltraNet.world.broadcast(&"halve", [net_id, info.dir, info.point, true], true)
+	var push := info.dir * clampf(info.amount * 0.05, 1.0, 4.0)
+	if info.shove.length() > push.length():
+		push = info.shove.limit_length(6.0)
+	knock_down(push + Vector3.UP * 1.0)
 
 
 ## `p` (world) is at the waist: on the lower torso capsule (hips -> chest), within
@@ -743,8 +782,8 @@ func knock_out(push: Vector3, secs: float) -> void:
 	state.ko_t = maxf(state.ko_t, secs)
 
 
-## A shove (UltraCombat.DamageInfo.shove, m/s) this big knocks you off your feet.
-const SHOVE_KNOCKDOWN := 3.5
+## (DamageProfile.shove_knockdown: a shove this big - UltraCombat.DamageInfo.shove, m/s - knocks you
+## off your feet.)
 
 
 ## Authority: fall over (ragdoll); you get up once the body settles. Predicted from here on.
@@ -768,6 +807,7 @@ func respawn(at: Transform3D) -> void:
 	state.set_flag(MotorState.F_UNCONSCIOUS, false)
 	state.set_flag(MotorState.F_HEART, false)
 	state.set_flag(MotorState.F_BLOCKING, false)
+	state.set_flag(MotorState.F_HALVED, false)
 	state.ko_t = 0.0
 	state.ko_count = 0
 	teleport(at.origin, at.basis.get_euler().y)

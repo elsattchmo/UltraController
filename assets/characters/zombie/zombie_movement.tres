@@ -1,0 +1,39 @@
+[gd_resource type="Resource" script_class="MovementProfile" format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/core/camera_profile.gd" id="1_hevpu"]
+[ext_resource type="Script" path="res://addons/ultra_controller/core/movement_profile.gd" id="2_6b466"]
+
+[sub_resource type="Resource" id="Resource_lp8c1"]
+script = ExtResource("1_hevpu")
+
+[resource]
+script = ExtResource("2_6b466")
+default_view = 1
+allow_view_toggle = false
+camera = SubResource("Resource_lp8c1")
+walk_speed = 0.9
+jog_speed = 1.6
+sprint_speed = 3.2
+crouch_speed = 0.9
+crawl_speed = 0.5
+back_mult = 0.5
+strafe_mult = 0.7
+accel = 3.5
+decel = 7.0
+sprint_stop_decel = 7.0
+brake_decel = 9.0
+turn_rate_walk = 300.0
+turn_rate_sprint = 200.0
+body_turn_rate = 200.0
+mass = 75.0
+push_strength = 250.0
+separation_speed = 1.6
+enable_slide = false
+impact_knockdown = 30.0
+enable_balance = false
+enable_crouch = false
+enable_roll = false
+enable_lean = false
+enable_turn_in_place = false
+enable_traversal = false
+get_up_time = 4.0
