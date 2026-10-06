@@ -22,7 +22,7 @@ const LEG_INJURED_DAMAGE := 0.583   ## leg_damage at 50 % health (the INJURED th
 static func leg_damage(s: MotorState, left: bool) -> float:
 	var R := UltraLimbs.Region
 	var worst := 0.0
-	for r: int in ([R.THIGH_L, R.SHIN_L] if left else [R.THIGH_R, R.SHIN_R]):
+	for r: int in ([R.THIGH_L, R.SHIN_L, R.FOOT_L] if left else [R.THIGH_R, R.SHIN_R, R.FOOT_R]):
 		if (s.severed >> r) & 1:
 			return 1.0
 		worst = maxf(worst, clampf((85.0 - float(s.limb_hp[r])) / 60.0, 0.0, 1.0))

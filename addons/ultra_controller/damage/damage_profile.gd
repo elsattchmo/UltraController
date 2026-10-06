@@ -12,20 +12,20 @@ enum Gore { OFF, NO_BLOOD, FULL }
 
 @export_group("Regions")
 ## Absolute health per region: head, torso, upper arm L, forearm L, upper arm R, forearm R,
-## thigh L, shin L, thigh R, shin R.
-@export var region_hp := PackedFloat32Array([45, 100, 40, 35, 40, 35, 55, 45, 55, 45])
+## thigh L, shin L, thigh R, shin R, hand L, hand R, foot L, foot R.
+@export var region_hp := PackedFloat32Array([45, 100, 40, 35, 40, 35, 55, 45, 55, 45, 22, 22, 28, 28])
 ## How much of a hit there comes off overall health.
-@export var region_mult := PackedFloat32Array([3.0, 1.0, 0.55, 0.45, 0.55, 0.45, 0.7, 0.55, 0.7, 0.55])
+@export var region_mult := PackedFloat32Array([3.0, 1.0, 0.55, 0.45, 0.55, 0.45, 0.7, 0.55, 0.7, 0.55, 0.3, 0.3, 0.35, 0.35])
 ## A single hit that takes a region this far past zero cuts it off (bladed / blast: any overkill).
 @export var sever_overkill := 45.0
 ## Bitmask of regions that can come off (bit = UltraLimbs.Region); torso never does.
-@export_flags("Head", "Torso", "Upper arm L", "Forearm L", "Upper arm R", "Forearm R", "Thigh L", "Shin L", "Thigh R", "Shin R")
-var severable := 0b1111111101
+@export_flags("Head", "Torso", "Upper arm L", "Forearm L", "Upper arm R", "Forearm R", "Thigh L", "Shin L", "Thigh R", "Shin R", "Hand L", "Hand R", "Foot L", "Foot R")
+var severable := 0b11111111111101
 
 ## Bleeding out: health lost per second (hp/s) while a region is cut off (counted at the top of
 ## a cut chain - an arm off at the shoulder bleeds as the upper arm). An arm off: dead in
 ## ~25 s; a leg off at the hip: ~18 s.
-@export var bleed_rate := PackedFloat32Array([0.0, 0.0, 4.0, 3.0, 4.0, 3.0, 5.5, 3.5, 5.5, 3.5])
+@export var bleed_rate := PackedFloat32Array([0.0, 0.0, 4.0, 3.0, 4.0, 3.0, 5.5, 3.5, 5.5, 3.5, 1.8, 1.8, 2.2, 2.2])
 ## A crippled region (still on) seeps: hp/s each - a slow bleed (one crippled limb takes
 ## ~6 minutes to kill you; a medkit's 50 hp buys a few more).
 @export var cripple_bleed_rate := 0.25

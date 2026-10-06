@@ -40,6 +40,7 @@ sway_amount = 1.4
 recoil_gun_deg = 11.0
 sprint_lower_deg = Vector2(66.4, -8.1)
 stats = {
+"whiz_db": -3.0,
 "drag": 3.5,
 "muzzle_velocity": 400.0,
 "ads_fov": 58.0,

@@ -171,6 +171,8 @@ static func _firearm(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemD
 		_set_action(s, Action.RELOADING)
 		c.emit_item_event(&"reload", {}, replaying)
 		return
+	if not i.has(InputFrame.B_PRIMARY):
+		s.burst = 0                      # (trigger let go: the next round starts a burst)
 	var edge := UltraMotor.pressed_edge(s, i, InputFrame.B_PRIMARY)
 	var pull := edge or (def.fire_mode == ItemDefinition.FireMode.AUTO and i.has(InputFrame.B_PRIMARY) and s.mag > 0)
 	# Crawling, the gun is down in the hands that pull you along: stop to shoot.
@@ -189,6 +191,7 @@ static func _firearm(c: UltraCharacter, s: MotorState, i: InputFrame, def: ItemD
 		s.fire_cd = float(def.stat("fire_interval", 0.15))
 		var shot := aim_ray(c, s, i, def)
 		_recoil(c, s, def)
+		s.burst += 1
 		var pellets := int(def.stat("pellets", 1))
 		if pellets > 1:
 			shot["dirs"] = pellet_dirs(c, s, shot.dir, def, pellets)
@@ -340,6 +343,18 @@ static func _recoil(c: UltraCharacter, s: MotorState, def: ItemDefinition) -> vo
 	rng.seed = hash(Vector3i(c.net_id, s.fire_seq, 7))
 	var w := TAU * def.sway_return_hz
 	var kick := deg_to_rad(def.recoil_gun_deg) * w * 1.8
+	if def.fire_mode == ItemDefinition.FireMode.AUTO:
+		# Automatic: the first round jumps a little more, then the muzzle climbs harder the
+		# longer you hold it (to `recoil_climb` x by the 8th round), wandering sideways along a
+		# drift that turns now and then (seeded per burst) rather than shaking at random.
+		var b := s.burst
+		var climb := lerpf(1.0, float(def.stat("recoil_climb", 1.6)), clampf(b / 8.0, 0.0, 1.0))
+		var first := 1.25 if b == 0 else 1.0
+		var side_rng := RandomNumberGenerator.new()
+		side_rng.seed = hash(Vector3i(c.net_id, s.fire_seq - b, 11))      # (one per burst)
+		var drift := sin(b * 0.55 + side_rng.randf() * TAU) * 0.45 + side_rng.randf_range(-0.15, 0.25)
+		s.sway_v += Vector2((drift + rng.randf_range(-0.12, 0.12)) * kick, kick * climb * first)
+		return
 	s.sway_v += Vector2(rng.randf_range(-0.35, 0.35) * kick, kick)
 
 

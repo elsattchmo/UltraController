@@ -82,7 +82,9 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   movement; `breath` is in MotorState. Buoyancy for props runs wherever physics is
   authoritative (`UltraNet.mode != CLIENT`; tests run in NONE). Swim visuals (stroke lift,
   dive pitch) are presentation in `UltraCharacter._swim_visual`.
-- **Damage is per region** (`UltraLimbs`: 10 regions). `limb_hp` (percent) and the `severed`
+- **Damage is per region** (`UltraLimbs`: 14 regions - hands and feet APPENDED as 10-13 so old
+  indices / dummy booth buttons hold; BELOW lists every region under one; arm() / leg() take the
+  worst along the chain, so a lost hand moves the weapon, a lost foot forces a crawl). `limb_hp` (percent) and the `severed`
   mask live in MotorState, so injuries change movement predictably (`UltraInjury`: speed, no
   sprint/jump, forced crawl, no climbing, weapon hand). Only the authority changes them
   (`apply_damage`); remote players get 2-bit statuses in snapshots. Which limb a shot hit comes
@@ -544,8 +546,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   glide both ways (`UltraMotor.last_step_down`) and the step goes into `_prev_pos` too (the
   offset was applied a tick before the interpolated position: a 14 cm dip per step up).
 - Damage feedback (`UltraDamageScreen`, HUD child): one shader (tunnel vision / blur / dark),
-  tunnel ONLY while bleeding (0.05 + 0.6 x hp lost, <= 0.65, a slight pulse), knocked out =
-  blurred + dark; dead =
+  tunnel ONLY while bleeding (0.04 + 0.5 x hp lost, <= 0.55, a slight pulse), knocked out =
+  double vision (two drifting copies), a little blurred and dim; dead =
   cut to black + recap (hits merged by who / weapon / region, limbs lost, blood lost per source
   from the replicated state). Controls in the HUD: set_anchors_AND_OFFSETS_preset (a plain
   anchors preset left them 0 x 0).
@@ -553,8 +555,23 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   bullet / buckshot / blade whose line passes within `heart_radius` (4.5 cm) -> F_HEART, bleeds
   `heart_bleed_rate` (12 hp/s), event `heart` (gush; the chest pumps every 0.42 s).
 - Torso gore (buckshot / blast >= 30 to the torso, UltraBodyFX.torso_blast): skin chunks round
-  the hit (`_collect_tris(.., near, radius)`), a flesh crater on the bone, flesh / gut lumps, and
-  >= 45 (or a kill) `UltraGuts` - a verlet strand hanging from the wound. Cleared on respawn.
+  the hit (`_collect_tris(.., near, radius)`), a crater (UltraWoundMesh.crater, sunk in), flesh /
+  gut lumps; from the FRONT, `_spill_guts`: a belly wound on the Spine bone and two UltraGuts
+  verlet chains - a loop held at both ends (anchor_b) sagging out and a dangling strand.
+  Attachments: work offsets out from the bone's posed transform - a new BoneAttachment3D only
+  takes its pose at the next skeleton update. Cleared on respawn (back from dead or hp jumping
+  to full - NOT simply "hp is 100": that wiped gore on an undamaged body).
+- Stumps / cut ends (UltraWoundMesh.stump): ragged domed meat (cellular-noise albedo + normal
+  map, wet), a thin skin / fat rim, bone(s) out of it with marrow (2 for forearm / shin), torn
+  flaps - on the body (`_make_cap`) and on the part that flew off (`spawn_gib` -> `_make_gib`).
+- Melee animation: one-handed melee at rest takes ONLY the weapon arm from the item layer (the
+  sword idle is a hunched crouch; filter toggled in AnimDriver, inertial trigger), no
+  item_hips_yaw twist; a melee item's "aim" (block) is never its stance (item_hips_yaw / bladed
+  idle legs read "low").
+- Automatic recoil: `MotorState.burst` (codec'd, reset when the trigger's let go); the gun kick
+  climbs to `recoil_climb` x by the 8th round, first round x1.25, sideways a seeded drift per
+  burst; the view keeps 35 -> 60 % of each kick over a burst. Carbine recoil_gun 0.85,
+  pitch 0.75, yaw 0.45, climb 1.7.
 - Sounds (`UltraSfx`, child of UltraEffects): assets/audio/weapons made from
   assets/audio/source by `python tools/audio/prepare_sfx.py`. Variants are name_0, name_1 ...
   (a far render is name_far_k - it was written name_k_far and never found: distant shots were
@@ -563,7 +580,9 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   shots at 17/21/25 s): rifle_fire_k whole, rifle_fire_auto_k (attack, 0.16 s) per round of a
   burst (the last one cut), rifle_fire_tail_k once the trigger's let go (AUTO_GAP 0.2 s).
   Close fades out 25..110 m, far in 20..80 m, late by the speed of sound. Fly-bys graded from
-  "bullet close.wav": whiz_close (< 1.2 m) / whiz_mid (< 3) / whiz_far (< 6, dulled). Impacts,
+  "bullet close.wav": whiz_close (< 1.2 m) / whiz_mid (< 3) / whiz_far (< 6, dulled), each band
+  also drawing on its neighbour's takes (all 13 used), item stat `whiz_db` (pistol -5,
+  shotgun -3). The burst ring-out: -7 dB, smaller for a tap, level / pitch varied. Impacts,
   cases (random stretch of brass_shells.mp3), mag out / in / slide, shotgun shells and pump.
   Prefix = item stat "sfx" else its id.
 - **Rounds fly** (`UltraBallistics`, authority, a node under the scene, physics priority 150):

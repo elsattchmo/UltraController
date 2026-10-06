@@ -303,3 +303,41 @@ func test_bullet_flight_and_drop() -> void:
 	check(float(res.pistol[0]) > 0.14 and float(res.pistol[0]) < 0.26, "the pistol round takes ~0.18 s")
 	check(float(res.pistol[1]) > 0.08 and float(res.pistol[1]) < 0.3, "and drops ~15 cm")
 	check(float(res.rifle[0]) < float(res.pistol[0]) * 0.6 and float(res.rifle[1]) < float(res.pistol[1]) * 0.4, "the carbine: sooner and flatter")
+
+
+## Hands and feet are their own regions: cut one off and the rest of the limb stays; losing the
+## weapon hand moves the weapon to the other; losing a foot puts you on the ground; the
+## stumps and the parts get a cut-end mesh (not a ball).
+func test_hand_and_foot_come_off() -> void:
+	var t := dummy(Vector3(-24, 0.05, -70), 0.0)
+	await ticks(30)
+	blow(t, 60.0, Vector3(0, 0, 1), &"blade", true, R.HAND_R)
+	await ticks(10)
+	check((t.state.severed >> R.HAND_R) & 1 == 1, "the right hand came off")
+	check((t.state.severed >> R.FOREARM_R) & 1 == 0, "the forearm stayed on")
+	check(UltraInjury.weapon_hand(t.state) == -1, "the weapon goes to the left hand")
+	var caps := 0
+	for n in t.skeleton.find_children("Stump", "Node3D", true, false):
+		caps += 1
+	check(caps >= 1, "a cut-end on the stump (%d)" % caps)
+	var gib_caps := 0
+	for g in get_tree().get_nodes_in_group(&"ultra_gib"):
+		if (g as Node).find_child("Stump", true, false):
+			gib_caps += 1
+	check(gib_caps >= 1, "the hand that came off has its cut end")
+	blow(t, 60.0, Vector3(0, 0, 1), &"blade", true, R.FOOT_L)
+	await ticks(20)
+	check((t.state.severed >> R.FOOT_L) & 1 == 1 and (t.state.severed >> R.SHIN_L) & 1 == 0, "a foot off, the shin on")
+	check(UltraInjury.must_crawl(t.state), "no foot to stand on: down on the ground")
+	info("hand + foot off: %s" % UltraLimbs.describe(t.state))
+
+
+## A flying round (speed, drop) through the heart still finds it.
+func test_heart_shot_with_a_flying_round() -> void:
+	var t := dummy(Vector3(-24, 0.05, -70), 0.0)
+	await ticks(30)
+	var heart := UltraHitboxes.heart(t, t.state.pos)
+	# 15 m off, aimed up by the drop over that flight (~0.05 cm at 880 m/s - negligible).
+	UltraBallistics.instance(get_tree()).fire(c, heart + Vector3(0, 0.0015, -15.0), [Vector3(0, 0, 1)], ItemDB.get_def(&"rifle"))
+	await ticks(10)
+	check(t.state.has(MotorState.F_HEART), "a carbine round through the heart at 15 m")

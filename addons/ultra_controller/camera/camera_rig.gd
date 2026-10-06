@@ -137,8 +137,15 @@ func _on_item_event(kind: StringName, _data: Dictionary) -> void:
 	var ads := _equipment().ads if _equipment() else 0.0
 	var p := deg_to_rad(float(def.stat("recoil_pitch_deg", 2.0))) * lerpf(1.0, 0.6, ads)
 	var y := deg_to_rad(float(def.stat("recoil_yaw_deg", 0.5))) * randf_range(-1.0, 1.0)
-	character.input_source.add_aim_offset(y * 0.3, p * 0.3)
-	kick(p * 0.35, y * 0.35)
+	var keep := 0.3
+	if def.fire_mode == ItemDefinition.FireMode.AUTO:
+		# A burst climbs: more of each kick stays in the aim the longer it goes on (you pull
+		# down against it), the shake per round stays small.
+		var b := float(character.state.burst)
+		keep = lerpf(0.35, 0.6, clampf(b / 8.0, 0.0, 1.0))
+		y *= 0.6
+	character.input_source.add_aim_offset(y * keep, p * keep)
+	kick(p * 0.3, y * 0.3)
 	if character.input_source is LocalInputSource:
 		(character.input_source as LocalInputSource).rumble(0.3, 0.15, 0.08)
 

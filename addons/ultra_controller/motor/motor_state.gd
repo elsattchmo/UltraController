@@ -93,6 +93,9 @@ var ko_count: int = 0
 ## clients play it on change, like fire_seq).
 var melee_combo: int = 0
 var melee_seq: int = 0
+## Rounds fired in the current burst (0 = the first; reset when the trigger's let go): recoil
+## climbs with it.
+var burst: int = 0
 
 
 func has(f: int) -> bool:
@@ -137,7 +140,7 @@ func copy_from(o: MotorState) -> void:
 	sway = o.sway; sway_v = o.sway_v; sway_phase = o.sway_phase
 	aim_prev_yaw = o.aim_prev_yaw; aim_prev_pitch = o.aim_prev_pitch
 	ko_t = o.ko_t; ko_count = o.ko_count
-	melee_combo = o.melee_combo; melee_seq = o.melee_seq
+	melee_combo = o.melee_combo; melee_seq = o.melee_seq; burst = o.burst
 
 
 ## Error metric used by reconciliation (metres, plus a penalty for discrete mismatches).
@@ -215,6 +218,7 @@ func encode(buf: StreamPeerBuffer) -> void:
 	buf.put_u8(clampi(ko_count, 0, 255))
 	buf.put_u8(clampi(melee_combo, 0, 255))
 	buf.put_u8(melee_seq & 255)
+	buf.put_u8(mini(burst, 255))
 
 
 func decode(buf: StreamPeerBuffer) -> void:
@@ -276,6 +280,7 @@ func decode(buf: StreamPeerBuffer) -> void:
 	ko_count = buf.get_u8()
 	melee_combo = buf.get_u8()
 	melee_seq = buf.get_u8()
+	burst = buf.get_u8()
 
 
 ## Round-trip through the codec, so a predicting client and the server hold the same bits.

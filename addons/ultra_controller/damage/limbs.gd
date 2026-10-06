@@ -4,12 +4,13 @@ extends RefCounted
 ## MotorState (`limb_hp`: percent per region, `severed`: bitmask) so the movement effects of an
 ## injury predict exactly like everything else; the server is the only one that changes them.
 
-enum Region { HEAD, TORSO, ARM_L, FOREARM_L, ARM_R, FOREARM_R, THIGH_L, SHIN_L, THIGH_R, SHIN_R }
+enum Region { HEAD, TORSO, ARM_L, FOREARM_L, ARM_R, FOREARM_R, THIGH_L, SHIN_L, THIGH_R, SHIN_R,
+	HAND_L, HAND_R, FOOT_L, FOOT_R }      ## (hands and feet appended: older indices unchanged)
 enum Status { HEALTHY, INJURED, CRIPPLED, SEVERED }
 
-const COUNT := 10
+const COUNT := 14
 const NAMES: Array[String] = ["head", "torso", "upper arm L", "forearm L", "upper arm R", "forearm R",
-	"thigh L", "shin L", "thigh R", "shin R"]
+	"thigh L", "shin L", "thigh R", "shin R", "hand L", "hand R", "foot L", "foot R"]
 const STATUS_NAMES: Array[String] = ["ok", "hurt", "crippled", "severed"]
 
 ## Humanoid bones owned by each region. The first is the region's root: where it's cut off.
@@ -17,20 +18,28 @@ const BONES := {
 	Region.HEAD: ["Head"],
 	Region.TORSO: ["Hips", "Spine", "Chest", "UpperChest", "Neck"],
 	Region.ARM_L: ["LeftUpperArm"],
-	Region.FOREARM_L: ["LeftLowerArm", "LeftHand"],
+	Region.FOREARM_L: ["LeftLowerArm"],
 	Region.ARM_R: ["RightUpperArm"],
-	Region.FOREARM_R: ["RightLowerArm", "RightHand"],
+	Region.FOREARM_R: ["RightLowerArm"],
 	Region.THIGH_L: ["LeftUpperLeg"],
-	Region.SHIN_L: ["LeftLowerLeg", "LeftFoot", "LeftToes"],
+	Region.SHIN_L: ["LeftLowerLeg"],
 	Region.THIGH_R: ["RightUpperLeg"],
-	Region.SHIN_R: ["RightLowerLeg", "RightFoot", "RightToes"],
+	Region.SHIN_R: ["RightLowerLeg"],
+	Region.HAND_L: ["LeftHand"],
+	Region.HAND_R: ["RightHand"],
+	Region.FOOT_L: ["LeftFoot", "LeftToes"],
+	Region.FOOT_R: ["RightFoot", "RightToes"],
 }
 ## Losing a region takes the rest of the chain with it.
 const BELOW := {
-	Region.ARM_L: [Region.FOREARM_L],
-	Region.ARM_R: [Region.FOREARM_R],
-	Region.THIGH_L: [Region.SHIN_L],
-	Region.THIGH_R: [Region.SHIN_R],
+	Region.ARM_L: [Region.FOREARM_L, Region.HAND_L],
+	Region.FOREARM_L: [Region.HAND_L],
+	Region.ARM_R: [Region.FOREARM_R, Region.HAND_R],
+	Region.FOREARM_R: [Region.HAND_R],
+	Region.THIGH_L: [Region.SHIN_L, Region.FOOT_L],
+	Region.SHIN_L: [Region.FOOT_L],
+	Region.THIGH_R: [Region.SHIN_R, Region.FOOT_R],
+	Region.SHIN_R: [Region.FOOT_R],
 }
 
 
@@ -47,11 +56,13 @@ static func status(s: MotorState, r: int) -> int:
 
 ## Worst status along a leg / arm.
 static func leg(s: MotorState, left: bool) -> int:
-	return maxi(status(s, Region.THIGH_L if left else Region.THIGH_R), status(s, Region.SHIN_L if left else Region.SHIN_R))
+	return maxi(maxi(status(s, Region.THIGH_L if left else Region.THIGH_R), status(s, Region.SHIN_L if left else Region.SHIN_R)),
+		status(s, Region.FOOT_L if left else Region.FOOT_R))
 
 
 static func arm(s: MotorState, left: bool) -> int:
-	return maxi(status(s, Region.ARM_L if left else Region.ARM_R), status(s, Region.FOREARM_L if left else Region.FOREARM_R))
+	return maxi(maxi(status(s, Region.ARM_L if left else Region.ARM_R), status(s, Region.FOREARM_L if left else Region.FOREARM_R)),
+		status(s, Region.HAND_L if left else Region.HAND_R))
 
 
 static func is_whole(s: MotorState) -> bool:

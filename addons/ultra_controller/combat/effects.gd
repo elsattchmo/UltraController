@@ -267,7 +267,7 @@ func _fly_step(r: Dictionary, dt: float, space: PhysicsDirectSpaceState3D, lp: V
 			var closest := from + dir * tt
 			r.whizzed = true
 			if not r.pellet or randf() < 0.35:
-				sfx.whiz_at(closest, closest.distance_to(lp))
+				sfx.whiz_at(closest, closest.distance_to(lp), float(def.stat("whiz_db", 0.0)))
 	var q := PhysicsRayQueryParameters3D.create(from, to, UltraCombat.MASK, r.ex)
 	var hit := UltraCombat._cast(space, q, from, dir)
 	var streak := r.streak as MeshInstance3D

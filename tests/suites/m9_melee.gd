@@ -106,7 +106,7 @@ func test_knockout_blackout_and_codec() -> void:
 	copy.decode(b)
 	check(copy.has(MotorState.F_UNCONSCIOUS) and absf(copy.ko_t - c.state.ko_t) < 0.002 and copy.ko_count == c.state.ko_count, "knockout state round-trips")
 	info("blackout %.2f while out cold" % hud.blackout())
-	check(hud.blackout() > 0.95, "the screen is black")
+	check(hud.blackout() > 0.95, "the knockout screen is up (double vision, dim)")
 	hud.queue_free()
 
 

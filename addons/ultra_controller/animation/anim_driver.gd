@@ -1936,11 +1936,16 @@ func _set_item_clips(roles: Dictionary) -> void:
 				clip = _twisted(clip, "UpperChest", cy)
 			(item.get_node(node_name) as AnimationNodeAnimation).animation = _mirrored(clip) if item_left else clip
 	if modifier:
-		modifier.item_hips_yaw = _hips_yaw((item.get_node("aim") as AnimationNodeAnimation).animation)
+		# The weapon's stance: its aiming clip - but a melee weapon's "aim" is its block (hunched,
+		# turned): its stance is the idle.
+		var stance_node := "low" if held_def and held_def.kind == ItemDefinition.Kind.MELEE else "aim"
+		modifier.item_hips_yaw = _hips_yaw((item.get_node(stance_node) as AnimationNodeAnimation).animation)
+		if held_def and held_def.kind == ItemDefinition.Kind.MELEE and float(held_def.stat("two_hand_grip", 0.0)) <= 0.0:
+			modifier.item_hips_yaw = NAN      # (one-handed: only its arm comes from the clip - no twist)
 		# The bladed stance stands on the item's own aiming legs.
 		var gt := (tree.tree_root as AnimationNodeBlendTree).get_node("loco").get_node("ground") as AnimationNodeBlendTree
 		if gt.has_node("idle_b_src"):
-			(gt.get_node("idle_b_src") as AnimationNodeAnimation).animation = (item.get_node("aim") as AnimationNodeAnimation).animation
+			(gt.get_node("idle_b_src") as AnimationNodeAnimation).animation = (item.get_node(stance_node) as AnimationNodeAnimation).animation
 
 
 ## Hips yaw a clip was made with (skeleton space), from its first Hips rotation key.
@@ -2317,17 +2322,22 @@ func _drive_swing(speed: float, delta: float) -> void:
 	tree.set("parameters/swing/blend_amount", w * (1.0 - lying))
 	tree.set("parameters/swing_full/blend_amount", w * smoothstep(0.0, 1.0, _stand_w) * (1.0 - lying))
 	tree.set("parameters/swing_arms/blend_amount", w * lying)
-	# One-handed melee weapon (not blocking): the empty arm is left out of the item layer, so it
-	# hangs / swings with the legs (the clip's guard arm was held up in front all the time).
-	# A strike's own layers bring it in; the switch is smoothed by the inertial blend.
+	# One-handed melee weapon (not blocking): only the weapon arm comes from the item layer -
+	# the body stands as it walks (the sword idle clip is a hunched combat crouch) and the empty
+	# arm hangs / swings with the legs. A strike's own layers bring the rest in; the switch is
+	# smoothed by the inertial blend.
 	var one_hand := held_def != null and held_def.kind == ItemDefinition.Kind.MELEE 		and float(held_def.stat("two_hand_grip", 0.0)) <= 0.0 and not blocking
 	var free_side := "" if not one_hand else ("Right" if item_left else "Left")
 	if free_side != _free_side:
 		_free_side = free_side
 		var up := (tree.tree_root as AnimationNodeBlendTree).get_node("upper") as AnimationNodeBlend2
-		for b in _arm_bones():
-			var arm := b.begins_with("Left") or b.begins_with("Right")
-			up.set_filter_path(NodePath("%GeneralSkeleton:" + b), arm and not b.begins_with(free_side) or (arm and free_side == ""))
+		var weapon_side := "Left" if free_side == "Right" else "Right"
+		var arms := _arm_bones()
+		for b in _upper_body_bones():
+			var keep_b := true
+			if free_side != "":
+				keep_b = b in arms and b.begins_with(weapon_side)
+			up.set_filter_path(NodePath("%GeneralSkeleton:" + b), keep_b)
 		inertial.trigger()
 
 

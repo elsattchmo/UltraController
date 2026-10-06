@@ -60,13 +60,14 @@ static func build(p: Callable, head_up := Vector3.ZERO) -> Array[Dictionary]:
 		var hand: Vector3 = p.call(side + "Hand")
 		var lower: Vector3 = p.call(side + "LowerArm")
 		cap.call(R.ARM_L if l else R.ARM_R, p.call(side + "UpperArm"), lower, 0.065)
-		cap.call(R.FOREARM_L if l else R.FOREARM_R, lower, hand + (hand - lower).normalized() * 0.09, 0.055)
+		cap.call(R.FOREARM_L if l else R.FOREARM_R, lower, hand, 0.05)
+		cap.call(R.HAND_L if l else R.HAND_R, hand, hand + (hand - lower).normalized() * 0.1, 0.05)
 		var knee: Vector3 = p.call(side + "LowerLeg")
 		var foot: Vector3 = p.call(side + "Foot")
 		var toes: Vector3 = p.call(side + "Toes")
 		cap.call(R.THIGH_L if l else R.THIGH_R, p.call(side + "UpperLeg"), knee, 0.09)
 		cap.call(R.SHIN_L if l else R.SHIN_R, knee, foot, 0.065)
-		cap.call(R.SHIN_L if l else R.SHIN_R, foot, toes + (toes - foot).normalized() * 0.04, 0.05)
+		cap.call(R.FOOT_L if l else R.FOOT_R, foot + Vector3.UP * 0.02, toes + (toes - foot).normalized() * 0.04, 0.05)
 	return boxes
 
 

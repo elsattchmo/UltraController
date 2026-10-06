@@ -15,6 +15,7 @@ uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 uniform float tunnel = 0.0;      // 0..1 vision closing in
 uniform float blur = 0.0;        // 0..1 whole-view blur
 uniform float dark = 0.0;        // 0..1 darkening
+uniform float double_v = 0.0;    // 0..1 double vision (knocked out / coming round)
 uniform float aspect = 1.777;
 uniform vec3 tint = vec3(0.25, 0.0, 0.0);
 void fragment() {
@@ -23,10 +24,17 @@ void fragment() {
 	float edge = smoothstep(0.88 - tunnel * 0.5, 1.15 - tunnel * 0.38, r) * clamp(tunnel * 1.5, 0.0, 1.0);
 	float lod = blur * 5.0 + edge * 3.5;
 	vec3 c = textureLod(screen_tex, SCREEN_UV, lod).rgb;
+	// Double vision: a second image drifting off the first, the two never quite meeting.
+	if (double_v > 0.001) {
+		vec2 off = vec2(sin(TIME * 0.9) * 0.022 + 0.012, sin(TIME * 0.63 + 1.3) * 0.010) * double_v;
+		vec3 c2 = textureLod(screen_tex, SCREEN_UV + off, lod + 0.6).rgb;
+		vec3 c0 = textureLod(screen_tex, SCREEN_UV - off * 0.35, lod).rgb;
+		c = mix(c0, c2, 0.45 * double_v);
+	}
 	float g = dot(c, vec3(0.299, 0.587, 0.114));
 	c = mix(c, vec3(g), clamp(edge * 0.6 + tunnel * 0.15, 0.0, 1.0));
 	c = mix(c, tint, edge * 0.25);
-	c *= 1.0 - edge * 0.78;
+	c *= 1.0 - edge * 0.7;
 	c *= 1.0 - dark;
 	COLOR = vec4(c, 1.0);
 }
@@ -146,7 +154,7 @@ func _process(delta: float) -> void:
 	var hp := clampf(s.hp / 100.0, 0.0, 1.0)
 	var want := 0.0
 	if bleed > 0.0:
-		want = clampf(0.05 + (1.0 - hp) * 0.6, 0.0, 0.65)
+		want = clampf(0.04 + (1.0 - hp) * 0.5, 0.0, 0.55)
 	if dead:
 		want = 0.0
 	_tunnel = move_toward(_tunnel, want, delta * 0.8)
@@ -158,8 +166,11 @@ func _process(delta: float) -> void:
 	_fx.visible = show
 	if show:
 		_mat.set_shader_parameter("tunnel", tun)
-		_mat.set_shader_parameter("blur", smoothstep(0.0, 1.0, _ko_blur) * 0.9)
-		_mat.set_shader_parameter("dark", smoothstep(0.0, 1.0, _ko) * 0.86)
+		# Knocked out: seeing double, a little blurred and dim (not black); coming round the dimness
+		# goes first, the double image last.
+		_mat.set_shader_parameter("blur", smoothstep(0.0, 1.0, _ko_blur) * 0.35)
+		_mat.set_shader_parameter("dark", smoothstep(0.0, 1.0, _ko) * 0.5)
+		_mat.set_shader_parameter("double_v", smoothstep(0.0, 1.0, _ko_blur))
 		_mat.set_shader_parameter("aspect", size.x / maxf(size.y, 1.0))
 	# Death: cut to black in a blink, then the recap fades in.
 	_death_t += delta

@@ -104,7 +104,8 @@ func shot(at: Vector3, prefix: String, key := 0, loud := 1.0) -> void:
 		var voice: Variant = st.get("voice")
 		if voice != null and is_instance_valid(voice) and now - float(st.get("t", -9.0)) < AUTO_GAP:
 			_cut(voice as AudioStreamPlayer3D)           # (the last round's attack: cut short)
-		st = {"t": now, "at": at, "prefix": prefix, "late": late, "near": near_w, "far": far_w, "gain": gain, "voice": null}
+		var rounds := int(st.get("rounds", 0)) + 1 if now - float(st.get("t", -9.0)) < AUTO_GAP else 1
+		st = {"t": now, "at": at, "prefix": prefix, "late": late, "near": near_w, "far": far_w, "gain": gain, "voice": null, "rounds": rounds}
 		_auto[key] = st
 		var sfx_name := prefix + "_fire_auto"
 		if near_w > 0.01:
@@ -127,10 +128,14 @@ func _process(_delta: float) -> void:
 			_auto.erase(key)
 			var pre := String(st.prefix)
 			var late := float(st.late)
+			# The ring-out: well under the shots, a tap's softer than a long burst's, never the
+			# same twice (level and pitch varied).
+			var size := lerpf(-5.0, 0.0, clampf((int(st.get("rounds", 1)) - 1) / 6.0, 0.0, 1.0))
+			var tail_db := -7.0 + size + randf_range(-2.5, 1.0)
 			if float(st.near) > 0.01:
-				play(pre + "_fire_tail", st.at, float(st.gain) + linear_to_db(float(st.near)), 9.0, 260.0, 0.03, maxf(late - (now - float(st.t)), 0.0))
+				play(pre + "_fire_tail", st.at, float(st.gain) + linear_to_db(float(st.near)) + tail_db, 9.0, 260.0, 0.09, maxf(late - (now - float(st.t)), 0.0))
 			if float(st.far) > 0.01:
-				play(pre + "_fire_tail_far", st.at, float(st.gain) + linear_to_db(float(st.far)) + 2.0, 80.0, 1400.0, 0.03, maxf(late - (now - float(st.t)), 0.0))
+				play(pre + "_fire_tail_far", st.at, float(st.gain) + linear_to_db(float(st.far)) + 2.0 + tail_db, 80.0, 1400.0, 0.09, maxf(late - (now - float(st.t)), 0.0))
 
 
 func _later(delay: float, f: Callable) -> void:
@@ -171,21 +176,24 @@ func whiz(origin: Vector3, dir: Vector3, reach: float, shooter_is_listener: bool
 	var miss := closest.distance_to(lp)
 	if miss > WHIZ_RADIUS:
 		return
-	# Right past your head: the sharp crack; further out softer fly-bys, the far ones dulled.
-	var band := "whiz_close" if miss < 1.2 else ("whiz_mid" if miss < 3.0 else "whiz_far")
-	last_whiz = band
-	var vol := 2.0 if band == "whiz_close" else (-2.0 if band == "whiz_mid" else -5.0)
-	play(band, closest, vol - miss * 0.6, 4.0, 40.0, 0.07)
+	whiz_at(closest, miss)
 
 
-## A round passing the listener at `at`, `miss` m off: the set by how close.
-func whiz_at(at: Vector3, miss: float) -> void:
+## A round passing the listener at `at`, `miss` m off (`gain_db`: the gun's - a pistol round's
+## quieter): the takes graded by how close, each band drawing on its neighbour's too so every
+## recording gets used.
+func whiz_at(at: Vector3, miss: float, gain_db := 0.0) -> void:
 	if miss > WHIZ_RADIUS:
 		return
 	var band := "whiz_close" if miss < 1.2 else ("whiz_mid" if miss < 3.0 else "whiz_far")
 	last_whiz = band
-	var vol := 2.0 if band == "whiz_close" else (-2.0 if band == "whiz_mid" else -5.0)
-	play(band, at, vol - miss * 0.6, 4.0, 40.0, 0.07)
+	var pool: Array = streams(band).duplicate()
+	pool.append_array(streams("whiz_mid") if band != "whiz_mid" else streams("whiz_close") + streams("whiz_far"))
+	if pool.is_empty():
+		return
+	var vol := -1.0 if band == "whiz_close" else (-5.0 if band == "whiz_mid" else -8.0)
+	_log(band)
+	_start(pool[randi() % pool.size()], at, vol - miss * 0.5 + gain_db, 4.0, 40.0, 0.07)
 
 
 var last_whiz := ""                 ## (tests: which set the last fly-by came from)

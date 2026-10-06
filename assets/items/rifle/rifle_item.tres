@@ -45,7 +45,7 @@ sway_damping = 0.7
 free_aim_deg = 6.0
 sway_amount = 1.35
 ads_sway_mult = 0.3
-recoil_gun_deg = 1.8
+recoil_gun_deg = 0.85
 sprint_lower_deg = Vector2(66.4, -8.1)
 stats = {
 "drag": 0.9,
@@ -58,8 +58,9 @@ stats = {
 "impulse": 7.0,
 "mag_size": 30,
 "range": 300.0,
-"recoil_pitch_deg": 1.35,
-"recoil_yaw_deg": 0.55,
+"recoil_climb": 1.7,
+"recoil_pitch_deg": 0.75,
+"recoil_yaw_deg": 0.45,
 "reload_commit": 1.9,
 "reload_time": 2.6,
 "shell": "556",

@@ -31,6 +31,7 @@ anim_clips = {
 }
 recoil_gun_deg = 3.0
 stats = {
+"whiz_db": -5.0,
 "drag": 0.6,
 "muzzle_velocity": 360.0,
 "ads_fov": 55.0,
