@@ -53,6 +53,7 @@ var _now := 0.0
 var _last_think := 0.0
 var _until := 0.0
 var _resume: int = Mode.IDLE
+var _resume_until := 0.0               ## the mode's own timer, kept across a door (entering a mode resets `_until`)
 var _door: UltraDoor
 var _door_phase := 0
 var _cleared: UltraDoor              ## the door it just dealt with (don't stop for it again)
@@ -470,7 +471,11 @@ func _leave_door() -> void:
 	_cleared = _door
 	_door = null
 	_atk = {}
-	_enter(_resume if _resume != Mode.BASH_DOOR and _resume != Mode.OPEN_DOOR else Mode.CHASE)
+	if _resume != Mode.BASH_DOOR and _resume != Mode.OPEN_DOOR:
+		_enter(_resume)
+		_until = _resume_until             # (INVESTIGATE gives up 20 s after its timer: reset to 0 it did so at once once the game was 20 s old)
+	else:
+		_enter(Mode.CHASE)
 
 
 # ------------------------------------------------------------------ hurt
@@ -565,6 +570,7 @@ func _follow(now: float) -> bool:
 		if door != null and not door.is_open and not door.broken and door != _cleared:
 			if d0 < DOOR_REACH:
 				_resume = mode
+				_resume_until = _until
 				_door = door
 				_door_phase = 0
 				_atk = {}

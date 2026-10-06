@@ -1,5 +1,5 @@
 extends Node
-## Headless test runner. Usage (after `--`): --suite=m1 [--only=test_name]
+## Headless test runner. Usage (after `--`): --suite=m1[,m2...] [--only=test_name]
 ## Runs every tests/suites/<suite>_*.gd (UltraTestSuite subclasses), each `test_*` method in
 ## order, awaiting coroutines. Exit code = number of failures. Run with --fixed-fps 60 so a
 ## simulated second is 60 frames regardless of machine speed.
@@ -17,9 +17,14 @@ func _ready() -> void:
 	var suite: String = args.get("suite", "m1")
 	var only: String = args.get("only", "")
 	var files: Array[String] = []
+	var wanted := suite.split(",")                      # (--suite=z2,z3 runs both in one process: order effects show)
 	for f in DirAccess.get_files_at("res://tests/suites"):
-		if f.ends_with(".gd") and (f.begins_with(suite + "_") or f == suite + ".gd" or suite == "all"):
-			files.append(f)
+		if not f.ends_with(".gd"):
+			continue
+		for w in wanted:
+			if f.begins_with(w + "_") or f == w + ".gd" or w == "all":
+				files.append(f)
+				break
 	files.sort()
 	print("== UltraController tests: suite=%s files=%s" % [suite, files])
 	for f in files:

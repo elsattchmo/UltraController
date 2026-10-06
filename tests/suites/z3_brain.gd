@@ -105,6 +105,7 @@ func test_a_gunshot_carries_through_walls_but_a_footstep_does_not() -> void:
 
 
 func test_the_zombie_goes_to_look() -> void:
+	await ticks(1250)                                   # (a session 20 s old: timers are compared against the clock)
 	var b := zombie(&"walker", Vector3(13, 0.05, 15), 90.0, Mode.IDLE)     # the salon
 	director.max_thinks_per_frame = 99
 	await ticks(30)

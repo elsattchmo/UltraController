@@ -865,6 +865,9 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   repath, sidestep, back off 1 s, alternate sides.
 - Debug: `ZombieDebug` (F10 / `--zdebug`; new default input action `zombie_debug`, `tools/install_input_defaults.gd`
   adds actions to project.godot headless): label (mode, awareness, archetype), path, goal, facing, a ring per noise.
+- A brain's mode timer `_until` is reset by every `_enter`: the door interlude (OPEN_DOOR / BASH_DOOR) saves and restores it
+  (`_resume_until`) - INVESTIGATE gives up at `_until + 20`, so with it at 0 a zombie that opened a door gave up on the spot once the
+  game was 20 s old (z3 only saw it after z1 had burnt the clock: `--suite=z1,z3` runs suites in one process, as `all` does).
 - Tests `z3_brain` (10): hearing through walls and floors, goes to look, sight cone / walls, chase + hurt, doors on the
   way, stairs, bashing a locked door, the racket draws company, shot staggers / wakes a dormant one, crawler. Tour
   `zombie_review`.
