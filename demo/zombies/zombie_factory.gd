@@ -80,6 +80,9 @@ static func dress(c: UltraCharacter, force := false) -> void:
 	if c.has_meta(&"dressed") and not force:
 		return
 	c.set_meta(&"dressed", true)
+	# Nobody predicts a zombie: its state needn't be snapped to the wire format every tick, nor its floor re-probed.
+	c.quantize_state = false
+	c.motor.cache_floor = true
 	var arch := ZombieArchetype.get_arch(c.get_meta("zombie", &"walker"))
 	var R := UltraLimbs.Region
 	if arch.legs_gone:

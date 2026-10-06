@@ -53,6 +53,11 @@ var last_step_up: float = 0.0
 var last_step_down: float = 0.0
 var last_landing: float = 0.0
 var floor_friction: float = 1.0
+## Re-probe the floor (friction, normal) only after moving a bit (set for NPCs: not for predicted players,
+## whose motor must be a pure function of the state).
+var cache_floor := false
+var _probe_age := 0
+var _probe_pos := Vector3.ZERO
 var floor_normal := Vector3.UP
 ## Water sampled at the start of the step (volumes are static or a function of the tick).
 var water: UltraWater
@@ -362,6 +367,13 @@ func accelerate_ground(s: MotorState, wish: Vector3, target_speed: float, fricti
 
 ## Probe the floor below the feet: friction and normal (deterministic ray, not last-frame data).
 func probe_floor(s: MotorState) -> void:
+	# An NPC (cache_floor) re-asks only after it has moved or a few ticks have passed: its floor doesn't change that fast.
+	if cache_floor:
+		_probe_age += 1
+		if _probe_age < 6 and s.pos.distance_squared_to(_probe_pos) < 0.25:
+			return
+		_probe_age = 0
+		_probe_pos = s.pos
 	floor_friction = 1.0
 	floor_normal = Vector3.UP
 	var space := body.get_world_3d().direct_space_state
@@ -446,7 +458,7 @@ func _out_from_under_platforms(s: MotorState) -> void:
 
 func _update_platform(s: MotorState) -> void:
 	var on := 0
-	if body.is_on_floor():
+	if body.is_on_floor() and not TickPlatform.all.is_empty():
 		for i in body.get_slide_collision_count():
 			var c := body.get_slide_collision(i)
 			if c.get_normal().y > 0.7 and c.get_collider() is TickPlatform:

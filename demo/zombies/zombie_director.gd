@@ -79,9 +79,9 @@ const LOD_BATCH := 3                    ## zombies re-tiered per physics tick (e
 const IDLE_STRIDE := 4
 ## A walking zombie is simulated every 2nd tick once it is STRIDE_NEAR m from every target (it is drawn over
 ## its own ticks, so it stays smooth), every 3rd from STRIDE_MID m, every 4th from STRIDE_FAR m.
-const STRIDE_NEAR := 4.0
-const STRIDE_MID := 14.0
-const STRIDE_FAR := 30.0
+const STRIDE_NEAR := 3.0
+const STRIDE_MID := 8.0
+const STRIDE_FAR := 20.0
 var lod_enabled := DisplayServer.get_name() != "headless"
 var _lod_i := 0
 var _viewers: Array[Camera3D] = []

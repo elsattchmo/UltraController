@@ -14,29 +14,32 @@ func _build() -> void:
 	steps = [
 		{"teleport": "spawn", "t": 5.0, "yaw": 0, "pitch": 0, "view_tp": true},
 		{"call": _setup, "t": 22.0},
-		{"call": _measure.bind("warm-up"), "t": 3.0},
-		{"call": _measure.bind("baseline (all on)"), "t": 3.0},
-		{"call": _measure.bind("SSAO off"), "t": 3.0},
-		{"call": _measure.bind("glow off"), "t": 3.0},
-		{"call": _measure.bind("fog off"), "t": 3.0},
-		{"call": _measure.bind("moon shadow off"), "t": 3.0},
-		{"call": _measure.bind("omni shadows off"), "t": 3.0},
-		{"call": _measure.bind("all zombie casters off (no zombie shadows)"), "t": 3.0},
-		{"call": _measure.bind("all lights off"), "t": 3.0},
-		{"call": _measure.bind("zombie meshes hidden"), "t": 3.0},
-		{"call": _measure.bind("+ characters' _process off"), "t": 3.0},
-		{"call": _measure.bind("+ BodyFX / ragdoll / anim driver off"), "t": 3.0},
-		{"call": _measure.bind("+ AnimationTrees off"), "t": 3.0},
-		{"call": _measure.bind("+ skeleton modifiers off"), "t": 3.0},
-		{"call": _measure.bind("+ visual roots hidden"), "t": 3.0},
-		{"call": _measure.bind("+ brains / director off"), "t": 3.0},
-		{"call": _measure.bind("+ characters' physics off"), "t": 3.0},
+		{"call": _measure.bind("warm-up"), "t": 4.0},
+		{"call": _measure.bind("baseline (all on)"), "t": 4.0},
+		{"call": _measure.bind("SSAO off"), "t": 4.0},
+		{"call": _measure.bind("glow off"), "t": 4.0},
+		{"call": _measure.bind("fog off"), "t": 4.0},
+		{"call": _measure.bind("moon shadow off"), "t": 4.0},
+		{"call": _measure.bind("omni shadows off"), "t": 4.0},
+		{"call": _measure.bind("all zombie casters off (no zombie shadows)"), "t": 4.0},
+		{"call": _measure.bind("all lights off"), "t": 4.0},
+		{"call": _measure.bind("zombie meshes hidden"), "t": 4.0},
+		{"call": _measure.bind("+ characters' _process off"), "t": 4.0},
+		{"call": _measure.bind("+ BodyFX / ragdoll / anim driver off"), "t": 4.0},
+		{"call": _measure.bind("+ AnimationTrees off"), "t": 4.0},
+		{"call": _measure.bind("+ skeleton modifiers off"), "t": 4.0},
+		{"call": _measure.bind("+ visual roots hidden"), "t": 4.0},
+		{"call": _measure.bind("+ brains / director off"), "t": 4.0},
+		{"call": _measure.bind("+ characters' physics off"), "t": 4.0},
+		{"call": _measure.bind("+ hit volumes off"), "t": 4.0},
+		{"call": _measure.bind("+ no zombie simulated"), "t": 4.0},
 		{"call": _measure.bind("done"), "t": 0.5},
 	]
 
 
 func _setup() -> void:
 	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+	Engine.max_physics_steps_per_frame = 1          # (no catch-up spiral: a frame is one tick + one draw, so steps compare)
 	print("PERF adapter: ", RenderingServer.get_video_adapter_name(), " | ", Engine.get_physics_ticks_per_second(), " Hz physics, max steps ", Engine.max_physics_steps_per_frame)
 	_cam = Camera3D.new()
 	main.add_child(_cam)
@@ -48,8 +51,18 @@ func _setup() -> void:
 	# The player somewhere out of the way, the sandbox's zombies standing.
 	var p: UltraCharacter = main.player
 	p.teleport(Vector3(28, 0.05, 20.0), 0.0)
-	for b in main.sandbox.director.brains:
-		b.reset(ZombieBrain.Mode.CHASE, p)
+	# 25 zombies standing about the hall in view of the camera (a steady crowd: nothing drifts between steps),
+	# the rest of the house left as it is.
+	var brains: Array = main.sandbox.director.brains
+	var k := 0
+	for ix in 5:
+		for iz in 5:
+			if k >= brains.size():
+				break
+			var b: ZombieBrain = brains[k]
+			k += 1
+			b.reset(ZombieBrain.Mode.DORMANT, null)
+			b.c.teleport(Vector3(23.0 + ix * 2.5, 0.05, 12.0 + iz * 2.2), PI)
 	var we := main.map.get_node("WorldEnvironment") as WorldEnvironment
 	_env = we.environment
 
@@ -119,6 +132,16 @@ func _measure(next: String) -> void:
 			for b in main.sandbox.director.brains:
 				b.c.set_physics_process(false)
 				b.c.process_mode = Node.PROCESS_MODE_DISABLED
+		"+ hit volumes off":
+			for b in main.sandbox.director.brains:
+				if b.c.hit_volume:
+					b.c.hit_volume.process_mode = Node.PROCESS_MODE_DISABLED
+					for ch in b.c.hit_volume.get_children():
+						if ch is CollisionShape3D:
+							(ch as CollisionShape3D).disabled = true
+		"+ no zombie simulated":
+			for b in main.sandbox.director.brains:
+				b.c.sim_skip = true
 
 
 func _process(delta: float) -> void:
