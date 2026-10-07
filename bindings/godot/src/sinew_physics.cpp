@@ -807,6 +807,35 @@ PackedFloat32Array SinewPhysics::character_gait_leg_effort(int character) const 
 	return out;
 }
 
+Array SinewPhysics::character_gait_clip_report(int character) const {
+	Array out;
+	const auto it = _gaits.find(character);
+	if (it == _gaits.end()) {
+		return out;
+	}
+	for (const auto& r : it->second->clip_report()) {
+		Dictionary d;
+		d["speed"] = r.speed;
+		d["true_speed"] = r.true_speed;
+		d["stride"] = r.stride;
+		d["cadence"] = r.cadence;
+		d["duty"] = r.duty;
+		d["duty_l"] = r.duty_l;
+		d["duty_r"] = r.duty_r;
+		d["foot_off"] = r.foot_off;
+		d["angle"] = r.angle;
+		d["width_min"] = r.width_min;
+		d["width_max"] = r.width_max;
+		d["crossover"] = r.crossover;
+		d["contact_pitch_l"] = r.contact_pitch_l;
+		d["lift_max"] = r.lift_max;
+		d["yaw_range"] = r.yaw_range;
+		d["pelvis_bob"] = r.pelvis_bob;
+		out.push_back(d);
+	}
+	return out;
+}
+
 Dictionary SinewPhysics::character_gait_state(int character) const {
 	Dictionary d;
 	auto it = _gaits.find(character);
@@ -961,6 +990,7 @@ void SinewPhysics::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("character_gait_disturb", "character", "seconds"), &SinewPhysics::character_gait_disturb);
 	ClassDB::bind_method(D_METHOD("character_gait_leg_effort", "character"), &SinewPhysics::character_gait_leg_effort);
 	ClassDB::bind_method(D_METHOD("character_gait_pelvis_turn", "character"), &SinewPhysics::character_gait_pelvis_turn);
+	ClassDB::bind_method(D_METHOD("character_gait_clip_report", "character"), &SinewPhysics::character_gait_clip_report);
 	ClassDB::bind_method(D_METHOD("character_gait_drive", "character", "com", "velocity", "command", "dt"), &SinewPhysics::character_gait_drive);
 	ClassDB::bind_method(D_METHOD("character_gait_state", "character"), &SinewPhysics::character_gait_state);
 	ClassDB::bind_method(D_METHOD("ground_below", "point", "max_distance"), &SinewPhysics::ground_below, DEFVAL(3.0));

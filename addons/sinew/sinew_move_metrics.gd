@@ -25,6 +25,8 @@ var record_sinks := true
 ## ground (the bones aren't the soles): measured by calibrate(), used by summary().
 var stand_hips := 0.0
 var sink_zero := 0.0
+## The same per sole point (toe tip, ankle, heel; left then right): the bones sit at different heights over the sole.
+var sink_zeros: Array = []
 var _ids: Dictionary = {}
 
 
@@ -44,20 +46,29 @@ func detach() -> void:
 ## Take the standing reference from the frames recorded under `idle_label` (standing on flat ground).
 func calibrate(idle_label: String) -> void:
 	var hs := 0.0
-	var sk := 0.0
 	var n := 0
-	var ns := 0
+	var sums := []
+	var counts := []
 	for f: Dictionary in frames:
 		if f.label != idle_label:
 			continue
 		var b: Dictionary = f.bones
 		hs += (b.Hips as Vector3).y - minf((b.LeftToes as Vector3).y, (b.RightToes as Vector3).y)
 		n += 1
-		for x: float in f.sink:
-			sk += x
-			ns += 1
+		var sk: Array = f.sink
+		for i in sk.size():
+			if sums.size() <= i:
+				sums.append(0.0)
+				counts.append(0)
+			sums[i] += float(sk[i])
+			counts[i] += 1
 	stand_hips = hs / maxf(n, 1)
-	sink_zero = sk / maxf(ns, 1)
+	sink_zeros = []
+	var all := 0.0
+	for i in sums.size():
+		sink_zeros.append(sums[i] / maxf(counts[i], 1))
+		all += sink_zeros[i]
+	sink_zero = all / maxf(sums.size(), 1)
 
 
 func _on_posed() -> void:
@@ -79,7 +90,7 @@ func _capture() -> Dictionary:
 			"aim": float(character.last_input.yaw) if character.last_input else st_c.body_yaw, "body": st_c.body_yaw,
 			"state": MotorState.Id.keys()[st_c.state], "vel": Vector2(st_c.vel.x, st_c.vel.z), "pos": st_c.pos,
 			"planted_l": bool(st.get("planted_l", true)), "planted_r": bool(st.get("planted_r", true)),
-			"stepping": bool(st.get("stepping", false)), "gait_on": ragdoll.gait, "twist": ragdoll.torso_twist,
+			"stepping": bool(st.get("stepping", false)), "pivoting": bool(st.get("pivoting", false)), "gait_on": ragdoll.gait, "twist": ragdoll.torso_twist,
 			"pelvis_turn": float(st.get("pelvis_turn", 0.0)), "drop": float(st.get("pelvis_drop", 0.0)),
 			"cadence": float(st.get("cadence", 0.0)), "dirw": float(st.get("clip_dirw", -1.0)),
 			"step_max": float(st.get("step_max", 0.0)), "sink": _sinks(bones) if record_sinks else [],
@@ -148,7 +159,9 @@ static func _foot_yaw(ankle: Vector3, toe: Vector3) -> float:
 
 ## Per-label summary: gap_min (m), overlap (ticks the legs are through each other), hips_drop (m below the standing
 ## height), sink (m into the ground, past the flat-ground reading), leg_speed (fastest an ankle moves relative to
-## the hips, m/s), pivot (largest yaw change of a planted foot, deg), steps (touchdowns), frames.
+## the hips, m/s), pivot (largest yaw change of a planted foot, deg), steps (touchdowns), air (ticks with neither foot
+## planted below 2 m/s - for information: the walk clip's measured duty is 0.48, so even a straight walk has a tick or
+## two per step), frames.
 func summary(lab: String) -> Dictionary:
 	var gap := 9.0
 	var over := 0
@@ -157,6 +170,7 @@ func summary(lab: String) -> Dictionary:
 	var speed := 0.0
 	var pivot := 0.0
 	var steps := 0
+	var air := 0
 	var n := 0
 	var prev: Dictionary = {}
 	var yaw0 := {}
@@ -168,8 +182,11 @@ func summary(lab: String) -> Dictionary:
 		var g := legs_gap(b)
 		gap = minf(gap, g)
 		over += 1 if g < 0.0 else 0
-		for x: float in f.sink:
-			sink = maxf(sink, x - sink_zero)
+		var sk: Array = f.sink
+		for i in sk.size():
+			sink = maxf(sink, float(sk[i]) - (float(sink_zeros[i]) if i < sink_zeros.size() else sink_zero))
+		if not f.planted_l and not f.planted_r and (f.vel as Vector2).length() < 2.0:
+			air += 1
 		var h: Vector3 = b.Hips
 		if stand_hips > 0.0:
 			drop = maxf(drop, stand_hips - (h.y - minf((b.LeftToes as Vector3).y, (b.RightToes as Vector3).y)))
@@ -191,7 +208,7 @@ func summary(lab: String) -> Dictionary:
 				yaw0.erase(side)
 		prev = f
 	return {"gap_min": gap, "overlap": over, "hips_drop": drop, "sink": sink, "leg_speed": speed, "pivot": pivot,
-			"steps": steps, "frames": n}
+			"steps": steps, "air": air, "frames": n}
 
 
 ## Every label in recording order.
@@ -205,9 +222,9 @@ func labels() -> Array:
 
 ## One line per label, for logs.
 func table() -> String:
-	var lines := ["%-24s %8s %7s %9s %7s %9s %6s %5s" % ["segment", "gap cm", "overlap", "hips cm", "sink cm", "leg m/s", "pivot", "steps"]]
+	var lines := ["%-24s %8s %7s %9s %7s %9s %6s %5s %4s" % ["segment", "gap cm", "overlap", "hips cm", "sink cm", "leg m/s", "pivot", "steps", "air"]]
 	for lab: String in labels():
 		var s := summary(lab)
-		lines.append("%-24s %8.1f %7d %9.1f %7.1f %9.1f %6.0f %5d" % [lab, s.gap_min * 100.0, s.overlap, s.hips_drop * 100.0,
-				s.sink * 100.0, s.leg_speed, s.pivot, s.steps])
+		lines.append("%-24s %8.1f %7d %9.1f %7.1f %9.1f %6.0f %5d %4d" % [lab, s.gap_min * 100.0, s.overlap, s.hips_drop * 100.0,
+				s.sink * 100.0, s.leg_speed, s.pivot, s.steps, s.air])
 	return "\n".join(lines)

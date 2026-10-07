@@ -87,6 +87,7 @@ struct GaitSettings {
 	float cycle_bob = 0.6f, drop_rise = 0.15f, drop_fall = 0.06f, drop_slack = 0.06f;
 	float drop_fall_standing = 0.3f;            ///< stopped: the hips come back up this fast (m/s)
 	float across_warp = 1.0f;                   ///< a clip's sideways foot offsets turn at most this far toward the travel (rad)
+	float walk_drop_max = 0.1f;                 ///< walking, the same (m)
 	float run_drop_max = 0.06f;                 ///< at a run the hips sink at most this to reach a planted foot; further, it lifts (m)
 	float swing_speed_max = 16.0f;              ///< a swinging foot is drawn no faster than the body + this (m/s) at a run ..
 	float swing_speed_walk = 6.0f;              ///< .. and this walking
@@ -95,11 +96,12 @@ struct GaitSettings {
 	float pivot_rate = 4.0f;                    ///< a planted foot swivels toward the way it should face this fast (rad/s)
 	float pivot_max = 0.6f;                     ///< .. and at most this far from the facing it was put down with (rad)
 	float pivot_slack = 0.12f;                  ///< a pivoted foot may sit this much further off its standing spot (m)
-	float cross_sep = 0.22f;                    ///< a crossover step lands at least this far in front of / behind the other foot (m)
+	float leg_push_max = 0.25f;                 ///< a swinging leg is pushed clear of the other by at most this a tick (m)
+	float side_reach_strafe = 0.2f;             ///< the same on a side-step clip (its trailing foot)
 	float side_reach = 0.35f;                   ///< a standing foot further out to the side of its hip than this hurries the steps (m)
-	float side_settle = 0.3f, side_settle_angle = 0.45f;   ///< crossover steps only after this long (s) within this of sideways (rad)
-	float max_drop_moving = 0.15f;              ///< moving, the hips sink at most this to reach a foot (m)
-	float side_accel = 1.6f;                    ///< the drive speeds the body up sideways (off its facing) at most this (m/s2)
+	float side_accel = 100.0f;                    ///< the drive speeds the body up sideways (off its facing) at most this (m/s2)
+	float min_stance_gap = 0.06f;               ///< on a clip's path the feet come no closer sideways than this, even where the clip's do (m)
+	float side_settle = 0.3f, side_settle_angle = 0.45f;   ///< a side step follows its clip's path freely after this long (s) within this of sideways (rad)
 	float teleport_dist = 0.6f;                 ///< the root moving further than this in one update = a teleport (m)
 	float drop_snap_rate = 1.0f, drop_snap_speed = 3.0f;   ///< the hips' drop never changes faster than rate + speed x this (m/s)
 	float drop_fall_clip = 0.4f;                ///< walking on a clip's legs: the hips come back up this fast (m/s)
@@ -201,10 +203,30 @@ public:
 	/// The hips' yaw off the facing this tick (rad, + left): standing, they sit between feet and facing.
 	float pelvis_turn() const { return _pelvis_turn; }
 	float pelvis_drop() const { return _shown_drop; }   ///< how far the hips are lowered to reach the feet (m)
-	bool feet_pivoting() const { return _pivoting; }
-	float legs_gap() const { return _legs_gap; }   ///< the posed legs' closest approach as capsules (m; < 0 = through)   ///< a planted foot is swivelling in place
+	bool feet_pivoting() const { return _pivoting; }   ///< a planted foot is swivelling in place
+	float legs_gap() const { return _legs_gap; }       ///< the posed legs' closest approach as capsules (m; < 0 = through)
 	/// Both feet down on their standing spots, facing as the stance does (the clip's own standing legs match).
 	bool feet_home() const;
+	/// What the gait read off one reference cycle (`clip_report`): the facts a changed clip is checked on
+	/// (tools/sinew/clip_audit.gd, sinew/ANIMATION_GUIDE.md).
+	struct ClipReport {
+		float speed = 0.0f;          ///< authored speed (m/s)
+		float true_speed = 0.0f;     ///< ground speed measured off the planted feet (m/s)
+		float stride = 0.0f;         ///< m per stride (two steps)
+		float cadence = 0.0f;        ///< steps per second
+		float duty = 0.0f;           ///< share of a foot's cycle on the ground (< 0.5: flight)
+		float duty_l = 0.0f, duty_r = 0.0f;
+		float foot_off = 0.0f;       ///< the right foot's touchdown after the left's (share of the cycle)
+		float angle = 0.0f;          ///< way of travel off the facing (rad, + left)
+		float width_min = 0.0f;      ///< the feet's sideways spacing across the cycle (m; < 0 = crossed)
+		float width_max = 0.0f;
+		bool crossover = false;      ///< the feet cross each other's line
+		float contact_pitch_l = 0.0f;   ///< foot roll at touchdown (rad, + heel up: forefoot / toe landing)
+		float lift_max = 0.0f;       ///< highest swing lift (m)
+		float yaw_range = 0.0f;      ///< how far a planted foot turns over its stance (rad)
+		float pelvis_bob = 0.0f;     ///< pelvis height range over the cycle (m)
+	};
+	std::vector<ClipReport> clip_report() const;
 	/// Per reference cycle: {authored speed, measured ground speed, stride m, duty, travel angle off the facing, rad} (debug).
 	std::vector<std::array<float, 5>> clip_info() const {
 		std::vector<std::array<float, 5>> out;
@@ -261,6 +283,9 @@ private:
 		Vec3 path_dir;       ///< swinging: its own way of travel (turns toward the body's at a foot's pace)
 		bool overreach = false; ///< planted beyond the leg's reach at a run: it lifts next tick
 		bool held_back = false; ///< this swing's drawn foot was slowed by the speed cap (it lands where it is)
+		bool side_lift = false; ///< this swing lifted on a side-step clip (it may come down crossed)
+		int hold = 0;           ///< ticks its touchdown was held off because it would come down crossed
+		bool wrapped = false;   ///< held up past the cycle's wrap: it comes down at the next chance
 		Quat ground;         ///< the ground's tilt under the planted foot (a ramp), applied over its yaw
 		Quat lift_ground, land_ground;
 		Quat plant_yaw;      ///< the facing it was put down with (a stance pivot turns from there)
@@ -288,6 +313,7 @@ private:
 		float dirw = 0.0f;       ///< blended: the share from directional (back / side) clips
 		float foot_off = 0.5f;   ///< the right foot's touchdown, as a phase after the left's
 		float duty_f[2] = { 0.6f, 0.6f };  ///< each foot's share of the cycle on the ground
+		float width_min = 0.13f; ///< the feet's narrowest sideways spacing over the cycle (m, body frame; < 0 = crossed)
 	};
 	std::vector<ClipLegs> _clip;
 	ClipLegs _cl;                ///< this tick's (blended for the speed)

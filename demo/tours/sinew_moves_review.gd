@@ -38,7 +38,7 @@ func _build() -> void:
 			continue
 		var st: Dictionary = (s[2] as Dictionary).duplicate()
 		if label.begins_with("@"):
-			steps.append({"call": _place.bind(label), "t": 0.1, "yaw": 0})
+			steps.append({"call": _place.bind(label), "t": 0.1})
 		var yaw_add := float(st.get("yaw_add", 0.0))
 		st.erase("yaw_add")
 		st["call"] = _seg.bind(label, s[3], s[4], yaw_add)
@@ -64,6 +64,7 @@ func _place(label: String) -> void:
 	var at := SinewMoveSegments.place(label, main.map)
 	if _c and not at.is_empty():
 		_c.teleport(at[0], at[1])
+		_bot.live_yaw = at[1]
 
 
 func _ticks(n: int) -> bool:

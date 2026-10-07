@@ -7,7 +7,8 @@ extends RefCounted
 ##   input: "move" Vector2, "yaw" deg (absolute), "yaw_rate" deg/s, "yaw_add" deg (once, at the start),
 ##          "buttons" int, "slot" int.
 ## Labels starting with "@" move the character first and aren't measured:
-##   "@flat" level ground, "@reset" the speed track's start, "@stairs" the playground stairs, "@at:<marker>".
+##   "@flat" level ground, "@reset" the speed track's start, "@stairs" the playground stairs, "@at:<marker>[:<yaw deg>]",
+##   "@ramp:<angle>:up|down" 0.6 m short of the slope's foot facing up it / on the top 0.6 m from its edge facing down.
 
 const D := 0.70710678
 
@@ -51,13 +52,15 @@ static func all(chaos_seed := 7) -> Array:
 		["@stairs", 30, {}, "side", true],
 		["stairs up", 280, {"move": Vector2(0, 1), "yaw": 0.0}, "side", true],
 		["stairs down", 240, {"move": Vector2(0, 1), "yaw": 180.0}, "side", true],
-		# Ramps (playground markers ramp_<a> at the foot, facing up the slope).
-		["@at:ramp_20", 40, {}, "side", true],
-		["ramp 20 up", 200, {"move": Vector2(0, 1), "yaw": 0.0}, "side", true],
-		["ramp 20 down", 200, {"move": Vector2(0, 1), "yaw": 180.0}, "side", true],
-		["@at:ramp_30", 40, {}, "side", true],
-		["ramp 30 up", 200, {"move": Vector2(0, 1), "yaw": 0.0}, "side", true],
-		["ramp 30 down", 200, {"move": Vector2(0, 1), "yaw": 180.0}, "side", true],
+		# Ramps: from the foot of the slope up it, and from the top's edge down it (the whole slope each way).
+		["@ramp:20:up", 40, {}, "side", true],
+		["ramp 20 up", 380, {"move": Vector2(0, 1), "yaw": 0.0}, "side", true],
+		["@ramp:20:down", 40, {"yaw": 180.0}, "side", true],
+		["ramp 20 down", 340, {"move": Vector2(0, 1), "yaw": 180.0}, "side", true],
+		["@ramp:30:up", 40, {}, "side", true],
+		["ramp 30 up", 300, {"move": Vector2(0, 1), "yaw": 0.0}, "side", true],
+		["@ramp:30:down", 40, {"yaw": 180.0}, "side", true],
+		["ramp 30 down", 260, {"move": Vector2(0, 1), "yaw": 180.0}, "side", true],
 		# Strafing: starting from standing, and then backing (the user: "strafing then changing direction backwards").
 		["@flat", 40, {"slot": 0}, "front", true],
 		["strafe L then", 90, {"move": Vector2(-1, 0)}, "front", true],
@@ -103,7 +106,18 @@ static func place(label: String, map: Node) -> Array:
 			return [(map.call("marker", "speed_start") as Node3D).global_position, 0.0]
 		"@stairs":
 			return [Vector3(30.0, 0.05, -17.0), 0.0]
+	if label.begins_with("@ramp:"):
+		# Playground ramps: marker ramp_<a> stands 3 m in front of the slope's foot, ramp_<a>_top 2 m behind its top edge.
+		var parts := label.substr(6).split(":")
+		var down := parts.size() > 1 and parts[1] == "down"
+		var m := map.call("marker", "ramp_%s%s" % [parts[0], "_top" if down else ""]) as Node3D
+		if m == null:
+			return []
+		return [m.global_position + Vector3(0, 0, 1.4 if down else -2.4), PI if down else 0.0]
 	if label.begins_with("@at:"):
-		var m := map.call("marker", label.substr(4)) as Node3D
-		return [m.global_position, 0.0] if m else []
+		# "@at:<marker>" or "@at:<marker>:<yaw deg>"
+		var parts := label.substr(4).split(":")
+		var m := map.call("marker", parts[0]) as Node3D
+		var yaw := deg_to_rad(float(parts[1])) if parts.size() > 1 else 0.0
+		return [m.global_position, yaw] if m else []
 	return []
