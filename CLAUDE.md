@@ -737,6 +737,13 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   `art_src/mannequin_edit.blend`; author actions, then `-- export-actions --blend art_src/mannequin_edit.blend --actions "A,B"`
   writes `intake/blender/*.glb` -> `blender/` library via the same intake. Also `mirror`,
   `make-pistol`, `mixamo-test` (a Mixamo-named FBX for testing without an account).
+- **Mixamo packs**: `intake/mixamo/PACKS.md` (and `packs.json`) list every downloaded pack's clips by library name
+  (`mixamo/<file without _loop>`) - build a controller "from pack X" by mapping roles to that list. 21 packs (zombie /
+  creature, injured, drunk, rifle, shooter, pistol, axe, great sword, sword and shield, male locomotion, action adventure)
+  under prefixes ZS ZN CR CN INJ DRK RFP RFL SHT SHB SHS PST AXE GSW SNS SNL SNP AAD LMM LOC LOB; a clip in several packs is
+  imported once under the first pack's prefix (Rifle 8-Way = Pro Rifle = RFP_). Off-theme Quaternius clips (flying,
+  dancing, farming, sitting, spells, bows, female gaits...) are `UltraImportTools.PURGED`: skipped by the mannequin import,
+  `--script res://tools/purge_clips.gd` takes them out of a saved ual.res.
 - Round-trip test (m1_import.test_intake_roundtrip): Blender path exact, Mixamo FBX path < 5 cm.
 - Some Mixamo clips are authored facing away (Ladder_Climb: hips yaw 177 deg) or off the ground;
   `_refit` handles both. Slide_Start is a whole slide (down and up): only its first 0.4 s is used.

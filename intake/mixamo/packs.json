@@ -1,0 +1,3879 @@
+{
+ "Scary Zombie Pack": {
+  "prefix": "ZS",
+  "mixamo_id": "e8a9aa29-0459-4819-b36a-d4cb8af27e31",
+  "clips": [
+   {
+    "clip": "mixamo/ZS_ZombieWalk",
+    "file": "ZS_ZombieWalk_loop.fbx",
+    "mixamo_name": "zombie walk",
+    "seconds": 4.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZS_ZombieIdle",
+    "file": "ZS_ZombieIdle_loop.fbx",
+    "mixamo_name": "zombie idle",
+    "seconds": 4.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZS_ZombieAttack",
+    "file": "ZS_ZombieAttack_loop.fbx",
+    "mixamo_name": "zombie attack",
+    "seconds": 2.6,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZS_ZombieRun",
+    "file": "ZS_ZombieRun_loop.fbx",
+    "mixamo_name": "zombie run",
+    "seconds": 0.8,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZS_ZombieDeath",
+    "file": "ZS_ZombieDeath.fbx",
+    "mixamo_name": "zombie death",
+    "seconds": 2.97,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/ZS_ZombieNeckBite",
+    "file": "ZS_ZombieNeckBite_loop.fbx",
+    "mixamo_name": "zombie neck bite",
+    "seconds": 4.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZS_ZombieCrawl",
+    "file": "ZS_ZombieCrawl_loop.fbx",
+    "mixamo_name": "zombie crawl",
+    "seconds": 5.13,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZS_ZombieBiting",
+    "file": "ZS_ZombieBiting_loop.fbx",
+    "mixamo_name": "zombie biting",
+    "seconds": 6.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZS_ZombieBiting2",
+    "file": "ZS_ZombieBiting2_loop.fbx",
+    "mixamo_name": "zombie biting",
+    "seconds": 2.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZS_ZombieDying",
+    "file": "ZS_ZombieDying.fbx",
+    "mixamo_name": "zombie dying",
+    "seconds": 3.33,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/ZS_RunningCrawl",
+    "file": "ZS_RunningCrawl_loop.fbx",
+    "mixamo_name": "running crawl",
+    "seconds": 0.57,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZS_ZombieScream",
+    "file": "ZS_ZombieScream_loop.fbx",
+    "mixamo_name": "zombie scream",
+    "seconds": 1.3,
+    "loop": true
+   }
+  ]
+ },
+ "Not So Scary Zombie Pack": {
+  "prefix": "ZN",
+  "mixamo_id": "21abfed7-921b-47d8-a296-a687996fb81a",
+  "clips": [
+   {
+    "clip": "mixamo/ZN_Walking",
+    "file": "ZN_Walking_loop.fbx",
+    "mixamo_name": "walking",
+    "seconds": 4.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_Walking2",
+    "file": "ZN_Walking2_loop.fbx",
+    "mixamo_name": "walking",
+    "seconds": 4.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieIdle",
+    "file": "ZN_ZombieIdle_loop.fbx",
+    "mixamo_name": "zombie idle",
+    "seconds": 6.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieIdle2",
+    "file": "ZN_ZombieIdle2_loop.fbx",
+    "mixamo_name": "zombie idle",
+    "seconds": 4.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombiePunching",
+    "file": "ZN_ZombiePunching_loop.fbx",
+    "mixamo_name": "zombie punching",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombiePunching2",
+    "file": "ZN_ZombiePunching2_loop.fbx",
+    "mixamo_name": "zombie punching",
+    "seconds": 2.6,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieHeadbutt",
+    "file": "ZN_ZombieHeadbutt_loop.fbx",
+    "mixamo_name": "zombie headbutt",
+    "seconds": 2.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieKicking",
+    "file": "ZN_ZombieKicking_loop.fbx",
+    "mixamo_name": "zombie kicking",
+    "seconds": 3.37,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieKicking2",
+    "file": "ZN_ZombieKicking2_loop.fbx",
+    "mixamo_name": "zombie kicking",
+    "seconds": 3.47,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieTransition",
+    "file": "ZN_ZombieTransition.fbx",
+    "mixamo_name": "zombie transition",
+    "seconds": 1.17,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/ZN_ZombieTransition2",
+    "file": "ZN_ZombieTransition2.fbx",
+    "mixamo_name": "zombie transition",
+    "seconds": 6.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/ZN_ZombieReactionHit",
+    "file": "ZN_ZombieReactionHit_loop.fbx",
+    "mixamo_name": "zombie reaction hit",
+    "seconds": 2.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieReactionHit2",
+    "file": "ZN_ZombieReactionHit2_loop.fbx",
+    "mixamo_name": "zombie reaction hit",
+    "seconds": 2.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieRunning",
+    "file": "ZN_ZombieRunning_loop.fbx",
+    "mixamo_name": "zombie running",
+    "seconds": 0.8,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieStandUp",
+    "file": "ZN_ZombieStandUp.fbx",
+    "mixamo_name": "zombie stand up",
+    "seconds": 3.07,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/ZN_ZombieStandUp2",
+    "file": "ZN_ZombieStandUp2.fbx",
+    "mixamo_name": "zombie stand up",
+    "seconds": 5.77,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/ZN_ZombieStandUp3",
+    "file": "ZN_ZombieStandUp3.fbx",
+    "mixamo_name": "zombie stand up",
+    "seconds": 6.0,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/ZN_ZombieIdle3",
+    "file": "ZN_ZombieIdle3_loop.fbx",
+    "mixamo_name": "zombie idle",
+    "seconds": 3.23,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieIdle4",
+    "file": "ZN_ZombieIdle4_loop.fbx",
+    "mixamo_name": "zombie idle",
+    "seconds": 4.13,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieTurn",
+    "file": "ZN_ZombieTurn_loop.fbx",
+    "mixamo_name": "zombie turn",
+    "seconds": 1.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieStumbling",
+    "file": "ZN_ZombieStumbling.fbx",
+    "mixamo_name": "zombie stumbling",
+    "seconds": 4.97,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/ZN_ZombieAgonizing",
+    "file": "ZN_ZombieAgonizing_loop.fbx",
+    "mixamo_name": "zombie agonizing",
+    "seconds": 11.6,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieScratchIdle",
+    "file": "ZN_ZombieScratchIdle_loop.fbx",
+    "mixamo_name": "zombie scratch idle",
+    "seconds": 4.73,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/ZN_ZombieAttack",
+    "file": "ZN_ZombieAttack_loop.fbx",
+    "mixamo_name": "zombie attack",
+    "seconds": 4.5,
+    "loop": true
+   }
+  ]
+ },
+ "Creature Pack": {
+  "prefix": "CR",
+  "mixamo_id": "e1add04c-9a82-4d0a-9446-7c427717a706",
+  "clips": [
+   {
+    "clip": "mixamo/CR_MutantRightTurn90",
+    "file": "CR_MutantRightTurn90_loop.fbx",
+    "mixamo_name": "mutant right turn 90",
+    "seconds": 2.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantJumping",
+    "file": "CR_MutantJumping_loop.fbx",
+    "mixamo_name": "mutant jumping",
+    "seconds": 3.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantJumping2",
+    "file": "CR_MutantJumping2.fbx",
+    "mixamo_name": "mutant jumping",
+    "seconds": 0.6,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/CR_MutantWalking",
+    "file": "CR_MutantWalking_loop.fbx",
+    "mixamo_name": "mutant walking",
+    "seconds": 1.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantSwiping",
+    "file": "CR_MutantSwiping_loop.fbx",
+    "mixamo_name": "mutant swiping",
+    "seconds": 2.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantRun",
+    "file": "CR_MutantRun_loop.fbx",
+    "mixamo_name": "mutant run",
+    "seconds": 0.87,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantDying",
+    "file": "CR_MutantDying.fbx",
+    "mixamo_name": "mutant dying",
+    "seconds": 4.6,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/CR_MutantIdle",
+    "file": "CR_MutantIdle_loop.fbx",
+    "mixamo_name": "mutant idle",
+    "seconds": 14.2,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantBreathingIdle",
+    "file": "CR_MutantBreathingIdle_loop.fbx",
+    "mixamo_name": "mutant breathing idle",
+    "seconds": 4.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantRightTurn45",
+    "file": "CR_MutantRightTurn45_loop.fbx",
+    "mixamo_name": "mutant right turn 45",
+    "seconds": 1.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantIdle2",
+    "file": "CR_MutantIdle2_loop.fbx",
+    "mixamo_name": "mutant idle",
+    "seconds": 5.3,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantRightTurn452",
+    "file": "CR_MutantRightTurn452_loop.fbx",
+    "mixamo_name": "mutant right turn 45",
+    "seconds": 1.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantLeftTurn45",
+    "file": "CR_MutantLeftTurn45_loop.fbx",
+    "mixamo_name": "mutant left turn 45",
+    "seconds": 1.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_LeftTurn45",
+    "file": "CR_LeftTurn45_loop.fbx",
+    "mixamo_name": "left turn 45",
+    "seconds": 1.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantFlexingMuscles",
+    "file": "CR_MutantFlexingMuscles_loop.fbx",
+    "mixamo_name": "mutant flexing muscles",
+    "seconds": 4.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_JumpAttack",
+    "file": "CR_JumpAttack_loop.fbx",
+    "mixamo_name": "jump attack",
+    "seconds": 1.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantJumpAttack",
+    "file": "CR_MutantJumpAttack_loop.fbx",
+    "mixamo_name": "mutant jump attack",
+    "seconds": 1.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantPunch",
+    "file": "CR_MutantPunch_loop.fbx",
+    "mixamo_name": "mutant punch",
+    "seconds": 1.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantRoaring",
+    "file": "CR_MutantRoaring_loop.fbx",
+    "mixamo_name": "mutant roaring",
+    "seconds": 5.4,
+    "loop": true
+   }
+  ]
+ },
+ "Creature NPC Pack": {
+  "prefix": "CN",
+  "mixamo_id": "c9d5768d-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/CR_MutantJumping",
+    "file": "CR_MutantJumping_loop.fbx",
+    "mixamo_name": "mutant jumping",
+    "seconds": 3.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantWalking",
+    "file": "CR_MutantWalking_loop.fbx",
+    "mixamo_name": "mutant walking",
+    "seconds": 1.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantSwiping",
+    "file": "CR_MutantSwiping_loop.fbx",
+    "mixamo_name": "mutant swiping",
+    "seconds": 2.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantRun",
+    "file": "CR_MutantRun_loop.fbx",
+    "mixamo_name": "mutant run",
+    "seconds": 0.87,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantDying",
+    "file": "CR_MutantDying.fbx",
+    "mixamo_name": "mutant dying",
+    "seconds": 4.6,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/CR_MutantBreathingIdle",
+    "file": "CR_MutantBreathingIdle_loop.fbx",
+    "mixamo_name": "mutant breathing idle",
+    "seconds": 4.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantRightTurn45",
+    "file": "CR_MutantRightTurn45_loop.fbx",
+    "mixamo_name": "mutant right turn 45",
+    "seconds": 1.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantIdle2",
+    "file": "CR_MutantIdle2_loop.fbx",
+    "mixamo_name": "mutant idle",
+    "seconds": 5.3,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantRightTurn452",
+    "file": "CR_MutantRightTurn452_loop.fbx",
+    "mixamo_name": "mutant right turn 45",
+    "seconds": 1.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantLeftTurn45",
+    "file": "CR_MutantLeftTurn45_loop.fbx",
+    "mixamo_name": "mutant left turn 45",
+    "seconds": 1.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_LeftTurn45",
+    "file": "CR_LeftTurn45_loop.fbx",
+    "mixamo_name": "left turn 45",
+    "seconds": 1.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/CR_MutantFlexingMuscles",
+    "file": "CR_MutantFlexingMuscles_loop.fbx",
+    "mixamo_name": "mutant flexing muscles",
+    "seconds": 4.67,
+    "loop": true
+   }
+  ]
+ },
+ "Male Injured Pack": {
+  "prefix": "INJ",
+  "mixamo_id": "c9d5942d-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/INJ_InjuredWalk",
+    "file": "INJ_InjuredWalk_loop.fbx",
+    "mixamo_name": "injured walk",
+    "seconds": 1.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/INJ_InjuredWalkLeftTurn",
+    "file": "INJ_InjuredWalkLeftTurn.fbx",
+    "mixamo_name": "injured walk left turn",
+    "seconds": 2.0,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/INJ_InjuredWalkRightTurn",
+    "file": "INJ_InjuredWalkRightTurn.fbx",
+    "mixamo_name": "injured walk right turn",
+    "seconds": 1.83,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/INJ_InjuredWalkBackwards",
+    "file": "INJ_InjuredWalkBackwards_loop.fbx",
+    "mixamo_name": "injured walk backwards",
+    "seconds": 1.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/INJ_InjuredBackwardsTurnRight",
+    "file": "INJ_InjuredBackwardsTurnRight.fbx",
+    "mixamo_name": "injured backwards turn right",
+    "seconds": 0.7,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/INJ_InjuredBackwardsTurnLeft",
+    "file": "INJ_InjuredBackwardsTurnLeft.fbx",
+    "mixamo_name": "injured backwards turn left",
+    "seconds": 0.73,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/INJ_InjuredRun",
+    "file": "INJ_InjuredRun_loop.fbx",
+    "mixamo_name": "injured run",
+    "seconds": 0.6,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/INJ_InjuredRunLeftTurn",
+    "file": "INJ_InjuredRunLeftTurn.fbx",
+    "mixamo_name": "injured run left turn",
+    "seconds": 0.57,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/INJ_InjuredRunRightTurn",
+    "file": "INJ_InjuredRunRightTurn.fbx",
+    "mixamo_name": "injured run right turn",
+    "seconds": 0.6,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/INJ_InjuredRunBackwards",
+    "file": "INJ_InjuredRunBackwards_loop.fbx",
+    "mixamo_name": "injured run backwards",
+    "seconds": 0.6,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/INJ_InjuredRunBackwardsRightTurn",
+    "file": "INJ_InjuredRunBackwardsRightTurn.fbx",
+    "mixamo_name": "injured run backwards right turn",
+    "seconds": 0.53,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/INJ_InjuredRunBackwardsLeftTurn",
+    "file": "INJ_InjuredRunBackwardsLeftTurn.fbx",
+    "mixamo_name": "injured run backwards left turn",
+    "seconds": 0.5,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/INJ_InjuredIdle",
+    "file": "INJ_InjuredIdle_loop.fbx",
+    "mixamo_name": "injured idle",
+    "seconds": 9.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/INJ_InjuredStumbleIdle",
+    "file": "INJ_InjuredStumbleIdle_loop.fbx",
+    "mixamo_name": "injured stumble idle",
+    "seconds": 5.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/INJ_InjuredWaveIdle",
+    "file": "INJ_InjuredWaveIdle_loop.fbx",
+    "mixamo_name": "injured wave idle",
+    "seconds": 5.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/INJ_InjuredHurtingIdle",
+    "file": "INJ_InjuredHurtingIdle_loop.fbx",
+    "mixamo_name": "injured hurting idle",
+    "seconds": 6.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/INJ_InjuredTurnRight",
+    "file": "INJ_InjuredTurnRight.fbx",
+    "mixamo_name": "injured turn right",
+    "seconds": 0.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/INJ_InjuredTurnLeft",
+    "file": "INJ_InjuredTurnLeft.fbx",
+    "mixamo_name": "injured turn left",
+    "seconds": 0.87,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/INJ_InjuredRunJump",
+    "file": "INJ_InjuredRunJump_loop.fbx",
+    "mixamo_name": "injured run jump",
+    "seconds": 0.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/INJ_InjuredStandingJump",
+    "file": "INJ_InjuredStandingJump_loop.fbx",
+    "mixamo_name": "injured standing jump",
+    "seconds": 1.9,
+    "loop": true
+   }
+  ]
+ },
+ "Male Drunk Pack": {
+  "prefix": "DRK",
+  "mixamo_id": "c9d595c4-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/DRK_DrunkIdle",
+    "file": "DRK_DrunkIdle_loop.fbx",
+    "mixamo_name": "drunk idle",
+    "seconds": 7.37,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/DRK_DrunkWalk",
+    "file": "DRK_DrunkWalk_loop.fbx",
+    "mixamo_name": "drunk walk",
+    "seconds": 2.97,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/DRK_DrunkWalkingTurn",
+    "file": "DRK_DrunkWalkingTurn.fbx",
+    "mixamo_name": "drunk walking turn",
+    "seconds": 2.53,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/DRK_DrunkWalkBackwards",
+    "file": "DRK_DrunkWalkBackwards_loop.fbx",
+    "mixamo_name": "drunk walk backwards",
+    "seconds": 1.57,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/DRK_BackwardWalkingTurn",
+    "file": "DRK_BackwardWalkingTurn.fbx",
+    "mixamo_name": "backward walking turn",
+    "seconds": 5.03,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/DRK_DrunkRunForward",
+    "file": "DRK_DrunkRunForward_loop.fbx",
+    "mixamo_name": "drunk run forward",
+    "seconds": 1.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/DRK_DrunkRunningLeftTurn",
+    "file": "DRK_DrunkRunningLeftTurn.fbx",
+    "mixamo_name": "drunk running left turn",
+    "seconds": 1.5,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/DRK_DrunkRunBackward",
+    "file": "DRK_DrunkRunBackward_loop.fbx",
+    "mixamo_name": "drunk run backward",
+    "seconds": 1.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/DRK_RunBackwardArcRight",
+    "file": "DRK_RunBackwardArcRight.fbx",
+    "mixamo_name": "run backward arc right",
+    "seconds": 3.73,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/DRK_DrunkTurn",
+    "file": "DRK_DrunkTurn.fbx",
+    "mixamo_name": "drunk turn",
+    "seconds": 1.53,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/DRK_DrunkIdleVariation",
+    "file": "DRK_DrunkIdleVariation_loop.fbx",
+    "mixamo_name": "drunk idle variation",
+    "seconds": 3.97,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/DRK_DrunkIdleVariation2",
+    "file": "DRK_DrunkIdleVariation2_loop.fbx",
+    "mixamo_name": "drunk idle variation",
+    "seconds": 5.37,
+    "loop": true
+   }
+  ]
+ },
+ "Pro Rifle Pack": {
+  "prefix": "RFP",
+  "mixamo_id": "d8c7c8cb-6fdd-4590-a62a-1ff743a7cffd",
+  "clips": [
+   {
+    "clip": "mixamo/RFP_SprintForward",
+    "file": "RFP_SprintForward_loop.fbx",
+    "mixamo_name": "sprint forward",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunForward",
+    "file": "RFP_RunForward_loop.fbx",
+    "mixamo_name": "run forward",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingForwardRight",
+    "file": "RFP_WalkCrouchingForwardRight_loop.fbx",
+    "mixamo_name": "walk crouching forward right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_Idle",
+    "file": "RFP_Idle_loop.fbx",
+    "mixamo_name": "idle",
+    "seconds": 2.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_Turn90Left",
+    "file": "RFP_Turn90Left_loop.fbx",
+    "mixamo_name": "turn 90 left",
+    "seconds": 0.97,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_IdleCrouching",
+    "file": "RFP_IdleCrouching_loop.fbx",
+    "mixamo_name": "idle crouching",
+    "seconds": 2.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunBackward",
+    "file": "RFP_RunBackward_loop.fbx",
+    "mixamo_name": "run backward",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunLeft",
+    "file": "RFP_RunLeft_loop.fbx",
+    "mixamo_name": "run left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunRight",
+    "file": "RFP_RunRight_loop.fbx",
+    "mixamo_name": "run right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunForwardRight",
+    "file": "RFP_RunForwardRight_loop.fbx",
+    "mixamo_name": "run forward right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunForwardLeft",
+    "file": "RFP_RunForwardLeft_loop.fbx",
+    "mixamo_name": "run forward left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunBackwardLeft",
+    "file": "RFP_RunBackwardLeft_loop.fbx",
+    "mixamo_name": "run backward left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunBackwardRight",
+    "file": "RFP_RunBackwardRight_loop.fbx",
+    "mixamo_name": "run backward right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintForwardRight",
+    "file": "RFP_SprintForwardRight_loop.fbx",
+    "mixamo_name": "sprint forward right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintForwardLeft",
+    "file": "RFP_SprintForwardLeft_loop.fbx",
+    "mixamo_name": "sprint forward left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintRight",
+    "file": "RFP_SprintRight_loop.fbx",
+    "mixamo_name": "sprint right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintLeft",
+    "file": "RFP_SprintLeft_loop.fbx",
+    "mixamo_name": "sprint left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintBackward",
+    "file": "RFP_SprintBackward_loop.fbx",
+    "mixamo_name": "sprint backward",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintBackwardRight",
+    "file": "RFP_SprintBackwardRight_loop.fbx",
+    "mixamo_name": "sprint backward right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintBackwardLeft",
+    "file": "RFP_SprintBackwardLeft_loop.fbx",
+    "mixamo_name": "sprint backward left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkForward",
+    "file": "RFP_WalkForward_loop.fbx",
+    "mixamo_name": "walk forward",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkForwardRight",
+    "file": "RFP_WalkForwardRight_loop.fbx",
+    "mixamo_name": "walk forward right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkForwardLeft",
+    "file": "RFP_WalkForwardLeft_loop.fbx",
+    "mixamo_name": "walk forward left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkRight",
+    "file": "RFP_WalkRight_loop.fbx",
+    "mixamo_name": "walk right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkLeft",
+    "file": "RFP_WalkLeft_loop.fbx",
+    "mixamo_name": "walk left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkBackward",
+    "file": "RFP_WalkBackward_loop.fbx",
+    "mixamo_name": "walk backward",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkBackwardRight",
+    "file": "RFP_WalkBackwardRight_loop.fbx",
+    "mixamo_name": "walk backward right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkBackwardLeft",
+    "file": "RFP_WalkBackwardLeft_loop.fbx",
+    "mixamo_name": "walk backward left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingForward",
+    "file": "RFP_WalkCrouchingForward_loop.fbx",
+    "mixamo_name": "walk crouching forward",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingRight",
+    "file": "RFP_WalkCrouchingRight_loop.fbx",
+    "mixamo_name": "walk crouching right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingLeft",
+    "file": "RFP_WalkCrouchingLeft_loop.fbx",
+    "mixamo_name": "walk crouching left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingForwardLeft",
+    "file": "RFP_WalkCrouchingForwardLeft_loop.fbx",
+    "mixamo_name": "walk crouching forward left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingBackward",
+    "file": "RFP_WalkCrouchingBackward_loop.fbx",
+    "mixamo_name": "walk crouching backward",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingBackwardLeft",
+    "file": "RFP_WalkCrouchingBackwardLeft_loop.fbx",
+    "mixamo_name": "walk crouching backward left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingBackwardRight",
+    "file": "RFP_WalkCrouchingBackwardRight_loop.fbx",
+    "mixamo_name": "walk crouching backward right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_IdleAiming",
+    "file": "RFP_IdleAiming_loop.fbx",
+    "mixamo_name": "idle aiming",
+    "seconds": 2.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_Turn90Right",
+    "file": "RFP_Turn90Right_loop.fbx",
+    "mixamo_name": "turn 90 right",
+    "seconds": 0.97,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_CrouchingTurn90Left",
+    "file": "RFP_CrouchingTurn90Left_loop.fbx",
+    "mixamo_name": "crouching turn 90 left",
+    "seconds": 1.23,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_CrouchingTurn90Right",
+    "file": "RFP_CrouchingTurn90Right_loop.fbx",
+    "mixamo_name": "crouching turn 90 right",
+    "seconds": 1.23,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_JumpUp",
+    "file": "RFP_JumpUp.fbx",
+    "mixamo_name": "jump up",
+    "seconds": 0.53,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_JumpLoop",
+    "file": "RFP_JumpLoop_loop.fbx",
+    "mixamo_name": "jump loop",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_JumpDown",
+    "file": "RFP_JumpDown.fbx",
+    "mixamo_name": "jump down",
+    "seconds": 0.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathFromFrontHeadshot",
+    "file": "RFP_DeathFromFrontHeadshot.fbx",
+    "mixamo_name": "death from front headshot",
+    "seconds": 2.83,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathFromRight",
+    "file": "RFP_DeathFromRight.fbx",
+    "mixamo_name": "death from right",
+    "seconds": 3.27,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathCrouchingHeadshotFront",
+    "file": "RFP_DeathCrouchingHeadshotFront.fbx",
+    "mixamo_name": "death crouching headshot front",
+    "seconds": 1.9,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathFromBackHeadshot",
+    "file": "RFP_DeathFromBackHeadshot.fbx",
+    "mixamo_name": "death from back headshot",
+    "seconds": 3.7,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathFromTheBack",
+    "file": "RFP_DeathFromTheBack.fbx",
+    "mixamo_name": "death from the back",
+    "seconds": 2.93,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathFromTheFront",
+    "file": "RFP_DeathFromTheFront.fbx",
+    "mixamo_name": "death from the front",
+    "seconds": 3.4,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_IdleCrouchingAiming",
+    "file": "RFP_IdleCrouchingAiming_loop.fbx",
+    "mixamo_name": "idle crouching aiming",
+    "seconds": 2.1,
+    "loop": true
+   }
+  ]
+ },
+ "Lite Rifle Pack": {
+  "prefix": "RFL",
+  "mixamo_id": "1a15529e-6039-43c5-988f-aefde67c5f0a",
+  "clips": [
+   {
+    "clip": "mixamo/RFP_RunForward",
+    "file": "RFP_RunForward_loop.fbx",
+    "mixamo_name": "run forward",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_Idle",
+    "file": "RFP_Idle_loop.fbx",
+    "mixamo_name": "idle",
+    "seconds": 2.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_Turn90Left",
+    "file": "RFP_Turn90Left_loop.fbx",
+    "mixamo_name": "turn 90 left",
+    "seconds": 0.97,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_IdleCrouching",
+    "file": "RFP_IdleCrouching_loop.fbx",
+    "mixamo_name": "idle crouching",
+    "seconds": 2.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunBackward",
+    "file": "RFP_RunBackward_loop.fbx",
+    "mixamo_name": "run backward",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunLeft",
+    "file": "RFP_RunLeft_loop.fbx",
+    "mixamo_name": "run left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunRight",
+    "file": "RFP_RunRight_loop.fbx",
+    "mixamo_name": "run right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunForwardRight",
+    "file": "RFP_RunForwardRight_loop.fbx",
+    "mixamo_name": "run forward right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunForwardLeft",
+    "file": "RFP_RunForwardLeft_loop.fbx",
+    "mixamo_name": "run forward left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunBackwardLeft",
+    "file": "RFP_RunBackwardLeft_loop.fbx",
+    "mixamo_name": "run backward left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunBackwardRight",
+    "file": "RFP_RunBackwardRight_loop.fbx",
+    "mixamo_name": "run backward right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_IdleAiming",
+    "file": "RFP_IdleAiming_loop.fbx",
+    "mixamo_name": "idle aiming",
+    "seconds": 2.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_Turn90Right",
+    "file": "RFP_Turn90Right_loop.fbx",
+    "mixamo_name": "turn 90 right",
+    "seconds": 0.97,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_DeathFromFrontHeadshot",
+    "file": "RFP_DeathFromFrontHeadshot.fbx",
+    "mixamo_name": "death from front headshot",
+    "seconds": 2.83,
+    "loop": false
+   }
+  ]
+ },
+ "Shooter Pack": {
+  "prefix": "SHT",
+  "mixamo_id": "c9d58255-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/SHT_RifleRun",
+    "file": "SHT_RifleRun_loop.fbx",
+    "mixamo_name": "rifle run",
+    "seconds": 0.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_Strafe",
+    "file": "SHT_Strafe_loop.fbx",
+    "mixamo_name": "strafe",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_RifleAimingIdle",
+    "file": "SHT_RifleAimingIdle_loop.fbx",
+    "mixamo_name": "rifle aiming idle",
+    "seconds": 3.07,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_StartWalking",
+    "file": "SHT_StartWalking.fbx",
+    "mixamo_name": "start walking",
+    "seconds": 1.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SHT_Walking",
+    "file": "SHT_Walking_loop.fbx",
+    "mixamo_name": "walking",
+    "seconds": 2.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_Strafe2",
+    "file": "SHT_Strafe2_loop.fbx",
+    "mixamo_name": "strafe",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_StopWalking",
+    "file": "SHT_StopWalking.fbx",
+    "mixamo_name": "stop walking",
+    "seconds": 4.17,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SHT_FiringRifle",
+    "file": "SHT_FiringRifle_loop.fbx",
+    "mixamo_name": "firing rifle",
+    "seconds": 0.97,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_StartWalkingBackwards",
+    "file": "SHT_StartWalkingBackwards_loop.fbx",
+    "mixamo_name": "start walking backwards",
+    "seconds": 2.13,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_WalkBackwardsStop",
+    "file": "SHT_WalkBackwardsStop.fbx",
+    "mixamo_name": "walk backwards stop",
+    "seconds": 1.17,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SHT_RunBackwards",
+    "file": "SHT_RunBackwards_loop.fbx",
+    "mixamo_name": "run backwards",
+    "seconds": 0.53,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_JumpBackward",
+    "file": "SHT_JumpBackward_loop.fbx",
+    "mixamo_name": "jump backward",
+    "seconds": 3.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_JumpForward",
+    "file": "SHT_JumpForward_loop.fbx",
+    "mixamo_name": "jump forward",
+    "seconds": 3.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_WalkingBackwards",
+    "file": "SHT_WalkingBackwards_loop.fbx",
+    "mixamo_name": "walking backwards",
+    "seconds": 1.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_WalkingToDying",
+    "file": "SHT_WalkingToDying.fbx",
+    "mixamo_name": "walking to dying",
+    "seconds": 4.17,
+    "loop": false
+   }
+  ]
+ },
+ "Basic Shooter Pack": {
+  "prefix": "SHB",
+  "mixamo_id": "c9d58b50-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/SHT_RifleRun",
+    "file": "SHT_RifleRun_loop.fbx",
+    "mixamo_name": "rifle run",
+    "seconds": 0.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHB_TossGrenade",
+    "file": "SHB_TossGrenade_loop.fbx",
+    "mixamo_name": "toss grenade",
+    "seconds": 3.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_Strafe",
+    "file": "SHT_Strafe_loop.fbx",
+    "mixamo_name": "strafe",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_RifleAimingIdle",
+    "file": "SHT_RifleAimingIdle_loop.fbx",
+    "mixamo_name": "rifle aiming idle",
+    "seconds": 3.07,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_Walking",
+    "file": "SHT_Walking_loop.fbx",
+    "mixamo_name": "walking",
+    "seconds": 2.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_Strafe2",
+    "file": "SHT_Strafe2_loop.fbx",
+    "mixamo_name": "strafe",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHB_StrafeRight",
+    "file": "SHB_StrafeRight_loop.fbx",
+    "mixamo_name": "strafe right",
+    "seconds": 1.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_RunBackwards",
+    "file": "SHT_RunBackwards_loop.fbx",
+    "mixamo_name": "run backwards",
+    "seconds": 0.53,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_WalkingBackwards",
+    "file": "SHT_WalkingBackwards_loop.fbx",
+    "mixamo_name": "walking backwards",
+    "seconds": 1.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHB_StrafeLeft",
+    "file": "SHB_StrafeLeft_loop.fbx",
+    "mixamo_name": "strafe left",
+    "seconds": 1.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHB_Reloading",
+    "file": "SHB_Reloading_loop.fbx",
+    "mixamo_name": "reloading",
+    "seconds": 6.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHB_RifleJump",
+    "file": "SHB_RifleJump_loop.fbx",
+    "mixamo_name": "rifle jump",
+    "seconds": 0.6,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHB_TurningRight45Degrees",
+    "file": "SHB_TurningRight45Degrees.fbx",
+    "mixamo_name": "turning right 45 degrees",
+    "seconds": 0.97,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SHB_HitReaction",
+    "file": "SHB_HitReaction_loop.fbx",
+    "mixamo_name": "hit reaction",
+    "seconds": 0.43,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHB_TurnLeft",
+    "file": "SHB_TurnLeft_loop.fbx",
+    "mixamo_name": "turn left",
+    "seconds": 0.9,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHB_FiringRifle",
+    "file": "SHB_FiringRifle_loop.fbx",
+    "mixamo_name": "firing rifle",
+    "seconds": 0.23,
+    "loop": true
+   }
+  ]
+ },
+ "Slim Shooter Pack": {
+  "prefix": "SHS",
+  "mixamo_id": "c9d585a5-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/SHT_RifleRun",
+    "file": "SHT_RifleRun_loop.fbx",
+    "mixamo_name": "rifle run",
+    "seconds": 0.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_Strafe",
+    "file": "SHT_Strafe_loop.fbx",
+    "mixamo_name": "strafe",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_RifleAimingIdle",
+    "file": "SHT_RifleAimingIdle_loop.fbx",
+    "mixamo_name": "rifle aiming idle",
+    "seconds": 3.07,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_Walking",
+    "file": "SHT_Walking_loop.fbx",
+    "mixamo_name": "walking",
+    "seconds": 2.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHT_Strafe2",
+    "file": "SHT_Strafe2_loop.fbx",
+    "mixamo_name": "strafe",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHB_Reloading",
+    "file": "SHB_Reloading_loop.fbx",
+    "mixamo_name": "reloading",
+    "seconds": 6.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SHB_FiringRifle",
+    "file": "SHB_FiringRifle_loop.fbx",
+    "mixamo_name": "firing rifle",
+    "seconds": 0.23,
+    "loop": true
+   }
+  ]
+ },
+ "Pistol/Handgun Locomotion Pack": {
+  "prefix": "PST",
+  "mixamo_id": "c9d59aa3-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/PST_PistolIdle",
+    "file": "PST_PistolIdle_loop.fbx",
+    "mixamo_name": "pistol idle",
+    "seconds": 1.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/PST_PistolJump",
+    "file": "PST_PistolJump_loop.fbx",
+    "mixamo_name": "pistol jump",
+    "seconds": 2.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/PST_PistolRun",
+    "file": "PST_PistolRun_loop.fbx",
+    "mixamo_name": "pistol run",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/PST_PistolJump2",
+    "file": "PST_PistolJump2_loop.fbx",
+    "mixamo_name": "pistol jump",
+    "seconds": 0.8,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/PST_PistolWalk",
+    "file": "PST_PistolWalk_loop.fbx",
+    "mixamo_name": "pistol walk",
+    "seconds": 0.77,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/PST_PistolRunBackward",
+    "file": "PST_PistolRunBackward_loop.fbx",
+    "mixamo_name": "pistol run backward",
+    "seconds": 0.53,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/PST_PistolWalkBackward",
+    "file": "PST_PistolWalkBackward_loop.fbx",
+    "mixamo_name": "pistol walk backward",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/PST_PistolStrafe",
+    "file": "PST_PistolStrafe_loop.fbx",
+    "mixamo_name": "pistol strafe",
+    "seconds": 0.57,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/PST_PistolStrafe2",
+    "file": "PST_PistolStrafe2_loop.fbx",
+    "mixamo_name": "pistol strafe",
+    "seconds": 0.6,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/PST_PistolWalkArc",
+    "file": "PST_PistolWalkArc.fbx",
+    "mixamo_name": "pistol walk arc",
+    "seconds": 0.73,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/PST_PistolWalkArc2",
+    "file": "PST_PistolWalkArc2.fbx",
+    "mixamo_name": "pistol walk arc",
+    "seconds": 0.77,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/PST_PistolRunArc",
+    "file": "PST_PistolRunArc.fbx",
+    "mixamo_name": "pistol run arc",
+    "seconds": 0.6,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/PST_PistolRunArc2",
+    "file": "PST_PistolRunArc2.fbx",
+    "mixamo_name": "pistol run arc",
+    "seconds": 0.63,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/PST_PistolRunBackwardArc",
+    "file": "PST_PistolRunBackwardArc.fbx",
+    "mixamo_name": "pistol run backward arc",
+    "seconds": 0.5,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/PST_PistolRunBackwardArc2",
+    "file": "PST_PistolRunBackwardArc2.fbx",
+    "mixamo_name": "pistol run backward arc",
+    "seconds": 0.5,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/PST_PistolStandToKneel",
+    "file": "PST_PistolStandToKneel.fbx",
+    "mixamo_name": "pistol stand to kneel",
+    "seconds": 1.0,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/PST_PistolKneelingIdle",
+    "file": "PST_PistolKneelingIdle_loop.fbx",
+    "mixamo_name": "pistol kneeling idle",
+    "seconds": 3.8,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/PST_PistolKneelToStand",
+    "file": "PST_PistolKneelToStand.fbx",
+    "mixamo_name": "pistol kneel to stand",
+    "seconds": 1.33,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/PST_PistolWalkBackwardArc",
+    "file": "PST_PistolWalkBackwardArc.fbx",
+    "mixamo_name": "pistol walk backward arc",
+    "seconds": 0.6,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/PST_PistolWalkBackwardArc2",
+    "file": "PST_PistolWalkBackwardArc2.fbx",
+    "mixamo_name": "pistol walk backward arc",
+    "seconds": 0.57,
+    "loop": false
+   }
+  ]
+ },
+ "Pro Melee Axe Pack": {
+  "prefix": "AXE",
+  "mixamo_id": "d9c1f16c-b22b-4678-b5ce-597153bb25b1",
+  "clips": [
+   {
+    "clip": "mixamo/AXE_CrouchIdle",
+    "file": "AXE_CrouchIdle_loop.fbx",
+    "mixamo_name": "crouch idle",
+    "seconds": 1.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_CrouchToStandingIdle",
+    "file": "AXE_CrouchToStandingIdle.fbx",
+    "mixamo_name": "crouch to standing idle",
+    "seconds": 0.6,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AXE_StandingBlockIdle",
+    "file": "AXE_StandingBlockIdle_loop.fbx",
+    "mixamo_name": "standing block idle",
+    "seconds": 1.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingBlockReactLarge",
+    "file": "AXE_StandingBlockReactLarge_loop.fbx",
+    "mixamo_name": "standing block react large",
+    "seconds": 1.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingDisarmUnderarm",
+    "file": "AXE_StandingDisarmUnderarm.fbx",
+    "mixamo_name": "standing disarm underarm",
+    "seconds": 1.7,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AXE_StandingDisarmOverShoulder",
+    "file": "AXE_StandingDisarmOverShoulder.fbx",
+    "mixamo_name": "standing disarm over shoulder",
+    "seconds": 1.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AXE_StandingIdle",
+    "file": "AXE_StandingIdle_loop.fbx",
+    "mixamo_name": "standing idle",
+    "seconds": 1.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingIdleLookingVer1",
+    "file": "AXE_StandingIdleLookingVer1_loop.fbx",
+    "mixamo_name": "standing idle looking ver. 1",
+    "seconds": 11.23,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingIdleLookingVer2",
+    "file": "AXE_StandingIdleLookingVer2_loop.fbx",
+    "mixamo_name": "standing idle looking ver. 2",
+    "seconds": 7.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingMeleeAttackBackhand",
+    "file": "AXE_StandingMeleeAttackBackhand_loop.fbx",
+    "mixamo_name": "standing melee attack backhand",
+    "seconds": 3.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingMeleeAttackDownward",
+    "file": "AXE_StandingMeleeAttackDownward_loop.fbx",
+    "mixamo_name": "standing melee attack downward",
+    "seconds": 2.27,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingMeleeAttackHorizontal",
+    "file": "AXE_StandingMeleeAttackHorizontal_loop.fbx",
+    "mixamo_name": "standing melee attack horizontal",
+    "seconds": 2.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingMeleeAttack360High",
+    "file": "AXE_StandingMeleeAttack360High_loop.fbx",
+    "mixamo_name": "standing melee attack 360 high",
+    "seconds": 3.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingMeleeAttack360Low",
+    "file": "AXE_StandingMeleeAttack360Low_loop.fbx",
+    "mixamo_name": "standing melee attack 360 low",
+    "seconds": 2.47,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingMeleeAttackKickVer1",
+    "file": "AXE_StandingMeleeAttackKickVer1_loop.fbx",
+    "mixamo_name": "standing melee attack kick ver. 1",
+    "seconds": 1.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingMeleeAttackKickVer2",
+    "file": "AXE_StandingMeleeAttackKickVer2_loop.fbx",
+    "mixamo_name": "standing melee attack kick ver. 2",
+    "seconds": 1.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingMeleeComboAttackVer1",
+    "file": "AXE_StandingMeleeComboAttackVer1_loop.fbx",
+    "mixamo_name": "standing melee combo attack ver. 1",
+    "seconds": 4.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingMeleeComboAttackVer2",
+    "file": "AXE_StandingMeleeComboAttackVer2_loop.fbx",
+    "mixamo_name": "standing melee combo attack ver. 2",
+    "seconds": 4.2,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingMeleeComboAttackVer3",
+    "file": "AXE_StandingMeleeComboAttackVer3_loop.fbx",
+    "mixamo_name": "standing melee combo attack ver. 3",
+    "seconds": 2.73,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingMeleeRunJumpAttack",
+    "file": "AXE_StandingMeleeRunJumpAttack.fbx",
+    "mixamo_name": "standing melee run jump attack",
+    "seconds": 3.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AXE_StandingReactLargeFromLeft",
+    "file": "AXE_StandingReactLargeFromLeft_loop.fbx",
+    "mixamo_name": "standing react large from left",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingReactLargeFromRight",
+    "file": "AXE_StandingReactLargeFromRight_loop.fbx",
+    "mixamo_name": "standing react large from right",
+    "seconds": 1.77,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingReactLargeGut",
+    "file": "AXE_StandingReactLargeGut_loop.fbx",
+    "mixamo_name": "standing react large gut",
+    "seconds": 1.57,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingRunBack",
+    "file": "AXE_StandingRunBack_loop.fbx",
+    "mixamo_name": "standing run back",
+    "seconds": 0.77,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingRunForward",
+    "file": "AXE_StandingRunForward_loop.fbx",
+    "mixamo_name": "standing run forward",
+    "seconds": 0.73,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingTauntBattlecry",
+    "file": "AXE_StandingTauntBattlecry_loop.fbx",
+    "mixamo_name": "standing taunt battlecry",
+    "seconds": 2.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingTauntChestThump",
+    "file": "AXE_StandingTauntChestThump_loop.fbx",
+    "mixamo_name": "standing taunt chest thump",
+    "seconds": 2.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingTurnLeft90",
+    "file": "AXE_StandingTurnLeft90_loop.fbx",
+    "mixamo_name": "standing turn left 90",
+    "seconds": 1.73,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingTurnRight90",
+    "file": "AXE_StandingTurnRight90_loop.fbx",
+    "mixamo_name": "standing turn right 90",
+    "seconds": 1.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingWalkBack",
+    "file": "AXE_StandingWalkBack_loop.fbx",
+    "mixamo_name": "standing walk back",
+    "seconds": 1.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingWalkForward",
+    "file": "AXE_StandingWalkForward_loop.fbx",
+    "mixamo_name": "standing walk forward",
+    "seconds": 1.3,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingWalkLeft",
+    "file": "AXE_StandingWalkLeft_loop.fbx",
+    "mixamo_name": "standing walk left",
+    "seconds": 1.2,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingWalkRight",
+    "file": "AXE_StandingWalkRight_loop.fbx",
+    "mixamo_name": "standing walk right",
+    "seconds": 1.27,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedEquipUnderarm",
+    "file": "AXE_UnarmedEquipUnderarm.fbx",
+    "mixamo_name": "unarmed equip underarm",
+    "seconds": 1.23,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedEquipOverShoulder",
+    "file": "AXE_UnarmedEquipOverShoulder.fbx",
+    "mixamo_name": "unarmed equip over shoulder",
+    "seconds": 1.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedIdle",
+    "file": "AXE_UnarmedIdle_loop.fbx",
+    "mixamo_name": "unarmed idle",
+    "seconds": 1.9,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedIdleLookingVer1",
+    "file": "AXE_UnarmedIdleLookingVer1_loop.fbx",
+    "mixamo_name": "unarmed idle looking ver. 1",
+    "seconds": 11.23,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedIdleLookingVer2",
+    "file": "AXE_UnarmedIdleLookingVer2_loop.fbx",
+    "mixamo_name": "unarmed idle looking ver. 2",
+    "seconds": 7.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedJump",
+    "file": "AXE_UnarmedJump_loop.fbx",
+    "mixamo_name": "unarmed jump",
+    "seconds": 2.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedJumpRunning",
+    "file": "AXE_UnarmedJumpRunning_loop.fbx",
+    "mixamo_name": "unarmed jump running",
+    "seconds": 1.37,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedRunBack",
+    "file": "AXE_UnarmedRunBack_loop.fbx",
+    "mixamo_name": "unarmed run back",
+    "seconds": 0.73,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedRunForward",
+    "file": "AXE_UnarmedRunForward_loop.fbx",
+    "mixamo_name": "unarmed run forward",
+    "seconds": 0.77,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedTurnLeft90",
+    "file": "AXE_UnarmedTurnLeft90_loop.fbx",
+    "mixamo_name": "unarmed turn left 90",
+    "seconds": 1.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedTurnRight90",
+    "file": "AXE_UnarmedTurnRight90_loop.fbx",
+    "mixamo_name": "unarmed turn right 90",
+    "seconds": 1.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedWalkBack",
+    "file": "AXE_UnarmedWalkBack_loop.fbx",
+    "mixamo_name": "unarmed walk back",
+    "seconds": 1.27,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_UnarmedWalkForward",
+    "file": "AXE_UnarmedWalkForward_loop.fbx",
+    "mixamo_name": "unarmed walk forward",
+    "seconds": 1.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AXE_StandingJump",
+    "file": "AXE_StandingJump_loop.fbx",
+    "mixamo_name": "standing jump",
+    "seconds": 1.87,
+    "loop": true
+   }
+  ]
+ },
+ "Great Sword Pack": {
+  "prefix": "GSW",
+  "mixamo_id": "c9d58f41-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/GSW_GreatSwordIdle",
+    "file": "GSW_GreatSwordIdle_loop.fbx",
+    "mixamo_name": "great sword idle",
+    "seconds": 2.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordWalk",
+    "file": "GSW_GreatSwordWalk_loop.fbx",
+    "mixamo_name": "great sword walk",
+    "seconds": 1.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordWalk2",
+    "file": "GSW_GreatSwordWalk2_loop.fbx",
+    "mixamo_name": "great sword walk",
+    "seconds": 1.27,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordStrafe",
+    "file": "GSW_GreatSwordStrafe_loop.fbx",
+    "mixamo_name": "great sword strafe",
+    "seconds": 1.07,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordStrafe2",
+    "file": "GSW_GreatSwordStrafe2_loop.fbx",
+    "mixamo_name": "great sword strafe",
+    "seconds": 1.13,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSword180Turn",
+    "file": "GSW_GreatSword180Turn.fbx",
+    "mixamo_name": "great sword 180 turn",
+    "seconds": 0.77,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordTurn",
+    "file": "GSW_GreatSwordTurn.fbx",
+    "mixamo_name": "great sword turn",
+    "seconds": 0.7,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordTurn2",
+    "file": "GSW_GreatSwordTurn2.fbx",
+    "mixamo_name": "great sword turn",
+    "seconds": 0.8,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordRun",
+    "file": "GSW_GreatSwordRun_loop.fbx",
+    "mixamo_name": "great sword run",
+    "seconds": 0.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSword180Turn2",
+    "file": "GSW_GreatSword180Turn2.fbx",
+    "mixamo_name": "great sword 180 turn",
+    "seconds": 0.53,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordStrafe3",
+    "file": "GSW_GreatSwordStrafe3_loop.fbx",
+    "mixamo_name": "great sword strafe",
+    "seconds": 0.57,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordStrafe4",
+    "file": "GSW_GreatSwordStrafe4_loop.fbx",
+    "mixamo_name": "great sword strafe",
+    "seconds": 0.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordJump",
+    "file": "GSW_GreatSwordJump_loop.fbx",
+    "mixamo_name": "great sword jump",
+    "seconds": 0.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordJump2",
+    "file": "GSW_GreatSwordJump2_loop.fbx",
+    "mixamo_name": "great sword jump",
+    "seconds": 0.9,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordSlash",
+    "file": "GSW_GreatSwordSlash_loop.fbx",
+    "mixamo_name": "great sword slash",
+    "seconds": 1.27,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordSlash2",
+    "file": "GSW_GreatSwordSlash2.fbx",
+    "mixamo_name": "great sword slash",
+    "seconds": 3.5,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordSlash3",
+    "file": "GSW_GreatSwordSlash3_loop.fbx",
+    "mixamo_name": "great sword slash",
+    "seconds": 1.8,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordSlash4",
+    "file": "GSW_GreatSwordSlash4.fbx",
+    "mixamo_name": "great sword slash",
+    "seconds": 1.77,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordBlocking",
+    "file": "GSW_GreatSwordBlocking.fbx",
+    "mixamo_name": "great sword blocking",
+    "seconds": 0.5,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordBlocking2",
+    "file": "GSW_GreatSwordBlocking2_loop.fbx",
+    "mixamo_name": "great sword blocking",
+    "seconds": 0.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordBlocking3",
+    "file": "GSW_GreatSwordBlocking3.fbx",
+    "mixamo_name": "great sword blocking",
+    "seconds": 0.5,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordImpact",
+    "file": "GSW_GreatSwordImpact_loop.fbx",
+    "mixamo_name": "great sword impact",
+    "seconds": 0.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordImpact2",
+    "file": "GSW_GreatSwordImpact2_loop.fbx",
+    "mixamo_name": "great sword impact",
+    "seconds": 1.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordImpact3",
+    "file": "GSW_GreatSwordImpact3_loop.fbx",
+    "mixamo_name": "great sword impact",
+    "seconds": 1.23,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordCrouching",
+    "file": "GSW_GreatSwordCrouching.fbx",
+    "mixamo_name": "great sword crouching",
+    "seconds": 0.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordCrouching2",
+    "file": "GSW_GreatSwordCrouching2.fbx",
+    "mixamo_name": "great sword crouching",
+    "seconds": 0.7,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordCrouching3",
+    "file": "GSW_GreatSwordCrouching3_loop.fbx",
+    "mixamo_name": "great sword crouching",
+    "seconds": 1.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordSlash5",
+    "file": "GSW_GreatSwordSlash5_loop.fbx",
+    "mixamo_name": "great sword slash",
+    "seconds": 1.43,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordCrouching4",
+    "file": "GSW_GreatSwordCrouching4.fbx",
+    "mixamo_name": "great sword crouching",
+    "seconds": 0.37,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordCrouching5",
+    "file": "GSW_GreatSwordCrouching5_loop.fbx",
+    "mixamo_name": "great sword crouching",
+    "seconds": 1.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordCrouching6",
+    "file": "GSW_GreatSwordCrouching6.fbx",
+    "mixamo_name": "great sword crouching",
+    "seconds": 0.47,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordImpact4",
+    "file": "GSW_GreatSwordImpact4_loop.fbx",
+    "mixamo_name": "great sword impact",
+    "seconds": 0.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordImpact5",
+    "file": "GSW_GreatSwordImpact5_loop.fbx",
+    "mixamo_name": "great sword impact",
+    "seconds": 0.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordJumpAttack",
+    "file": "GSW_GreatSwordJumpAttack.fbx",
+    "mixamo_name": "great sword jump attack",
+    "seconds": 2.17,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordSlideAttack",
+    "file": "GSW_GreatSwordSlideAttack.fbx",
+    "mixamo_name": "great sword slide attack",
+    "seconds": 2.1,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordHighSpinAttack",
+    "file": "GSW_GreatSwordHighSpinAttack.fbx",
+    "mixamo_name": "great sword high spin attack",
+    "seconds": 1.87,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordKick",
+    "file": "GSW_GreatSwordKick_loop.fbx",
+    "mixamo_name": "great sword kick",
+    "seconds": 1.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordKick2",
+    "file": "GSW_GreatSwordKick2_loop.fbx",
+    "mixamo_name": "great sword kick",
+    "seconds": 1.73,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordIdle2",
+    "file": "GSW_GreatSwordIdle2_loop.fbx",
+    "mixamo_name": "great sword idle",
+    "seconds": 3.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordIdle3",
+    "file": "GSW_GreatSwordIdle3_loop.fbx",
+    "mixamo_name": "great sword idle",
+    "seconds": 3.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordIdle4",
+    "file": "GSW_GreatSwordIdle4_loop.fbx",
+    "mixamo_name": "great sword idle",
+    "seconds": 3.73,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordIdle5",
+    "file": "GSW_GreatSwordIdle5_loop.fbx",
+    "mixamo_name": "great sword idle",
+    "seconds": 7.53,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordCasting",
+    "file": "GSW_GreatSwordCasting_loop.fbx",
+    "mixamo_name": "great sword casting",
+    "seconds": 4.77,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordPowerUp",
+    "file": "GSW_GreatSwordPowerUp_loop.fbx",
+    "mixamo_name": "great sword power up",
+    "seconds": 3.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordAttack",
+    "file": "GSW_GreatSwordAttack_loop.fbx",
+    "mixamo_name": "great sword attack",
+    "seconds": 1.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_TwoHandedSwordDeath",
+    "file": "GSW_TwoHandedSwordDeath.fbx",
+    "mixamo_name": "two handed sword death",
+    "seconds": 2.4,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_DrawAGreatSword1",
+    "file": "GSW_DrawAGreatSword1.fbx",
+    "mixamo_name": "draw a great sword 1",
+    "seconds": 0.5,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_DrawAGreatSword2",
+    "file": "GSW_DrawAGreatSword2.fbx",
+    "mixamo_name": "draw a great sword 2",
+    "seconds": 0.77,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_TwoHandedSwordDeath2",
+    "file": "GSW_TwoHandedSwordDeath2.fbx",
+    "mixamo_name": "two handed sword death",
+    "seconds": 2.57,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/GSW_SpellCast",
+    "file": "GSW_SpellCast_loop.fbx",
+    "mixamo_name": "spell cast",
+    "seconds": 1.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/GSW_GreatSwordRun2",
+    "file": "GSW_GreatSwordRun2_loop.fbx",
+    "mixamo_name": "great sword run",
+    "seconds": 0.6,
+    "loop": true
+   }
+  ]
+ },
+ "Sword and Shield Pack": {
+  "prefix": "SNS",
+  "mixamo_id": "c9d590fe-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/SNS_SwordAndShieldWalk",
+    "file": "SNS_SwordAndShieldWalk_loop.fbx",
+    "mixamo_name": "sword and shield walk",
+    "seconds": 1.07,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldRun",
+    "file": "SNS_SwordAndShieldRun_loop.fbx",
+    "mixamo_name": "sword and shield run",
+    "seconds": 0.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldJump",
+    "file": "SNS_SwordAndShieldJump_loop.fbx",
+    "mixamo_name": "sword and shield jump",
+    "seconds": 0.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldJump2",
+    "file": "SNS_SwordAndShieldJump2_loop.fbx",
+    "mixamo_name": "sword and shield jump",
+    "seconds": 0.97,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldStrafe",
+    "file": "SNS_SwordAndShieldStrafe_loop.fbx",
+    "mixamo_name": "sword and shield strafe",
+    "seconds": 1.13,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldStrafe2",
+    "file": "SNS_SwordAndShieldStrafe2_loop.fbx",
+    "mixamo_name": "sword and shield strafe",
+    "seconds": 1.3,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldWalk2",
+    "file": "SNS_SwordAndShieldWalk2_loop.fbx",
+    "mixamo_name": "sword and shield walk",
+    "seconds": 1.23,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShield180Turn",
+    "file": "SNS_SwordAndShield180Turn.fbx",
+    "mixamo_name": "sword and shield 180 turn",
+    "seconds": 0.77,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldStrafe3",
+    "file": "SNS_SwordAndShieldStrafe3_loop.fbx",
+    "mixamo_name": "sword and shield strafe",
+    "seconds": 0.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldStrafe4",
+    "file": "SNS_SwordAndShieldStrafe4_loop.fbx",
+    "mixamo_name": "sword and shield strafe",
+    "seconds": 0.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShield180Turn2",
+    "file": "SNS_SwordAndShield180Turn2.fbx",
+    "mixamo_name": "sword and shield 180 turn",
+    "seconds": 0.8,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldRun2",
+    "file": "SNS_SwordAndShieldRun2_loop.fbx",
+    "mixamo_name": "sword and shield run",
+    "seconds": 0.53,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldSlash",
+    "file": "SNS_SwordAndShieldSlash_loop.fbx",
+    "mixamo_name": "sword and shield slash",
+    "seconds": 1.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldSlash2",
+    "file": "SNS_SwordAndShieldSlash2.fbx",
+    "mixamo_name": "sword and shield slash",
+    "seconds": 3.53,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldSlash3",
+    "file": "SNS_SwordAndShieldSlash3_loop.fbx",
+    "mixamo_name": "sword and shield slash",
+    "seconds": 1.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldSlash4",
+    "file": "SNS_SwordAndShieldSlash4.fbx",
+    "mixamo_name": "sword and shield slash",
+    "seconds": 2.43,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldBlock",
+    "file": "SNS_SwordAndShieldBlock.fbx",
+    "mixamo_name": "sword and shield block",
+    "seconds": 0.57,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldBlockIdle",
+    "file": "SNS_SwordAndShieldBlockIdle_loop.fbx",
+    "mixamo_name": "sword and shield block idle",
+    "seconds": 1.37,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldBlock2",
+    "file": "SNS_SwordAndShieldBlock2.fbx",
+    "mixamo_name": "sword and shield block",
+    "seconds": 0.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldImpact",
+    "file": "SNS_SwordAndShieldImpact_loop.fbx",
+    "mixamo_name": "sword and shield impact",
+    "seconds": 0.77,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldImpact2",
+    "file": "SNS_SwordAndShieldImpact2_loop.fbx",
+    "mixamo_name": "sword and shield impact",
+    "seconds": 0.77,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldImpact3",
+    "file": "SNS_SwordAndShieldImpact3_loop.fbx",
+    "mixamo_name": "sword and shield impact",
+    "seconds": 0.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouch",
+    "file": "SNS_SwordAndShieldCrouch.fbx",
+    "mixamo_name": "sword and shield crouch",
+    "seconds": 0.53,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouching",
+    "file": "SNS_SwordAndShieldCrouching.fbx",
+    "mixamo_name": "sword and shield crouching",
+    "seconds": 0.47,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouchIdle",
+    "file": "SNS_SwordAndShieldCrouchIdle_loop.fbx",
+    "mixamo_name": "sword and shield crouch idle",
+    "seconds": 2.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldSlash5",
+    "file": "SNS_SwordAndShieldSlash5_loop.fbx",
+    "mixamo_name": "sword and shield slash",
+    "seconds": 1.37,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouchBlock",
+    "file": "SNS_SwordAndShieldCrouchBlock.fbx",
+    "mixamo_name": "sword and shield crouch block",
+    "seconds": 0.5,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouchBlockIdle",
+    "file": "SNS_SwordAndShieldCrouchBlockIdle_loop.fbx",
+    "mixamo_name": "sword and shield crouch block idle",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouching2",
+    "file": "SNS_SwordAndShieldCrouching2.fbx",
+    "mixamo_name": "sword and shield crouching",
+    "seconds": 0.6,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouchBlock2",
+    "file": "SNS_SwordAndShieldCrouchBlock2_loop.fbx",
+    "mixamo_name": "sword and shield crouch block",
+    "seconds": 0.8,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouching3",
+    "file": "SNS_SwordAndShieldCrouching3_loop.fbx",
+    "mixamo_name": "sword and shield crouching",
+    "seconds": 0.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack",
+    "file": "SNS_SwordAndShieldAttack.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 2.3,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack2",
+    "file": "SNS_SwordAndShieldAttack2.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 1.3,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack3",
+    "file": "SNS_SwordAndShieldAttack3.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 1.73,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldIdle",
+    "file": "SNS_SwordAndShieldIdle_loop.fbx",
+    "mixamo_name": "sword and shield idle",
+    "seconds": 3.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldIdle2",
+    "file": "SNS_SwordAndShieldIdle2_loop.fbx",
+    "mixamo_name": "sword and shield idle",
+    "seconds": 7.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldIdle3",
+    "file": "SNS_SwordAndShieldIdle3_loop.fbx",
+    "mixamo_name": "sword and shield idle",
+    "seconds": 8.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldKick",
+    "file": "SNS_SwordAndShieldKick_loop.fbx",
+    "mixamo_name": "sword and shield kick",
+    "seconds": 1.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCasting",
+    "file": "SNS_SwordAndShieldCasting_loop.fbx",
+    "mixamo_name": "sword and shield casting",
+    "seconds": 2.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack4",
+    "file": "SNS_SwordAndShieldAttack4_loop.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldPowerUp",
+    "file": "SNS_SwordAndShieldPowerUp_loop.fbx",
+    "mixamo_name": "sword and shield power up",
+    "seconds": 2.37,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldDeath",
+    "file": "SNS_SwordAndShieldDeath.fbx",
+    "mixamo_name": "sword and shield death",
+    "seconds": 2.27,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldDeath2",
+    "file": "SNS_SwordAndShieldDeath2.fbx",
+    "mixamo_name": "sword and shield death",
+    "seconds": 3.9,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldTurn",
+    "file": "SNS_SwordAndShieldTurn.fbx",
+    "mixamo_name": "sword and shield turn",
+    "seconds": 0.9,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldTurn2",
+    "file": "SNS_SwordAndShieldTurn2.fbx",
+    "mixamo_name": "sword and shield turn",
+    "seconds": 0.9,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldIdle4",
+    "file": "SNS_SwordAndShieldIdle4_loop.fbx",
+    "mixamo_name": "sword and shield idle",
+    "seconds": 2.53,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCasting2",
+    "file": "SNS_SwordAndShieldCasting2_loop.fbx",
+    "mixamo_name": "sword and shield casting",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SheathSword1",
+    "file": "SNS_SheathSword1.fbx",
+    "mixamo_name": "sheath sword 1",
+    "seconds": 1.27,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SheathSword2",
+    "file": "SNS_SheathSword2.fbx",
+    "mixamo_name": "sheath sword 2",
+    "seconds": 0.83,
+    "loop": false
+   }
+  ]
+ },
+ "Lite Sword and Shield Pack": {
+  "prefix": "SNL",
+  "mixamo_id": "71a0d0f8-9411-47d1-a595-1f8fcdbb0acf",
+  "clips": [
+   {
+    "clip": "mixamo/SNS_SwordAndShieldRun",
+    "file": "SNS_SwordAndShieldRun_loop.fbx",
+    "mixamo_name": "sword and shield run",
+    "seconds": 0.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldStrafe3",
+    "file": "SNS_SwordAndShieldStrafe3_loop.fbx",
+    "mixamo_name": "sword and shield strafe",
+    "seconds": 0.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldStrafe4",
+    "file": "SNS_SwordAndShieldStrafe4_loop.fbx",
+    "mixamo_name": "sword and shield strafe",
+    "seconds": 0.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldRun2",
+    "file": "SNS_SwordAndShieldRun2_loop.fbx",
+    "mixamo_name": "sword and shield run",
+    "seconds": 0.53,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldBlock",
+    "file": "SNS_SwordAndShieldBlock.fbx",
+    "mixamo_name": "sword and shield block",
+    "seconds": 0.57,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldBlockIdle",
+    "file": "SNS_SwordAndShieldBlockIdle_loop.fbx",
+    "mixamo_name": "sword and shield block idle",
+    "seconds": 1.37,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldBlock2",
+    "file": "SNS_SwordAndShieldBlock2.fbx",
+    "mixamo_name": "sword and shield block",
+    "seconds": 0.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack",
+    "file": "SNS_SwordAndShieldAttack.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 2.3,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack2",
+    "file": "SNS_SwordAndShieldAttack2.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 1.3,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack3",
+    "file": "SNS_SwordAndShieldAttack3.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 1.73,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack4",
+    "file": "SNS_SwordAndShieldAttack4_loop.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldDeath",
+    "file": "SNS_SwordAndShieldDeath.fbx",
+    "mixamo_name": "sword and shield death",
+    "seconds": 2.27,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldTurn",
+    "file": "SNS_SwordAndShieldTurn.fbx",
+    "mixamo_name": "sword and shield turn",
+    "seconds": 0.9,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldTurn2",
+    "file": "SNS_SwordAndShieldTurn2.fbx",
+    "mixamo_name": "sword and shield turn",
+    "seconds": 0.9,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldIdle4",
+    "file": "SNS_SwordAndShieldIdle4_loop.fbx",
+    "mixamo_name": "sword and shield idle",
+    "seconds": 2.53,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNL_DrawSword1",
+    "file": "SNL_DrawSword1.fbx",
+    "mixamo_name": "draw sword 1",
+    "seconds": 0.47,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SheathSword1",
+    "file": "SNS_SheathSword1.fbx",
+    "mixamo_name": "sheath sword 1",
+    "seconds": 1.27,
+    "loop": false
+   }
+  ]
+ },
+ "Pro Sword and Shield Pack": {
+  "prefix": "SNP",
+  "mixamo_id": "081399c1-a024-4cfd-8b49-d3d6d9ab2945",
+  "clips": [
+   {
+    "clip": "mixamo/SNS_SwordAndShieldWalk",
+    "file": "SNS_SwordAndShieldWalk_loop.fbx",
+    "mixamo_name": "sword and shield walk",
+    "seconds": 1.07,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldRun",
+    "file": "SNS_SwordAndShieldRun_loop.fbx",
+    "mixamo_name": "sword and shield run",
+    "seconds": 0.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldJump",
+    "file": "SNS_SwordAndShieldJump_loop.fbx",
+    "mixamo_name": "sword and shield jump",
+    "seconds": 0.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldJump2",
+    "file": "SNS_SwordAndShieldJump2_loop.fbx",
+    "mixamo_name": "sword and shield jump",
+    "seconds": 0.97,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldStrafe",
+    "file": "SNS_SwordAndShieldStrafe_loop.fbx",
+    "mixamo_name": "sword and shield strafe",
+    "seconds": 1.13,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldStrafe2",
+    "file": "SNS_SwordAndShieldStrafe2_loop.fbx",
+    "mixamo_name": "sword and shield strafe",
+    "seconds": 1.3,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldWalk2",
+    "file": "SNS_SwordAndShieldWalk2_loop.fbx",
+    "mixamo_name": "sword and shield walk",
+    "seconds": 1.23,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShield180Turn",
+    "file": "SNS_SwordAndShield180Turn.fbx",
+    "mixamo_name": "sword and shield 180 turn",
+    "seconds": 0.77,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldStrafe3",
+    "file": "SNS_SwordAndShieldStrafe3_loop.fbx",
+    "mixamo_name": "sword and shield strafe",
+    "seconds": 0.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldStrafe4",
+    "file": "SNS_SwordAndShieldStrafe4_loop.fbx",
+    "mixamo_name": "sword and shield strafe",
+    "seconds": 0.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShield180Turn2",
+    "file": "SNS_SwordAndShield180Turn2.fbx",
+    "mixamo_name": "sword and shield 180 turn",
+    "seconds": 0.8,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldRun2",
+    "file": "SNS_SwordAndShieldRun2_loop.fbx",
+    "mixamo_name": "sword and shield run",
+    "seconds": 0.53,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldSlash",
+    "file": "SNS_SwordAndShieldSlash_loop.fbx",
+    "mixamo_name": "sword and shield slash",
+    "seconds": 1.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldSlash2",
+    "file": "SNS_SwordAndShieldSlash2.fbx",
+    "mixamo_name": "sword and shield slash",
+    "seconds": 3.53,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldSlash3",
+    "file": "SNS_SwordAndShieldSlash3_loop.fbx",
+    "mixamo_name": "sword and shield slash",
+    "seconds": 1.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldSlash4",
+    "file": "SNS_SwordAndShieldSlash4.fbx",
+    "mixamo_name": "sword and shield slash",
+    "seconds": 2.43,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldBlock",
+    "file": "SNS_SwordAndShieldBlock.fbx",
+    "mixamo_name": "sword and shield block",
+    "seconds": 0.57,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldBlockIdle",
+    "file": "SNS_SwordAndShieldBlockIdle_loop.fbx",
+    "mixamo_name": "sword and shield block idle",
+    "seconds": 1.37,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldBlock2",
+    "file": "SNS_SwordAndShieldBlock2.fbx",
+    "mixamo_name": "sword and shield block",
+    "seconds": 0.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldImpact",
+    "file": "SNS_SwordAndShieldImpact_loop.fbx",
+    "mixamo_name": "sword and shield impact",
+    "seconds": 0.77,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldImpact2",
+    "file": "SNS_SwordAndShieldImpact2_loop.fbx",
+    "mixamo_name": "sword and shield impact",
+    "seconds": 0.77,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldImpact3",
+    "file": "SNS_SwordAndShieldImpact3_loop.fbx",
+    "mixamo_name": "sword and shield impact",
+    "seconds": 0.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouch",
+    "file": "SNS_SwordAndShieldCrouch.fbx",
+    "mixamo_name": "sword and shield crouch",
+    "seconds": 0.53,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouching",
+    "file": "SNS_SwordAndShieldCrouching.fbx",
+    "mixamo_name": "sword and shield crouching",
+    "seconds": 0.47,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouchIdle",
+    "file": "SNS_SwordAndShieldCrouchIdle_loop.fbx",
+    "mixamo_name": "sword and shield crouch idle",
+    "seconds": 2.4,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldSlash5",
+    "file": "SNS_SwordAndShieldSlash5_loop.fbx",
+    "mixamo_name": "sword and shield slash",
+    "seconds": 1.37,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouchBlock",
+    "file": "SNS_SwordAndShieldCrouchBlock.fbx",
+    "mixamo_name": "sword and shield crouch block",
+    "seconds": 0.5,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouchBlockIdle",
+    "file": "SNS_SwordAndShieldCrouchBlockIdle_loop.fbx",
+    "mixamo_name": "sword and shield crouch block idle",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouching2",
+    "file": "SNS_SwordAndShieldCrouching2.fbx",
+    "mixamo_name": "sword and shield crouching",
+    "seconds": 0.6,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouchBlock2",
+    "file": "SNS_SwordAndShieldCrouchBlock2_loop.fbx",
+    "mixamo_name": "sword and shield crouch block",
+    "seconds": 0.8,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCrouching3",
+    "file": "SNS_SwordAndShieldCrouching3_loop.fbx",
+    "mixamo_name": "sword and shield crouching",
+    "seconds": 0.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack",
+    "file": "SNS_SwordAndShieldAttack.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 2.3,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack2",
+    "file": "SNS_SwordAndShieldAttack2.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 1.3,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack3",
+    "file": "SNS_SwordAndShieldAttack3.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 1.73,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldIdle",
+    "file": "SNS_SwordAndShieldIdle_loop.fbx",
+    "mixamo_name": "sword and shield idle",
+    "seconds": 3.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldIdle2",
+    "file": "SNS_SwordAndShieldIdle2_loop.fbx",
+    "mixamo_name": "sword and shield idle",
+    "seconds": 7.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldIdle3",
+    "file": "SNS_SwordAndShieldIdle3_loop.fbx",
+    "mixamo_name": "sword and shield idle",
+    "seconds": 8.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldKick",
+    "file": "SNS_SwordAndShieldKick_loop.fbx",
+    "mixamo_name": "sword and shield kick",
+    "seconds": 1.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCasting",
+    "file": "SNS_SwordAndShieldCasting_loop.fbx",
+    "mixamo_name": "sword and shield casting",
+    "seconds": 2.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldAttack4",
+    "file": "SNS_SwordAndShieldAttack4_loop.fbx",
+    "mixamo_name": "sword and shield attack",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldPowerUp",
+    "file": "SNS_SwordAndShieldPowerUp_loop.fbx",
+    "mixamo_name": "sword and shield power up",
+    "seconds": 2.37,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldDeath",
+    "file": "SNS_SwordAndShieldDeath.fbx",
+    "mixamo_name": "sword and shield death",
+    "seconds": 2.27,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldDeath2",
+    "file": "SNS_SwordAndShieldDeath2.fbx",
+    "mixamo_name": "sword and shield death",
+    "seconds": 3.9,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldTurn",
+    "file": "SNS_SwordAndShieldTurn.fbx",
+    "mixamo_name": "sword and shield turn",
+    "seconds": 0.9,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldTurn2",
+    "file": "SNS_SwordAndShieldTurn2.fbx",
+    "mixamo_name": "sword and shield turn",
+    "seconds": 0.9,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldIdle4",
+    "file": "SNS_SwordAndShieldIdle4_loop.fbx",
+    "mixamo_name": "sword and shield idle",
+    "seconds": 2.53,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNS_SwordAndShieldCasting2",
+    "file": "SNS_SwordAndShieldCasting2_loop.fbx",
+    "mixamo_name": "sword and shield casting",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/SNL_DrawSword1",
+    "file": "SNL_DrawSword1.fbx",
+    "mixamo_name": "draw sword 1",
+    "seconds": 0.47,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNP_DrawSword2",
+    "file": "SNP_DrawSword2.fbx",
+    "mixamo_name": "draw sword 2",
+    "seconds": 0.73,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SheathSword1",
+    "file": "SNS_SheathSword1.fbx",
+    "mixamo_name": "sheath sword 1",
+    "seconds": 1.27,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/SNS_SheathSword2",
+    "file": "SNS_SheathSword2.fbx",
+    "mixamo_name": "sheath sword 2",
+    "seconds": 0.83,
+    "loop": false
+   }
+  ]
+ },
+ "Action Adventure Pack": {
+  "prefix": "AAD",
+  "mixamo_id": "c9d5840a-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/AAD_Idle",
+    "file": "AAD_Idle_loop.fbx",
+    "mixamo_name": "idle",
+    "seconds": 4.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_FallingIdle",
+    "file": "AAD_FallingIdle_loop.fbx",
+    "mixamo_name": "falling idle",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_Idle2",
+    "file": "AAD_Idle2_loop.fbx",
+    "mixamo_name": "idle",
+    "seconds": 10.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_Idle3",
+    "file": "AAD_Idle3_loop.fbx",
+    "mixamo_name": "idle",
+    "seconds": 3.27,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_Running",
+    "file": "AAD_Running_loop.fbx",
+    "mixamo_name": "running",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_StandToCover",
+    "file": "AAD_StandToCover.fbx",
+    "mixamo_name": "stand to cover",
+    "seconds": 1.13,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AAD_Walking",
+    "file": "AAD_Walking_loop.fbx",
+    "mixamo_name": "walking",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_StandToCover2",
+    "file": "AAD_StandToCover2.fbx",
+    "mixamo_name": "stand to cover",
+    "seconds": 1.23,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AAD_RunToStop",
+    "file": "AAD_RunToStop.fbx",
+    "mixamo_name": "run to stop",
+    "seconds": 0.9,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AAD_LeftTurn",
+    "file": "AAD_LeftTurn_loop.fbx",
+    "mixamo_name": "left turn",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_RightTurn",
+    "file": "AAD_RightTurn_loop.fbx",
+    "mixamo_name": "right turn",
+    "seconds": 0.83,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_JumpingUp",
+    "file": "AAD_JumpingUp.fbx",
+    "mixamo_name": "jumping up",
+    "seconds": 0.23,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AAD_FallingToRoll",
+    "file": "AAD_FallingToRoll.fbx",
+    "mixamo_name": "falling to roll",
+    "seconds": 1.77,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AAD_HardLanding",
+    "file": "AAD_HardLanding.fbx",
+    "mixamo_name": "hard landing",
+    "seconds": 2.0,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AAD_CoverToStand",
+    "file": "AAD_CoverToStand.fbx",
+    "mixamo_name": "cover to stand",
+    "seconds": 1.5,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/AAD_Idle4",
+    "file": "AAD_Idle4_loop.fbx",
+    "mixamo_name": "idle",
+    "seconds": 2.57,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_CrouchedSneakingLeft",
+    "file": "AAD_CrouchedSneakingLeft_loop.fbx",
+    "mixamo_name": "crouched sneaking left",
+    "seconds": 1.27,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_CrouchedSneakingRight",
+    "file": "AAD_CrouchedSneakingRight_loop.fbx",
+    "mixamo_name": "crouched sneaking right",
+    "seconds": 1.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_LeftCoverSneak",
+    "file": "AAD_LeftCoverSneak_loop.fbx",
+    "mixamo_name": "left cover sneak",
+    "seconds": 1.13,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_RightCoverSneak",
+    "file": "AAD_RightCoverSneak_loop.fbx",
+    "mixamo_name": "right cover sneak",
+    "seconds": 1.13,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_Idle5",
+    "file": "AAD_Idle5_loop.fbx",
+    "mixamo_name": "idle",
+    "seconds": 2.27,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/AAD_CoverToStand2",
+    "file": "AAD_CoverToStand2.fbx",
+    "mixamo_name": "cover to stand",
+    "seconds": 1.4,
+    "loop": false
+   }
+  ]
+ },
+ "Male Locomotion Pack": {
+  "prefix": "LMM",
+  "mixamo_id": "bd8ac609-e3ca-4ef3-8782-a05cd6deebe3",
+  "clips": [
+   {
+    "clip": "mixamo/LMM_LeftStrafeWalking",
+    "file": "LMM_LeftStrafeWalking_loop.fbx",
+    "mixamo_name": "left strafe walking",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_RightStrafeWalking",
+    "file": "LMM_RightStrafeWalking_loop.fbx",
+    "mixamo_name": "right strafe walking",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_LeftStrafe",
+    "file": "LMM_LeftStrafe_loop.fbx",
+    "mixamo_name": "left strafe",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_RightStrafe",
+    "file": "LMM_RightStrafe_loop.fbx",
+    "mixamo_name": "right strafe",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_Idle",
+    "file": "LMM_Idle_loop.fbx",
+    "mixamo_name": "idle",
+    "seconds": 8.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_Jump",
+    "file": "LMM_Jump_loop.fbx",
+    "mixamo_name": "jump",
+    "seconds": 2.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_Walking",
+    "file": "LMM_Walking_loop.fbx",
+    "mixamo_name": "walking",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_RightTurn90",
+    "file": "LMM_RightTurn90_loop.fbx",
+    "mixamo_name": "right turn 90",
+    "seconds": 0.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_LeftTurn90",
+    "file": "LMM_LeftTurn90_loop.fbx",
+    "mixamo_name": "left turn 90",
+    "seconds": 0.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_StandardRun",
+    "file": "LMM_StandardRun_loop.fbx",
+    "mixamo_name": "standard run",
+    "seconds": 0.7,
+    "loop": true
+   }
+  ]
+ },
+ "Locomotion Pack": {
+  "prefix": "LOC",
+  "mixamo_id": "c9d57b3f-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/LMM_LeftStrafeWalking",
+    "file": "LMM_LeftStrafeWalking_loop.fbx",
+    "mixamo_name": "left strafe walking",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_RightStrafeWalking",
+    "file": "LMM_RightStrafeWalking_loop.fbx",
+    "mixamo_name": "right strafe walking",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_LeftStrafe",
+    "file": "LMM_LeftStrafe_loop.fbx",
+    "mixamo_name": "left strafe",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LOC_LeftTurn",
+    "file": "LOC_LeftTurn_loop.fbx",
+    "mixamo_name": "left turn",
+    "seconds": 1.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_RightStrafe",
+    "file": "LMM_RightStrafe_loop.fbx",
+    "mixamo_name": "right strafe",
+    "seconds": 0.67,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LOC_RightTurn",
+    "file": "LOC_RightTurn_loop.fbx",
+    "mixamo_name": "right turn",
+    "seconds": 1.63,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_Idle",
+    "file": "LMM_Idle_loop.fbx",
+    "mixamo_name": "idle",
+    "seconds": 8.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_Jump",
+    "file": "LMM_Jump_loop.fbx",
+    "mixamo_name": "jump",
+    "seconds": 2.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LOC_Running",
+    "file": "LOC_Running_loop.fbx",
+    "mixamo_name": "running",
+    "seconds": 0.7,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_Walking",
+    "file": "LMM_Walking_loop.fbx",
+    "mixamo_name": "walking",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_RightTurn90",
+    "file": "LMM_RightTurn90_loop.fbx",
+    "mixamo_name": "right turn 90",
+    "seconds": 0.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_LeftTurn90",
+    "file": "LMM_LeftTurn90_loop.fbx",
+    "mixamo_name": "left turn 90",
+    "seconds": 0.93,
+    "loop": true
+   }
+  ]
+ },
+ "Basic Locomotion Pack": {
+  "prefix": "LOB",
+  "mixamo_id": "c9d58d72-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/LMM_LeftStrafeWalking",
+    "file": "LMM_LeftStrafeWalking_loop.fbx",
+    "mixamo_name": "left strafe walking",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_RightStrafeWalking",
+    "file": "LMM_RightStrafeWalking_loop.fbx",
+    "mixamo_name": "right strafe walking",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_Idle",
+    "file": "LMM_Idle_loop.fbx",
+    "mixamo_name": "idle",
+    "seconds": 8.33,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_Jump",
+    "file": "LMM_Jump_loop.fbx",
+    "mixamo_name": "jump",
+    "seconds": 2.17,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_Walking",
+    "file": "LMM_Walking_loop.fbx",
+    "mixamo_name": "walking",
+    "seconds": 1.03,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_RightTurn90",
+    "file": "LMM_RightTurn90_loop.fbx",
+    "mixamo_name": "right turn 90",
+    "seconds": 0.93,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/LMM_LeftTurn90",
+    "file": "LMM_LeftTurn90_loop.fbx",
+    "mixamo_name": "left turn 90",
+    "seconds": 0.93,
+    "loop": true
+   }
+  ]
+ },
+ "Rifle 8-Way Locomotion Pack": {
+  "prefix": "RFP",
+  "mixamo_id": "c9d598f8-b96c-11e4-a802-0aaa78deedf9",
+  "clips": [
+   {
+    "clip": "mixamo/RFP_SprintForward",
+    "file": "RFP_SprintForward_loop.fbx",
+    "mixamo_name": "sprint forward",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunForward",
+    "file": "RFP_RunForward_loop.fbx",
+    "mixamo_name": "run forward",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingForwardRight",
+    "file": "RFP_WalkCrouchingForwardRight_loop.fbx",
+    "mixamo_name": "walk crouching forward right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_Idle",
+    "file": "RFP_Idle_loop.fbx",
+    "mixamo_name": "idle",
+    "seconds": 2.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_Turn90Left",
+    "file": "RFP_Turn90Left_loop.fbx",
+    "mixamo_name": "turn 90 left",
+    "seconds": 0.97,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_IdleCrouching",
+    "file": "RFP_IdleCrouching_loop.fbx",
+    "mixamo_name": "idle crouching",
+    "seconds": 2.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunBackward",
+    "file": "RFP_RunBackward_loop.fbx",
+    "mixamo_name": "run backward",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunLeft",
+    "file": "RFP_RunLeft_loop.fbx",
+    "mixamo_name": "run left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunRight",
+    "file": "RFP_RunRight_loop.fbx",
+    "mixamo_name": "run right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunForwardRight",
+    "file": "RFP_RunForwardRight_loop.fbx",
+    "mixamo_name": "run forward right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunForwardLeft",
+    "file": "RFP_RunForwardLeft_loop.fbx",
+    "mixamo_name": "run forward left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunBackwardLeft",
+    "file": "RFP_RunBackwardLeft_loop.fbx",
+    "mixamo_name": "run backward left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_RunBackwardRight",
+    "file": "RFP_RunBackwardRight_loop.fbx",
+    "mixamo_name": "run backward right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintForwardRight",
+    "file": "RFP_SprintForwardRight_loop.fbx",
+    "mixamo_name": "sprint forward right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintForwardLeft",
+    "file": "RFP_SprintForwardLeft_loop.fbx",
+    "mixamo_name": "sprint forward left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintRight",
+    "file": "RFP_SprintRight_loop.fbx",
+    "mixamo_name": "sprint right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintLeft",
+    "file": "RFP_SprintLeft_loop.fbx",
+    "mixamo_name": "sprint left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintBackward",
+    "file": "RFP_SprintBackward_loop.fbx",
+    "mixamo_name": "sprint backward",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintBackwardRight",
+    "file": "RFP_SprintBackwardRight_loop.fbx",
+    "mixamo_name": "sprint backward right",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_SprintBackwardLeft",
+    "file": "RFP_SprintBackwardLeft_loop.fbx",
+    "mixamo_name": "sprint backward left",
+    "seconds": 0.5,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkForward",
+    "file": "RFP_WalkForward_loop.fbx",
+    "mixamo_name": "walk forward",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkForwardRight",
+    "file": "RFP_WalkForwardRight_loop.fbx",
+    "mixamo_name": "walk forward right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkForwardLeft",
+    "file": "RFP_WalkForwardLeft_loop.fbx",
+    "mixamo_name": "walk forward left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkRight",
+    "file": "RFP_WalkRight_loop.fbx",
+    "mixamo_name": "walk right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkLeft",
+    "file": "RFP_WalkLeft_loop.fbx",
+    "mixamo_name": "walk left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkBackward",
+    "file": "RFP_WalkBackward_loop.fbx",
+    "mixamo_name": "walk backward",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkBackwardRight",
+    "file": "RFP_WalkBackwardRight_loop.fbx",
+    "mixamo_name": "walk backward right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkBackwardLeft",
+    "file": "RFP_WalkBackwardLeft_loop.fbx",
+    "mixamo_name": "walk backward left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingForward",
+    "file": "RFP_WalkCrouchingForward_loop.fbx",
+    "mixamo_name": "walk crouching forward",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingRight",
+    "file": "RFP_WalkCrouchingRight_loop.fbx",
+    "mixamo_name": "walk crouching right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingLeft",
+    "file": "RFP_WalkCrouchingLeft_loop.fbx",
+    "mixamo_name": "walk crouching left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingForwardLeft",
+    "file": "RFP_WalkCrouchingForwardLeft_loop.fbx",
+    "mixamo_name": "walk crouching forward left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingBackward",
+    "file": "RFP_WalkCrouchingBackward_loop.fbx",
+    "mixamo_name": "walk crouching backward",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingBackwardLeft",
+    "file": "RFP_WalkCrouchingBackwardLeft_loop.fbx",
+    "mixamo_name": "walk crouching backward left",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_WalkCrouchingBackwardRight",
+    "file": "RFP_WalkCrouchingBackwardRight_loop.fbx",
+    "mixamo_name": "walk crouching backward right",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_IdleAiming",
+    "file": "RFP_IdleAiming_loop.fbx",
+    "mixamo_name": "idle aiming",
+    "seconds": 2.1,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_Turn90Right",
+    "file": "RFP_Turn90Right_loop.fbx",
+    "mixamo_name": "turn 90 right",
+    "seconds": 0.97,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_CrouchingTurn90Left",
+    "file": "RFP_CrouchingTurn90Left_loop.fbx",
+    "mixamo_name": "crouching turn 90 left",
+    "seconds": 1.23,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_CrouchingTurn90Right",
+    "file": "RFP_CrouchingTurn90Right_loop.fbx",
+    "mixamo_name": "crouching turn 90 right",
+    "seconds": 1.23,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_JumpUp",
+    "file": "RFP_JumpUp.fbx",
+    "mixamo_name": "jump up",
+    "seconds": 0.53,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_JumpLoop",
+    "file": "RFP_JumpLoop_loop.fbx",
+    "mixamo_name": "jump loop",
+    "seconds": 1.0,
+    "loop": true
+   },
+   {
+    "clip": "mixamo/RFP_JumpDown",
+    "file": "RFP_JumpDown.fbx",
+    "mixamo_name": "jump down",
+    "seconds": 0.67,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathFromFrontHeadshot",
+    "file": "RFP_DeathFromFrontHeadshot.fbx",
+    "mixamo_name": "death from front headshot",
+    "seconds": 2.83,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathFromRight",
+    "file": "RFP_DeathFromRight.fbx",
+    "mixamo_name": "death from right",
+    "seconds": 3.27,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathCrouchingHeadshotFront",
+    "file": "RFP_DeathCrouchingHeadshotFront.fbx",
+    "mixamo_name": "death crouching headshot front",
+    "seconds": 1.9,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathFromBackHeadshot",
+    "file": "RFP_DeathFromBackHeadshot.fbx",
+    "mixamo_name": "death from back headshot",
+    "seconds": 3.7,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathFromTheBack",
+    "file": "RFP_DeathFromTheBack.fbx",
+    "mixamo_name": "death from the back",
+    "seconds": 2.93,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_DeathFromTheFront",
+    "file": "RFP_DeathFromTheFront.fbx",
+    "mixamo_name": "death from the front",
+    "seconds": 3.4,
+    "loop": false
+   },
+   {
+    "clip": "mixamo/RFP_IdleCrouchingAiming",
+    "file": "RFP_IdleCrouchingAiming_loop.fbx",
+    "mixamo_name": "idle crouching aiming",
+    "seconds": 2.1,
+    "loop": true
+   }
+  ]
+ }
+}

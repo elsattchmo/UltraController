@@ -5,7 +5,7 @@ func _init() -> void:
 	root.add_child(scene)
 	var skel := scene.find_child("GeneralSkeleton", true, false) as Skeleton3D
 	var lib: AnimationLibrary = load("res://assets/characters/mannequin/anims/ual.res")
-	for clip in ["Walk", "Walk_Formal", "Walk_Large", "Walk_Female", "Walk_Stealth", "Walk_Carry", "Zombie_Walk", "Jog", "Run_Stealth", "Sprint"]:
+	for clip in ["Walk", "Walk_Formal", "Walk_Large", "Walk_Stealth", "Walk_Carry", "Zombie_Walk", "Jog", "Run_Stealth", "Sprint"]:
 		if not lib.has_animation(clip):
 			continue
 		var a := lib.get_animation(clip)
