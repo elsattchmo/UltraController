@@ -1181,6 +1181,39 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   Result (worst per-phase |gait - clip|): walk knee 22 deg, ankle 4 cm, pitch 4 deg, pelvis 0.5 cm; run knee 39,
   ankle 6 cm, pelvis 1 cm; sprint knee 50 (the early-swing fold - one tick of presentation interpolation at
   4.2 steps/s), ankle 12 cm, pelvis 3 cm; stride and cadence equal at all three.
+- **Directional cycles (strafe / back)**: `SinewAnimationSet.gait_back / gait_left / gait_right` (walk_b,
+  strafe_l = Mixamo Strafe_Walk_L, strafe_r) join the forward walk / run / sprint; the core finds each clip's way of
+  travel from its grounded feet's slide (`ClipLegs.angle`: back -180, right -91, left +90) and `cycle_weights(speed,
+  theta)` blends the two clips either side of the travel round the compass (forward = the speed blend), a directional
+  one fading out from 1.3 to 2.2 x its own speed (running sideways = the forward run, warped). Their own hip twist
+  comes with them (warp only for the forward share, `dirw`). Paths are 2D per foot: along the travel (`fwd`, share of
+  stride) and across it (`across`, m) from the hips' centre, plus the foot's facing (`yaw`, relative to the slowest
+  forward clip's: the drawn foot is that yaw on its rest orientation) - a crossover strafe's feet cross and close.
+  Per-foot touchdown offset (`foot_off`) and duty (`duty_f`): a side step isn't symmetric. A stance = the LONGEST run
+  of down samples (`stance_run`): a crossover's swinging foot passes low under the body and read as a touchdown. No
+  "never across the other foot" rule on a clip's own path. Strafe: hip 4 deg, knee 19, pelvis 1.6 cm off the clip.
+  `SinewAnimDriver` walk point per direction (walk_b / strafe speeds; against the forward walk a strafe sat between
+  strafe and idle and slid). Compare tour `--dir=left|right|back` films from the front for sideways, at the clip's
+  own speed. Pitch is measured along the foot's own facing.
+- **Turning on the spot / pivot starts** (tour `sinew_turn_review` + `tools/sinew/turn_report.py`: feet distance as
+  ankle->toe segments, crossings, torso lag, settle time; a "turn 150 + go" segment): the torso leads -
+  `SinewRagdoll.torso_twist` (aim off the hips, unwrapped, clamped 80 deg, damped spring 14 rad/s capped 7 rad/s)
+  spread by `SinewPoseModifier` (Spine 0.15, Chest 0.15, UpperChest 0.2, Neck/head 0.5) over whatever pose shows;
+  standing, the hips sit `pelvis_follow` 0.5 of the way from the feet's facing to the body's (`Gait::pelvis_turn`).
+  Turning steps (`turn_step_yaw`): the foot on the turn's side opens up to `step_turn` 75 deg past the other, the
+  other only CLOSES to it (overtaking left the first toed in: the feet met in a V); spots round the body's centre in
+  that facing; quicker steps the more there is to turn (`turn_cadence`); a swinging ankle keeps `foot_clear` 16 cm
+  from the standing foot's heel..ball segment. Setting off sideways of the feet, the near foot goes first.
+  Pivot start (`SinewCharacter._pivot`, third person, offline physical motion, no gun up): the body's facing turns at
+  <= `pivot_rate` 400 deg/s eased (the motor snaps it 900 deg/s when moving - it moves along the aim, never the
+  facing, so this is presentation), and while it's > 20..90 deg from where it's going the push-off is held to 15 %:
+  turn 150 + go = the turn plays over 0.4 s while the speed builds 0.08 -> 0.97 m/s; under `pivot_speed` 0.7 m/s with
+  the facing > 0.6 rad off the feet the steps are pivot steps.
+- **Stagger fixes**: the gait's last pose stays the target through a stagger (`_gait_frozen`; fading to the clip's
+  flat-ground pose lifted the hips' target 14 cm on uneven ground). Standing ankles are torque-capped
+  (`Character::set_part_torque_cap`, `BalanceSettings.ankle_cap` 0.75 x weight share x sole lever): the uncapped
+  ankle strategy rose a body 15 cm onto tiptoe after a ball on the forearm; s5's hard hit now recovers in 0.45 s,
+  no step.
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
   data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
   coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),

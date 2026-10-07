@@ -84,7 +84,7 @@ func test_cycles_come_from_the_reference_clips() -> void:
 	for cy in cycles:
 		clips.append("%s @ %.2f m/s" % [cy.clip, cy.speed])
 	info("gait cycles: %s" % [clips])
-	check(cycles.size() == 3, "walk, run and sprint cycles sampled (%d)" % cycles.size())
+	check(cycles.size() == 6, "walk, run, sprint + back and both side-step cycles sampled (%d)" % cycles.size())
 	check((cycles[0].samples as Array).size() == SinewGaitCycles.SAMPLES and (cycles[0].samples[0] as Array).size() == r.parts.size(), "24 phases x every part")
 	check(r._gait_on and r.gait_w > 0.99, "standing: the gait has the body")
 	var st: Dictionary = r.world.physics.call("character_gait_state", r._id)

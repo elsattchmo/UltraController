@@ -18,6 +18,9 @@ static func build(drv: UltraAnimDriver, parts: Array) -> Array:
 	var roles: Array[StringName] = [&"walk_f", &"jog_f", &"sprint_f"]
 	if aset:
 		roles = [aset.gait_walk, aset.gait_run, aset.gait_sprint]
+		for r in [aset.gait_back, aset.gait_left, aset.gait_right]:
+			if r != &"":
+				roles.append(r)
 	var seen := {}
 	for role in roles:
 		var clip := String(drv.anim_set.clip(role))
@@ -108,14 +111,10 @@ static func sample_cycle(a: Animation, sk: Skeleton3D, parts: Array, plant_phase
 ## How many strides a cycle clip holds: the left ankle's furthest-forward points (relative to the hips)
 ## over the whole clip, counted cyclically (a stride is one of them).
 static func stride_count(a: Animation, sk: Skeleton3D, parts: Array) -> int:
-	var foot := sk.find_bone("LeftFoot")
-	if foot < 0:
+	var z := _ankle_along(a, sk, parts, 96)
+	if z.is_empty():
 		return 1
 	const N := 96
-	var z := PackedFloat32Array()
-	for k in N:
-		var g := _globals(a, sk, float(k) / N * a.length)
-		z.append(g[foot].origin.z - g[parts[0].bone].origin.z)
 	var lo := INF
 	var hi := -INF
 	for x in z:
@@ -134,19 +133,48 @@ static func stride_count(a: Animation, sk: Skeleton3D, parts: Array) -> int:
 	return clampi(n, 1, 4)
 
 
+## The left ankle off the hips over the clip (n samples), along the way its feet move most (forward for
+## a walk, sideways for a strafe); empty without feet.
+static func _ankle_along(a: Animation, sk: Skeleton3D, parts: Array, n: int) -> PackedFloat32Array:
+	var foot := sk.find_bone("LeftFoot")
+	var out := PackedFloat32Array()
+	if foot < 0:
+		return out
+	var pts: Array[Vector2] = []
+	var mean := Vector2.ZERO
+	for k in n:
+		var g := _globals(a, sk, float(k) / n * a.length)
+		var d := g[foot].origin - g[parts[0].bone].origin
+		pts.append(Vector2(d.x, d.z))
+		mean += Vector2(d.x, d.z) / n
+	# Principal axis of the horizontal spread.
+	var sxx := 0.0
+	var szz := 0.0
+	var sxz := 0.0
+	for p in pts:
+		var q := p - mean
+		sxx += q.x * q.x
+		szz += q.y * q.y
+		sxz += q.x * q.y
+	var ang := 0.5 * atan2(2.0 * sxz, sxx - szz)
+	var axis := Vector2(cos(ang), sin(ang))
+	# (Sign: the forward-most for a walk - keep +Z positive when the axis is mostly along it.)
+	if absf(axis.y) >= absf(axis.x) and axis.y < 0.0:
+		axis = -axis
+	for p in pts:
+		out.append(p.dot(axis))
+	return out
+
+
 ## The left heel strike as a phase of the clip (the left ankle furthest forward of the hips); -1 without feet.
 static func contact_phase(a: Animation, sk: Skeleton3D, parts: Array) -> float:
-	var foot := sk.find_bone("LeftFoot")
-	if foot < 0:
-		return -1.0
 	const N := 96
-	var best := -INF
+	var z := _ankle_along(a, sk, parts, N)
+	if z.is_empty():
+		return -1.0
 	var at := 0
 	for k in N:
-		var g := _globals(a, sk, float(k) / N * a.length)
-		var z := g[foot].origin.z - g[parts[0].bone].origin.z
-		if z > best:
-			best = z
+		if z[k] > z[at]:
 			at = k
 	return float(at) / N
 

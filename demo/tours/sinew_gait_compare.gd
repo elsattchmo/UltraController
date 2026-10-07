@@ -6,7 +6,8 @@ extends "res://demo/tours/tour_base.gd"
 ## tools/sinew/gait_compare.py pairs the frames by stride phase (left-foot contacts found in the bones
 ## themselves), makes side-by-side strips and overlays, and prints per-phase joint angles.
 ##   godot --path . --fixed-fps 60 --resolution 1280x720 -- --tour=sinew_gait_compare --controller=sinew
-##         --no-kit --gaitcmp=clip|gait --pace=walk|jog|sprint --out=<dir>
+##         --no-kit --gaitcmp=clip|gait --pace=walk|jog|sprint [--dir=fwd|left|right|back] --out=<dir>
+## (Sideways moves are filmed from the front, the rest from the side.)
 ## (--fixed-fps: every frame is one physics tick whatever the grabs cost.)
 
 const BONES := ["Hips", "Spine", "Chest", "UpperChest", "Neck", "Head",
@@ -21,6 +22,8 @@ var _cam: Camera3D
 var _c: UltraCharacter
 var _mode := "gait"
 var _pace := "walk"
+var _dir := "fwd"
+var _move := Vector2(0, 1)
 var _frames: Array = []
 var _bone_ids: Array[int] = []
 var _capturing := false
@@ -31,15 +34,17 @@ var _pending: Dictionary = {}
 func _build() -> void:
 	_mode = String(main.args.get("gaitcmp", "gait"))
 	_pace = String(main.args.get("pace", "walk"))
+	_dir = String(main.args.get("dir", "fwd"))
+	_move = {"fwd": Vector2(0, 1), "left": Vector2(-1, 0), "right": Vector2(1, 0), "back": Vector2(0, -1)}.get(_dir, Vector2(0, 1))
 	out_dir = out_dir.replace("/m1", "/sinew_gait_compare/%s_%s" % [_pace, _mode])
 	var buttons := InputFrame.B_SPRINT if _pace == "sprint" else 0
 	steps = [
 		{"teleport": "speed_start", "t": 0.6, "yaw": 0, "pitch": -4, "view_tp": true, "slot": 0},
 		{"call": _setup, "t": 0.5},
 		# (Counted in physics frames: the tour's clock is real time, and frame grabs are slow.)
-		{"call": _mark, "t": 600.0, "move": Vector2(0, 1), "yaw": 0, "buttons": buttons,
+		{"call": _mark, "t": 600.0, "move": _move, "yaw": 0, "buttons": buttons,
 				"until": func() -> bool: return Engine.get_physics_frames() - _f0 >= int(WARMUP * 60.0)},
-		{"call": _start, "t": 600.0, "move": Vector2(0, 1), "yaw": 0, "buttons": buttons,
+		{"call": _start, "t": 600.0, "move": _move, "yaw": 0, "buttons": buttons,
 				"until": func() -> bool: return _n >= int(CAPTURE * 60.0)},
 		{"call": _finish, "t": 0.2},
 	]
@@ -55,6 +60,11 @@ func _setup() -> void:
 		r._setup_gait()
 	if _pace == "jog":
 		_c.profile.default_gait = MovementProfile.Gait.JOG
+	# Sideways / backing at the clip's own speed: the reference is then the clip itself, not a blend.
+	if _pace == "walk" and _dir != "fwd":
+		var role := {"left": &"strafe_l", "right": &"strafe_r", "back": &"walk_b"}[_dir] as StringName
+		var mult := _c.profile.back_mult if _dir == "back" else _c.profile.strafe_mult
+		_c.profile.walk_speed = _c.anim.anim_set.speed_of(role, 1.0) / mult
 	# Nothing over the picture (the HUD's hotbar covered the feet).
 	for n in get_tree().root.find_children("*", "CanvasLayer", true, false):
 		(n as CanvasLayer).visible = false
@@ -84,7 +94,8 @@ func _process(delta: float) -> void:
 	super._process(delta)
 	if _cam and _c and _c.visual_root:
 		var root := _c.visual_root.global_position
-		_cam.global_position = root + Vector3(4.0, 0.95, 0.0)
+		# (yaw 0 faces -Z: from the side on +X; sideways moves from the front, on -Z.)
+		_cam.global_position = root + (Vector3(0.0, 0.95, -4.0) if _dir in ["left", "right"] else Vector3(4.0, 0.95, 0.0))
 		_cam.look_at(root + Vector3(0.0, 0.95, 0.0), Vector3.UP)
 	if _capturing and not _pending.is_empty():
 		var rec := _pending
@@ -126,12 +137,15 @@ func _on_posed() -> void:
 		# The gait's own ankle target (the leg's IK goal), same frame as the bones.
 		var a: Vector3 = (st.ankle_l as Vector3) - root.origin
 		_pending["ankle_target_l"] = [a.dot(right), a.y, a.dot(fwd)]
+		var fh: Vector3 = (st.foothold_l as Vector3) - root.origin
+		_pending["foothold_l"] = [fh.dot(right), fh.y, fh.dot(fwd)]
+		_pending["planted_l"] = bool(st.planted_l)
 
 
 func _finish() -> void:
 	_capturing = false
 	var f := FileAccess.open(out_dir.path_join("frames.json"), FileAccess.WRITE)
-	f.store_string(JSON.stringify({"mode": _mode, "pace": _pace, "ortho": ORTHO, "crop": [CROP.x, CROP.y],
+	f.store_string(JSON.stringify({"mode": _mode, "pace": _pace, "dir": _dir, "move": [_move.x, _move.y], "ortho": ORTHO, "crop": [CROP.x, CROP.y],
 			"view_px": 720, "frames": _frames}))
 	f.close()
 	print("gait_compare: %d frames -> %s" % [_frames.size(), out_dir])

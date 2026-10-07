@@ -94,6 +94,13 @@ var _handback_from: Array[Transform3D] = []
 ## Any GaitSettings field by name (cadence_base, duty_walk, swing_height, bob, arm_swing...).
 @export var gait_settings := {}
 var gait_w := 0.0                            ## how much of the gait pose shows (eased)
+## The torso turned toward the aim off the hips (rad, + left; SinewPoseModifier spreads it up the spine,
+## the neck and head taking most): standing, the upper body looks round before the feet turn.
+var torso_twist := 0.0
+@export var torso_twist_max := deg_to_rad(80.0)
+var _twist_v := 0.0
+var _twist_raw := 0.0
+var _gait_frozen := false
 var gait_part_w := PackedFloat32Array()      ## per part: the gait's share (the upper body keeps an item's clip)
 var gait_prev: Array[Transform3D] = []       ## the gait pose (world) at the last two ticks
 var gait_now: Array[Transform3D] = []
@@ -200,6 +207,17 @@ func _update_gait(dt: float) -> void:
 		return
 	var st := character.state
 	var Id := MotorState.Id
+	# Staggering, the balancer has the legs: the gait stops, but its last pose stays the target - it is
+	# fitted to the ground (a foot up a step, the hips lowered to reach the other). Fading to the clip's
+	# flat-ground pose lifted the hips' target 14 cm and the legs hopped the body up to reach it.
+	if _stagger_t >= 0.0 and not active and _gait_running:
+		_gait_frozen = true
+		_update_twist(dt, false)
+		return
+	if _gait_frozen:
+		_gait_frozen = false
+		_gait_running = false        # (restarts from where the body stepped to)
+		gait_w = 0.0
 	# (Not while staggering: the balancer has the legs.)
 	var want := not active and _stagger_t < 0.0 and st.is_grounded() and st.state in [Id.IDLE, Id.MOVE, Id.TURN_IN_PLACE, Id.LAND]
 	if want and not _gait_running:
@@ -215,6 +233,7 @@ func _update_gait(dt: float) -> void:
 	gait_w = move_toward(gait_w, 1.0 if want else 0.0, dt / 0.2)
 	if gait_w <= 0.0 and not want:
 		_gait_running = false
+	_update_twist(dt, want and _gait_running)
 	# Pelvis and legs walk the gait. The upper body takes the gait's arm swing as it moves; standing,
 	# holding an item or playing a one-shot (a hit flinch, a swing) it keeps the clips.
 	var drv := character.anim as SinewAnimDriver
@@ -222,6 +241,27 @@ func _update_gait(dt: float) -> void:
 	var upper := 0.0 if busy else smoothstep(0.1, 0.6, Vector2(st.vel.x, st.vel.z).length())
 	for i in parts.size():
 		gait_part_w[i] = 1.0 if _walks(i) else move_toward(gait_part_w[i], upper, dt / 0.25)
+
+
+## The torso's turn toward the aim: the aim off the hips (the facing, plus the gait's hip offset when
+## standing), kept continuous through the back (unwrapped) before the clamp, followed on a damped spring
+## with a speed cap (a flick must not snap the chest round).
+func _update_twist(dt: float, on: bool) -> void:
+	var target := 0.0
+	if on:
+		var off := angle_difference(character.state.body_yaw, character.last_input.yaw)
+		off -= float(world.physics.call("character_gait_pelvis_turn", _id))
+		_twist_raw += angle_difference(_twist_raw, off)
+		if absf(_twist_raw) > deg_to_rad(200.0):
+			_twist_raw = wrapf(_twist_raw, -PI, PI)
+		target = clampf(_twist_raw, -torso_twist_max, torso_twist_max)
+	const W := 14.0
+	var steps := maxi(1, ceili(dt * W / 0.35))
+	var h := dt / steps
+	for k in steps:
+		_twist_v += (W * W * (target - torso_twist) - 2.0 * W * _twist_v) * h
+		_twist_v = clampf(_twist_v, -7.0, 7.0)
+		torso_twist += _twist_v * h
 
 
 # ------------------------------------------------------------------ per tick (SinewWorld)

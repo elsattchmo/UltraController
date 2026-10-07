@@ -147,6 +147,7 @@ public:
 	int64_t add_ball(const Vector3& position, const Vector3& velocity, double radius, double mass, double restitution = 0.35);
 	/// Estimated leg muscle effort per part from the gait's pose (Gait::leg_effort; -1: not a leg).
 	PackedFloat32Array character_gait_leg_effort(int character) const;
+	double character_gait_pelvis_turn(int character) const;
 	Vector3 character_gait_drive(int character, const Vector3& com, const Vector3& velocity, const Vector3& command, double dt);
 	/// {phase, stepping, cadence, duty, planted_l / r, ankle_l / r (drawn, rolling), plant_l / r (where
 	///  it was put down: locked), foothold_l / r}

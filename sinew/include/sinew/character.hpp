@@ -78,6 +78,9 @@ public:
 	/// Per part: a further stiffness factor on its muscle (hertz and damping) - e.g. a standing
 	/// hip, which holds the whole body above it through a light pelvis. Default 1.
 	void set_part_stiffness(int part, float k) { _parts[size_t(part)].stiffness = std::max(0.0f, k); }
+	/// Caps a muscle's torque (N m; < 0 = none) under its strength - e.g. a standing ankle can't push
+	/// harder than the weight on the foot times the ball's lever before the foot tips onto its toes.
+	void set_part_torque_cap(int part, float cap) { _parts[size_t(part)].torque_cap = cap; }
 
 	/// Root assist: hold the root part (pelvis) to `target` with a capped spring, the way a
 	/// balance controller would. strength 0 = off (the body stands or falls on its own).
@@ -142,6 +145,7 @@ private:
 		bool kinematic = false;
 		bool gravity_comp = true;
 		float stiffness = 1.0f;
+		float torque_cap = -1.0f;  // N m, < 0 = none
 	};
 	PhysicsWorld& _world;
 	std::shared_ptr<const Rig> _rig;

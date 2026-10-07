@@ -199,8 +199,15 @@ func test_balls_knock_the_part_they_hit() -> void:
 	var at := marker("spawn").global_position + Vector3(-12, 0, -3)
 	var shooter := _sinew(at + Vector3(0, 0, 6))
 	var t := _sinew_target(at)
-	await ticks(60)
 	var r := t.ragdoll as SinewRagdoll
+	# (It turns round to face the shooter in real steps first: wait for its feet to settle.)
+	await ticks(60)
+	for i in 240:
+		var gs: Dictionary = r.world.physics.call("character_gait_state", r._id)
+		if not bool(gs.get("stepping", false)):
+			break
+		await ticks(1)
+	await ticks(10)
 	var arm := r._part("RightLowerArm")
 	var chest := r._part("Chest")
 	var pelvis := 0

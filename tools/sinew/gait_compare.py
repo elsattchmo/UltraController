@@ -41,6 +41,13 @@ def sag(u):
     return math.degrees(math.atan2(u[2], -u[1]))
 
 
+MOVE = [0.0, 1.0]      # the motion in the character's frame (x right, z forward), from frames.json
+
+
+def along(p):
+    return p[0] * MOVE[0] + p[2] * MOVE[1]
+
+
 def metrics(b):
     out = {}
     for side, s in (("L", "Left"), ("R", "Right")):
@@ -51,10 +58,11 @@ def metrics(b):
         out["toe_h" + side] = toe[1]
         f = v(ankle, toe)
         out["foot_pitch" + side] = math.degrees(math.atan2(f[1], f[2]))  # + toes up (signed: past vertical reads past 90)
-        out["ankle_fwd" + side] = ankle[2] - b["Hips"][2]
+        out["ankle_fwd" + side] = along(ankle) - along(b["Hips"])     # ahead of the hips along the motion
         sh, el = b[s + "UpperArm"], b[s + "LowerArm"]
         out["arm" + side] = sag(v(sh, el))
     out["pelvis_h"] = b["Hips"][1]
+    out["gap"] = abs(b["LeftFoot"][0] - b["RightFoot"][0])                    # feet apart, sideways
     t = v(b["Hips"], b["Head"])
     out["trunk_lean"] = math.degrees(math.atan2(t[2], t[1]))                   # + leaning forward
     return out
@@ -62,7 +70,7 @@ def metrics(b):
 
 def strides(frames):
     """Frame indices where the left ankle is furthest forward (a local max over +-8 frames)."""
-    z = [f["bones"]["LeftFoot"][2] - f["bones"]["Hips"][2] for f in frames]
+    z = [along(f["bones"]["LeftFoot"]) - along(f["bones"]["Hips"]) for f in frames]
     out = []
     for i in range(8, len(z) - 8):
         if z[i] == max(z[i - 8:i + 9]) and (not out or i - out[-1] > 12):
@@ -112,6 +120,7 @@ def pick(ph, s, phase):
 def compare(root, pace):
     dc, dg = os.path.join(root, pace + "_clip"), os.path.join(root, pace + "_gait")
     c, g = load(dc), load(dg)
+    MOVE[:] = c.get("move", [0.0, 1.0])
     fc, fg = c["frames"], g["frames"]
     pc, per_c, sc = phased(fc)
     pg, per_g, sg = phased(fg)
@@ -124,7 +133,7 @@ def compare(root, pace):
         pace, speed_c, speed_g, per_c / 60, per_g / 60, speed_c * per_c / 60, speed_g * per_g / 60,
         120.0 / per_c, 120.0 / per_g))
     tc, tg = table(fc, pc), table(fg, pg)
-    keys = ["kneeL", "hipL", "ankle_hL", "toe_hL", "foot_pitchL", "ankle_fwdL", "pelvis_h", "trunk_lean", "armL"]
+    keys = ["kneeL", "hipL", "ankle_hL", "toe_hL", "foot_pitchL", "ankle_fwdL", "gap", "pelvis_h", "trunk_lean", "armL"]
     print("phase " + " ".join("%22s" % k for k in keys))
     worst = {k: 0.0 for k in keys}
     for b in range(BUCKETS):
@@ -132,11 +141,11 @@ def compare(root, pace):
         for k in keys:
             a, x = tc[b].get(k, 0.0), tg[b].get(k, 0.0)
             worst[k] = max(worst[k], abs(x - a))
-            unit = 100.0 if k in ("ankle_hL", "toe_hL", "ankle_fwdL", "pelvis_h") else 1.0
+            unit = 100.0 if k in ("ankle_hL", "toe_hL", "ankle_fwdL", "gap", "pelvis_h") else 1.0
             row.append("%7.1f %6.1f (%+6.1f)" % (a * unit, x * unit, (x - a) * unit))
         print("%4.2f  " % (b / BUCKETS) + " ".join(row))
-    print("worst |gait - clip|: " + ", ".join("%s %.1f%s" % (k, worst[k] * (100 if k in ("ankle_hL", "toe_hL", "ankle_fwdL", "pelvis_h") else 1),
-          " cm" if k in ("ankle_hL", "toe_hL", "ankle_fwdL", "pelvis_h") else " deg") for k in keys))
+    print("worst |gait - clip|: " + ", ".join("%s %.1f%s" % (k, worst[k] * (100 if k in ("ankle_hL", "toe_hL", "ankle_fwdL", "gap", "pelvis_h") else 1),
+          " cm" if k in ("ankle_hL", "toe_hL", "ankle_fwdL", "gap", "pelvis_h") else " deg") for k in keys))
     # Pictures.
     strip, over = [], []
     for k in range(PHASES):
@@ -164,6 +173,6 @@ def compare(root, pace):
 
 if __name__ == "__main__":
     root = sys.argv[1]
-    for pace in sys.argv[2:] or ["walk", "jog", "sprint"]:
+    for pace in sys.argv[2:] or sorted(d[:-5] for d in os.listdir(root) if d.endswith("_clip")):
         if os.path.isdir(os.path.join(root, pace + "_clip")) and os.path.isdir(os.path.join(root, pace + "_gait")):
             compare(root, pace)

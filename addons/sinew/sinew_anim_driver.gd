@@ -17,6 +17,8 @@ const XFADE := 0.2
 const HIT_HOLD := 0.7
 
 var _ref_walk := 0.8
+var _ref_back := 0.8      ## backing / side-step clips' own speeds (the walk scale is per direction)
+var _ref_side := 0.8
 var _ref_run := 4.8
 var _ref_sprint := 7.1
 var _hit_left := 0.0
@@ -41,6 +43,8 @@ func setup(p_player: AnimationPlayer, p_skeleton: Skeleton3D) -> void:
 	_ref_walk = anim_set.speed_of(&"walk_f", 0.8)
 	_ref_run = anim_set.speed_of(&"jog_f", 4.8)
 	_ref_sprint = anim_set.speed_of(&"sprint_f", 7.1)
+	_ref_back = anim_set.speed_of(&"walk_b", _ref_walk)
+	_ref_side = 0.5 * (anim_set.speed_of(&"strafe_l", _ref_walk) + anim_set.speed_of(&"strafe_r", _ref_walk))
 	tree = AnimationTree.new()
 	tree.name = "AnimationTree"
 	player.get_parent().add_child(tree)
@@ -281,8 +285,15 @@ func _drive_moves(sp: float) -> void:
 	var side := local.x
 	var dir := Vector2(side, fwd)
 	var r := 0.0                              # 0 idle .. 1 walk .. 2 run .. 3 sprint
-	if sp < _ref_walk:
-		r = sp / maxf(_ref_walk, 0.05)
+	# The walk point of THIS direction: its own clip's speed (measured against the forward walk a strafe
+	# sat between the strafe and idle and its feet slid).
+	var walk_ref := _ref_walk
+	if sp > 0.05:
+		var nn := dir.normalized()
+		var w_side := absf(nn.x) / maxf(absf(nn.x) + absf(nn.y), 1e-3)
+		walk_ref = lerpf(_ref_walk if nn.y >= 0.0 else _ref_back, _ref_side, w_side)
+	if sp < walk_ref:
+		r = sp / maxf(walk_ref, 0.05)
 	elif sp < _ref_run:
 		r = 1.0 + (sp - _ref_walk) / maxf(_ref_run - _ref_walk, 0.05)
 	else:
@@ -293,10 +304,9 @@ func _drive_moves(sp: float) -> void:
 		# Only forward goes past a walk (there are no backward / sideways runs among the defaults).
 		pos = Vector2(n.x * minf(r, 1.0), n.y * (r if n.y > 0.7 else minf(r, 1.0)))
 	tree.set(GROUND + "move/blend_position", pos)
-	var at_speed := sp
-	if r > 1.0 and absf(dir.normalized().y) < 0.7:
-		at_speed = _ref_walk
-	tree.set(GROUND + "move_ts/scale", clampf(sp / maxf(_speed_at(r), 0.05), 0.5, 2.0) if sp > 0.05 and at_speed == sp else 1.0)
+	# (Faster than a walk sideways / backing: that direction's walk clip, quicker - there's no run of it.)
+	var ref_now := walk_ref if r <= 1.0 or absf(dir.normalized().y) < 0.7 else _speed_at(r)
+	tree.set(GROUND + "move_ts/scale", clampf(sp / maxf(ref_now, 0.05), 0.5, 2.0) if sp > 0.05 else 1.0)
 
 
 func _speed_at(r: float) -> float:

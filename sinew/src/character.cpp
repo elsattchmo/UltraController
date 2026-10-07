@@ -324,6 +324,9 @@ void Character::pre_step(float dt) {
 		// knocked down mid-walk kept leading its last walking target and its feet buzzed).
 		p.prev_target = p.target;
 		m.strength = std::max(0.0f, strength - comp);
+		if (p.torque_cap >= 0.0f) {
+			m.strength = std::min(m.strength, p.torque_cap);
+		}
 		_world.set_muscle(p.muscle, def.frame_parent.p, m);
 	}
 	for (Part& p : _parts) {
