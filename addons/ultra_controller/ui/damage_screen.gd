@@ -51,6 +51,7 @@ var _ko_blur := 0.0
 var _tunnel := 0.0
 var _death_a := 0.0
 var _death_t := 0.0
+var _died_at := -1.0                 ## game clock (s) at the death: the recap is about that moment, whenever it's read
 var _pulse := 0.0
 var _was_dead := false
 ## The damage log (since the last respawn): {t, attacker, weapon, region, amount, kind}.
@@ -138,6 +139,7 @@ func _process(delta: float) -> void:
 		_reset()                          # respawned
 	if not _was_dead and dead:
 		_death_t = 0.0
+		_died_at = _clock()
 		_recap.text = recap_text()
 		_title.text = "YOU DIED"
 	_was_dead = dead
@@ -185,6 +187,7 @@ func _process(delta: float) -> void:
 
 func _reset() -> void:
 	hits.clear()
+	_died_at = -1.0
 	bled.clear()
 	lost.clear()
 	_heart = false
@@ -194,7 +197,7 @@ func _reset() -> void:
 func _on_hit(target_id: int, _pos: Vector3, _dir: Vector3, amount: float, attacker_id: int, region := -1, kind := &"bullet") -> void:
 	if not _mine(target_id) or kind == &"bleed":
 		return
-	hits.append({"t": Time.get_ticks_msec() / 1000.0, "attacker": _who(attacker_id), "weapon": _weapon(attacker_id, kind),
+	hits.append({"t": _clock(), "attacker": _who(attacker_id), "weapon": _weapon(attacker_id, kind),
 		"region": region, "amount": amount, "kind": kind})
 
 
@@ -254,6 +257,11 @@ func _add_bled(src: String, hp: float) -> void:
 	bled[src] = float(bled.get(src, 0.0)) + hp
 
 
+## Game time (physics ticks): the same on a slow and a fast machine.
+func _clock() -> float:
+	return Engine.get_physics_frames() / float(Engine.physics_ticks_per_second)
+
+
 ## How you died, as lines: the cause, then the hits (merged by who / what / where), limbs lost,
 ## blood lost by source.
 func recap_text() -> String:
@@ -265,7 +273,8 @@ func recap_text() -> String:
 		total_bled += float(bled[k])
 		if worst_src == "" or float(bled[k]) > float(bled[worst_src]):
 			worst_src = k
-	var recent := not last.is_empty() and Time.get_ticks_msec() / 1000.0 - float(last.t) < 0.6
+	var at := _died_at if _died_at >= 0.0 else _clock()
+	var recent := not last.is_empty() and at - float(last.t) < 0.6
 	if recent and last.kind != &"drown":
 		var where := " to the " + UltraLimbs.NAMES[int(last.region)] if int(last.region) >= 0 else ""
 		var by := " by " + String(last.attacker) if String(last.attacker) != "" else ""

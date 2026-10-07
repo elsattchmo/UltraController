@@ -20,6 +20,21 @@ const REGION_CHILDREN := {
 	Region.THIGH_L: [Region.SHIN_L], Region.THIGH_R: [Region.SHIN_R],
 }
 
+## Clips of the source models left out of their libraries (off-theme for this project: flying, dancing,
+## farming, sitting, spells, bows, female gaits...). The mannequin import skips them; tools/purge_clips.gd
+## takes them out of an already-saved library.
+const PURGED := [
+	"Flying_Forward", "Flying_Forward_Super", "Glide", "Levitate_Entrance", "Levitate_Idle",
+	"Dance_Body_Roll", "Dance_Charleston", "Dance_Reach_Hip", "Dance_Simple",
+	"Farm_Harvest", "Farm_PlantSeed", "Farm_Watering", "Fishing_Cast", "Fishing_Catch", "Fishing_Reel",
+	"Golf_Drive", "Golf_idle", "Driving", "Sitting_Enter", "Sitting_Exit", "Sitting_Idle", "Sitting_Talking",
+	"Sleeping", "Meditate", "Pushup", "Jumping_Jacks",
+	"Spell_Simple_Enter", "Spell_Simple_Exit", "Spell_Simple_Idle", "Spell_Simple_Shoot",
+	"Bow", "Bow_Pull_Back", "Bow_Pull_Hold", "Bow_Release",
+	"NinjaJump_Idle", "NinjaJump_Land", "NinjaJump_Start", "Run_Female", "Walk_Female",
+	"Cheer_One_arm", "Cheering_Two_Hands", "Victory", "Victory_Fist_Pump", "Salute", "Greeting",
+]
+
 ## Default loop rules (regex on clip name). First match wins.
 const LOOP_RULES := [
 	["^(Idle|Fighting_Idle|Crouch_Idle|Crouch_Fwd|Crouch_Walk|Swim_|Ladder_Idle|Climb_Ladder|Climb_Wall|Pipe_Climb|Ledge_Hang|Levitate|Pistol_Idle|Pistol_Aim|Sitting_Idle|Driving|Dance|Glide|Flying_)", 1],

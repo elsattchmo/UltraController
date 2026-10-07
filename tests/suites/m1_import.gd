@@ -31,7 +31,7 @@ func test_skeleton_is_humanoid() -> void:
 
 func test_library_and_loops() -> void:
 	var lib: AnimationLibrary = load(DIR + "anims/ual.res")
-	check(lib.get_animation_list().size() >= 179, "≥178 clips + RESET (%d)" % lib.get_animation_list().size())
+	check(lib.get_animation_list().size() >= 179 - UltraImportTools.PURGED.size(), "the 178 clips + RESET, less the purged ones (%d)" % lib.get_animation_list().size())
 	for n in ["Walk", "Jog", "Sprint", "Idle_A", "Jump_air", "Crouch_Walk", "Ledge_Hang", "Swim_Fwd", "Climb_Ladder"]:
 		check(lib.get_animation(n).loop_mode == Animation.LOOP_LINEAR, "%s loops" % n)
 	for n in ["Jump_Start", "Jump_Land", "Roll_RM", "Pistol_Shoot", "Death_A", "Interact"]:

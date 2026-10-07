@@ -31,6 +31,8 @@ func _process_animations(player: AnimationPlayer, skel: Skeleton3D, dir: String)
 	var baked := 0
 	for name in player.get_animation_list():
 		var a := player.get_animation(name).duplicate(true) as Animation
+		if String(name) in UltraImportTools.PURGED:
+			continue
 		if name == &"RESET":
 			lib.add_animation(name, a)
 			continue
