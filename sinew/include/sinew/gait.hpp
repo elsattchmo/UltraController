@@ -88,6 +88,7 @@ struct GaitSettings {
 	float drop_fall_standing = 0.3f;            ///< stopped: the hips come back up this fast (m/s)
 	float across_warp = 1.0f;                   ///< a clip's sideways foot offsets turn at most this far toward the travel (rad)
 	float run_drop_max = 0.06f;                 ///< at a run the hips sink at most this to reach a planted foot; further, it lifts (m)
+	float swing_speed_max = 16.0f;              ///< a swinging foot is drawn no faster than the body + this (m/s)
 	float teleport_dist = 0.6f;                 ///< the root moving further than this in one update = a teleport (m)
 	float drop_snap_rate = 1.0f, drop_snap_speed = 3.0f;   ///< the hips' drop never changes faster than rate + speed x this (m/s)
 	float drop_fall_clip = 0.4f;                ///< walking on a clip's legs: the hips come back up this fast (m/s)

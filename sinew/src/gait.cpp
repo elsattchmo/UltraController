@@ -1096,7 +1096,17 @@ void Gait::step_feet(float dt) {
 		drawn.yaw = f.land_yaw;
 		roll(drawn, f.pitch);
 		// (On the clip's path the ankle already is the clip's ankle: rolled only coming in to land.)
+		const Vec3 was = f.eff;
 		f.eff = f.pos + (drawn.eff - f.pos) * (on_path ? smoothstep(0.75f, 1.0f, s) : smooth(s));
+		// (Never faster than the body plus a foot's own swing: a hard brake-and-turn at a sprint retargeted
+		// a swing and flicked the foot 0.57 m in a tick.)
+		if (f.lift_t > 1) {
+			const float lim = (length(_vel) + _s.swing_speed_max) * dt;
+			const Vec3 d = f.eff - was;
+			if (length(d) > lim) {
+				f.eff = was + normalized(d) * lim;
+			}
+		}
 	}
 }
 
