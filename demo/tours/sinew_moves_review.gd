@@ -183,7 +183,7 @@ func _on_posed() -> void:
 			"vel": [_c.state.vel.x, _c.state.vel.z], "pos": [_c.state.pos.x, _c.state.pos.y, _c.state.pos.z],
 			"planted_l": bool(st.get("planted_l", true)), "planted_r": bool(st.get("planted_r", true)),
 			"stepping": bool(st.get("stepping", false)), "gait_on": _r != null and _r.gait,
-			"twist": _r.torso_twist if _r else 0.0, "pelvis_turn": float(st.get("pelvis_turn", 0.0)),
+			"twist": _r.torso_twist if _r else 0.0, "pelvis_turn": float(st.get("pelvis_turn", 0.0)), "drop": float(st.get("pelvis_drop", 0.0)),
 			"cadence": float(st.get("cadence", 0.0)), "dirw": float(st.get("clip_dirw", -1.0)),
 			"step_max": float(st.get("step_max", 0.0)), "sink": _sinks(bones)}
 

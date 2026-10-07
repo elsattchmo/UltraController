@@ -881,7 +881,11 @@ void Gait::step_feet(float dt) {
 		const float duty_i = own ? _cl.duty_f[i] : _duty;
 		// Up when the foot's stance share is over; down only when its swing is through (the cycle
 		// wraps) - a duty that changes mid-swing (braking from a run) never drops a foot early.
-		const bool swing = f.swinging ? p >= f.p : p >= duty_i;
+		bool swing = f.swinging ? p >= f.p : p >= duty_i;
+		if (!f.swinging && f.overreach && moving && p > 0.3f * duty_i) {
+			swing = true;
+		}
+		f.overreach = false;
 		const float m = moving ? std::clamp(_speed / std::max(_s.walk_speed, 0.1f), 0.0f, 1.0f) : 0.0f;
 		// Heel strike and roll only walking forward (backing / side-stepping: flat-footed).
 		const float toe_up = _s.toe_up * m * (1.0f - 0.8f * run) * fwdness;
@@ -1417,18 +1421,23 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		const float L = (l.upper_len + l.lower_len) * reach_share;
 		const Vec3 hip = P + rotate(Pq, rig.parts[size_t(l.upper)].frame_parent.p);
 		const Vec3 d = hip - _feet[i].eff;
-		float dh = length(flat(d, U));
+		const float dh = length(flat(d, U));
 		const float dz = dot(d, U);
 		// (A foot further out than the leg is long can't be reached by dropping - that sank the hips to
-		// 17 cm off the ground backing off a ledge; slow, it steps instead: the hurry rule lifts it. At a
-		// run it's the push-off's stretch: the hips go as low as they reasonably can, or the foot slides.)
+		// 17 cm off the ground backing off a ledge; slow, it steps instead: the hurry rule lifts it.)
 		if (dh > 0.98f * L) {
-			if (_speed < 2.0f) {
-				continue;
-			}
-			dh = 0.85f * L;
+			// (At a run it's left behind at push-off: it lifts rather than pull the hips down 40 cm.)
+			_feet[i].overreach = _speed > 2.0f;
+			continue;
 		}
 		const float allowed = std::sqrt(std::max(L * L - dh * dh, 0.0f));
+		// (At a run, a foot the hips would have to sink more than `run_drop_max` for lifts instead: a
+		// sprint's trailing foot pulled them down 35 cm in five ticks before it let go.)
+		if (_speed > 2.0f && dz - allowed > _s.run_drop_max) {
+			_feet[i].overreach = true;
+			drop = std::max(drop, std::min(dz - allowed, _s.run_drop_max));
+			continue;
+		}
 		drop = std::max(drop, dz - allowed);
 	}
 	drop = std::min(drop, _s.max_drop);

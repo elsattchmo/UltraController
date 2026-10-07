@@ -71,7 +71,7 @@ struct GaitSettings {
 	/// The largest catching offset for a change of motion that wasn't a disturbance (m): a braking step,
 	/// not a lunge. Disturbances (Gait::disturb: a push) get the whole capture offset.
 	float brake_reach = 0.3f;
-	float max_drop = 0.42f;                     ///< the hips never sink further than this to reach a foot (m)
+	float max_drop = 0.35f;                     ///< the hips never sink further than this to reach a foot (m)
 	float swing_clear = 0.03f;                  ///< a swinging sole clears the ground under it by this (m, mid-swing)               ///< rad a directional clip must be nearer by to take over
 	float leg_clear = 0.01f;                    ///< a swinging leg's capsules keep this far off the other leg's, m
 	/// Setting off slower than this (m/s) with the facing more than `pivot_turn` (rad) off the feet:
@@ -87,6 +87,7 @@ struct GaitSettings {
 	float cycle_bob = 0.6f, drop_rise = 0.15f, drop_fall = 0.06f, drop_slack = 0.06f;
 	float drop_fall_standing = 0.3f;            ///< stopped: the hips come back up this fast (m/s)
 	float across_warp = 1.0f;                   ///< a clip's sideways foot offsets turn at most this far toward the travel (rad)
+	float run_drop_max = 0.06f;                 ///< at a run the hips sink at most this to reach a planted foot; further, it lifts (m)
 	float teleport_dist = 0.6f;                 ///< the root moving further than this in one update = a teleport (m)
 	float drop_snap_rate = 1.0f, drop_snap_speed = 3.0f;   ///< the hips' drop never changes faster than rate + speed x this (m/s)
 	float drop_fall_clip = 0.4f;                ///< walking on a clip's legs: the hips come back up this fast (m/s)
@@ -184,6 +185,7 @@ public:
 	void disturb(float seconds) { _disturbed = std::max(_disturbed, seconds); }
 	/// The hips' yaw off the facing this tick (rad, + left): standing, they sit between feet and facing.
 	float pelvis_turn() const { return _pelvis_turn; }
+	float pelvis_drop() const { return _shown_drop; }   ///< how far the hips are lowered to reach the feet (m)
 	/// Per reference cycle: {authored speed, measured ground speed, stride m, duty, travel angle off the facing, rad} (debug).
 	std::vector<std::array<float, 5>> clip_info() const {
 		std::vector<std::array<float, 5>> out;
@@ -238,6 +240,7 @@ private:
 		Vec3 lift_off;       ///< swing on the clip's path: where it lifted, off that path (flat, world)
 		Quat land_yaw;       ///< the facing it will be put down with (the clip's foot angle on its path)
 		Vec3 path_dir;       ///< swinging: its own way of travel (turns toward the body's at a foot's pace)
+		bool overreach = false; ///< planted beyond the leg's reach at a run: it lifts next tick
 	};
 	const Rig& _rig;
 	const Limbs& _limbs;
