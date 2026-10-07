@@ -22,16 +22,27 @@ concurrency:
 
 jobs:
   core:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
       - name: Build and test the core
+        shell: bash
         run: |
-          cmake -S sinew -B build/sinew -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/sinew -j4
-          ctest --test-dir build/sinew --output-on-failure
+          set +e
+          { cmake -S sinew -B build/sinew -DCMAKE_BUILD_TYPE=Release &&
+            cmake --build build/sinew --config Release -j4 &&
+            ctest --test-dir build/sinew -C Release --output-on-failure; } 2>&1 | tee core.log
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            grep -iE "error|fatal|undefined|unresolved|failed" core.log | head -30 |
+              while IFS= read -r line; do echo "::error::${line:0:900}"; done
+            exit 1
+          fi
 
   extension:
     needs: core
@@ -51,9 +62,16 @@ jobs:
       - name: Build template_debug + template_release
         shell: bash
         run: |
+          # Failing lines go out as annotations too (readable through the API without the log).
+          set +e
           for t in template_debug template_release; do
-            cmake -S bindings/godot -B build/$t -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=$t
-            cmake --build build/$t --config Release -j4
+            { cmake -S bindings/godot -B build/$t -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=$t &&
+              cmake --build build/$t --config Release -j4; } 2>&1 | tee build-$t.log
+            if [ ${PIPESTATUS[0]} -ne 0 ]; then
+              grep -iE "error|fatal|undefined|unresolved" build-$t.log | grep -v "error_macros" | head -30 |
+                while IFS= read -r line; do echo "::error::$t: ${line:0:900}"; done
+              exit 1
+            fi
           done
           ls -la addons/sinew/bin
       - uses: actions/upload-artifact@v4
