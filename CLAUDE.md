@@ -1033,6 +1033,15 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   stepped first); fallen or careering > 0.9 m off the capsule -> offline `knock_down(com velocity)`, legs
   stay physical into the fall. A torso hit slackens only the torso, to `torso_relax_tone` 0.6 (all of the
   upper body at 0.25 folded it over). `balance_settings` passes any BalanceSettings field by name.
+- **Physics shows per part** (`SinewRagdoll.part_w` / `_update_parts`, GTA IV's way): powered, the body
+  plays the animation EXACTLY (this frame's pose, the IK included: hands on the gun, feet planted) and
+  turns physical only where something happens - standing still with empty hands the upper body (its idle
+  life); a hit: the struck chain for `hit_window` 0.9 s (arm hit = that arm from the shoulder; body / head =
+  the whole upper body); a stagger: everything; procedural control (`reach` etc.) its limb while driven.
+  Running / armed / carrying / traversal = animation. Weights ease in 0.15 s, out 0.3 s while the part is
+  still physical, then it goes kinematic. SinewPoseModifier writes EVERY part (an animated child under a
+  physical parent is set to its animated global pose). Before this the whole upper body was always physics
+  AFTER the IK passes: arms trailed at a run and the hands slid off the guns.
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
   data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
   coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),
@@ -1040,5 +1049,5 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   muscle). Cycles off / overlay (no depth test) / x-ray (skeleton meshes hidden). Tour `sinew_debug_review`.
   A new class_name needs `godot --headless --import` before a tour can use it (global class cache).
 - Tests: core `sinew_tests` (34), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
-  knock-down, death, sever, zombie) / s4 (reach, look, contacts, probes) / s5 (stagger recovers, a blow it
+  knock-down, death, sever, zombie) / s4 (reach, look, contacts, probes) / s3 also: animated when running / armed, a hit on the gun arm / s5 (stagger recovers, a blow it
   can't take knocks it down, light hits don't stagger). Tours `sinew_review`, `sinew_debug_review`.

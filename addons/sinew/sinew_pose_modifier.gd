@@ -28,8 +28,15 @@ func _process_modification_with_delta(_delta: float) -> void:
 		return
 	var to_skel := sk.global_transform.affine_inverse()
 	var f := Engine.get_physics_interpolation_fraction()
+	var pw := ragdoll.part_w
 	for i in n:          # parents first, so each part's local pose is taken against its placed parent
+		# Per part: physics where it's physical, else exactly this frame's animated pose (set
+		# explicitly - a physical parent would otherwise carry an animated child off its pose).
+		var k := blend * (pw[i] if i < pw.size() else 1.0)
+		if k <= 0.0:
+			sk.set_bone_global_pose(ragdoll.parts[i].bone, anim_pose[i])
+			continue
 		var w: Transform3D = ragdoll.pose_prev[i].interpolate_with(ragdoll.pose_now[i], f)
 		var phys := to_skel * w
-		var xf := anim_pose[i].interpolate_with(phys, blend) if blend < 1.0 else phys
+		var xf := anim_pose[i].interpolate_with(phys, k) if k < 1.0 else phys
 		sk.set_bone_global_pose(ragdoll.parts[i].bone, xf)

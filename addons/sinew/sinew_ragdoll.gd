@@ -55,6 +55,17 @@ var _last_anim_hips := Vector3.INF
 var _hit_relax := {}                         ## part -> seconds since a hit weakened its limb
 var _requests: Array = []                    ## procedural effectors for the coming tick: [method, args...]
 
+## Where physics shows, part by part (GTA IV's way): the body plays the animation EXACTLY - your
+## IK included (hands on the gun, feet on the ground) - and turns physical only where something
+## is happening: a hit makes the struck chain physical for `hit_window` s (an arm hit: that arm; a
+## body / head hit: the whole upper body), a stagger the legs too. Standing still with empty hands
+## the upper body stays physical (the muscles' idle life). Weights ease per part.
+@export var physical_below_speed := 0.8      ## m/s: faster than this the upper body plays the animation
+@export var hit_window := 0.9                ## s a struck chain stays physical
+var part_w := PackedFloat32Array()           ## per part: 0 = this frame's animation, 1 = physics (shown)
+var _dyn := PackedByteArray()                ## per part: dynamic in Sinew (else kinematic, following the animation)
+var _hit_t := {}                             ## part -> seconds of hit window left
+
 ## Stagger (S5): a hard enough hit on a standing body makes its legs physical and the balancer
 ## keeps it up - shifting its weight, stepping - until it's steady again (then the legs hand
 ## back to the animation over 0.3 s) or it can't: in single player that's a real knock-down.
@@ -122,6 +133,9 @@ func _make_character() -> void:
 	var sk := character.skeleton
 	_id = world.physics.call("add_character", _rig, _rigid(sk.global_transform), character.get_instance_id() % 30000 + 1)
 	world.physics.call("character_set_kinematic", _id, true)
+	_dyn = PackedByteArray()
+	part_w = PackedFloat32Array()
+	_hit_t.clear()
 	_powered_on = false
 	_severed = 0
 	pose_now = _pose()
@@ -162,7 +176,8 @@ func sinew_pre_step(dt: float) -> void:
 			_handback_t = -1.0
 			world.physics.call("character_set_pose", _id, anim, Vector3.ZERO)
 		_last_anim_hips = hips
-		# Powered: the legs walk the animation, the upper body's muscles track it.
+		# Powered: the animation drives what isn't physical right now (see part_w).
+		_update_parts(dt)
 		world.physics.call("character_move_kinematic", _id, _handback(anim, dt), dt)
 		world.physics.call("character_set_targets", _id, anim)
 		_relax_hit_limbs(dt)
@@ -219,21 +234,25 @@ func _apply_requests() -> void:
 
 ## Reach an arm's hand to a world point (out of range: it stretches toward it).
 func reach(limb: Limb, point: Vector3, weight := 1.0) -> void:
+	_drive_parts(_limb_parts(limb))
 	_requests.append(["character_reach", limb, point, weight])
 
 
 ## Turn the head toward a world point (at most max_angle off the animated look).
 func look_toward(point: Vector3, weight := 1.0, max_angle := 1.2) -> void:
+	_drive_parts(_limb_parts(Limb.NECK))
 	_requests.append(["character_look_at", point, weight, max_angle])
 
 
 ## Put a leg's ankle at a world point, the foot keeping its animated orientation.
 func place_foot(limb: Limb, ankle: Vector3, weight := 1.0) -> void:
+	_drive_parts(_limb_parts(limb))
 	_requests.append(["character_place_foot", limb, ankle, weight])
 
 
 ## Lean the spine: pitch forward (+) / back, roll to the body's right (+) / left, radians.
 func lean(pitch: float, roll: float, weight := 1.0) -> void:
+	_drive_parts(_limb_parts(Limb.SPINE))
 	_requests.append(["character_lean", pitch, roll, weight])
 
 
@@ -242,7 +261,33 @@ func lean(pitch: float, roll: float, weight := 1.0) -> void:
 func set_part_target(part_name: String, local: Quaternion, weight := 1.0) -> void:
 	var i := _part(part_name)
 	if i >= 0:
+		_drive_parts([i])
 		_requests.append(["character_set_effector", i, local, weight])
+
+
+## Code driving a limb makes it physical while it does (and ~0.2 s after), even when the body
+## would otherwise play the animation there (gun in hand, running).
+func _drive_parts(chain: Array) -> void:
+	for i in chain:
+		if not _walks(i):
+			_hit_t[i] = maxf(float(_hit_t.get(i, 0.0)), 0.2)
+
+
+func _limb_parts(limb: Limb) -> Array:
+	var names: Array = []
+	match limb:
+		Limb.ARM_L: names = ["LeftShoulder", "LeftUpperArm", "LeftLowerArm", "LeftHand"]
+		Limb.ARM_R: names = ["RightShoulder", "RightUpperArm", "RightLowerArm", "RightHand"]
+		Limb.LEG_L: names = ["LeftUpperLeg", "LeftLowerLeg", "LeftFoot"]
+		Limb.LEG_R: names = ["RightUpperLeg", "RightLowerLeg", "RightFoot"]
+		Limb.SPINE: names = ["Spine", "Chest", "UpperChest"]
+		Limb.NECK: names = ["Neck"]
+	var out := []
+	for n in names:
+		var i := _part(n)
+		if i >= 0:
+			out.append(i)
+	return out
 
 
 ## {present, attached, health, end_position, end_velocity, contact, end_contact, reach}
@@ -278,8 +323,8 @@ func _power(on: bool) -> void:
 		if not anim.is_empty():
 			world.physics.call("character_set_pose", _id, anim, Vector3.ZERO)
 			world.physics.call("character_set_targets", _id, anim)
-		for i in parts.size():
-			world.physics.call("character_set_part_kinematic", _id, i, _walks(i))
+		_all_parts(false, 0.0)      # _update_parts turns on what should be physical
+		_hit_t.clear()
 		world.physics.call("character_set_tone", _id, 1.0)
 		world.physics.call("character_set_stiffness", _id, powered_stiffness)
 		world.physics.call("character_set_gravity_compensation", _id, 1.0)
@@ -287,7 +332,7 @@ func _power(on: bool) -> void:
 			world.physics.call("character_set_part_tone", _id, i, 1.0 if bool(world.physics.call("character_attached", _id, i)) else 0.0)
 	else:
 		world.physics.call("character_set_root_assist", _id, Transform3D(), 0.0, 1.0 / 60.0)
-		world.physics.call("character_set_kinematic", _id, true)
+		_all_parts(false, 0.0)
 
 
 ## Struck limbs come back to full tone over hit_relax_time.
@@ -333,6 +378,87 @@ func _walks(i: int) -> bool:
 	return i == 0 or n.contains("Leg") or n.contains("Foot")
 
 
+## Dynamic (physics) or kinematic (following the animation) in Sinew, tracked here.
+func _set_dyn(i: int, on: bool) -> void:
+	if _dyn.size() != parts.size():
+		_dyn.resize(parts.size())
+		part_w.resize(parts.size())
+	if bool(_dyn[i]) == on:
+		return
+	_dyn[i] = 1 if on else 0
+	world.physics.call("character_set_part_kinematic", _id, i, not on)
+
+
+func _all_parts(dyn: bool, w: float) -> void:
+	_dyn.resize(parts.size())
+	part_w.resize(parts.size())
+	for i in parts.size():
+		_dyn[i] = 1 if dyn else 0
+		part_w[i] = w
+	world.physics.call("character_set_kinematic", _id, not dyn)
+
+
+## Hands busy or on the move: the upper body plays the animation (and the IK on it).
+func _upper_animated() -> bool:
+	var st := character.state
+	if st.held_uid != 0 or st.held_id != 0:
+		return true
+	if st.state not in [MotorState.Id.IDLE, MotorState.Id.CROUCH, MotorState.Id.TURN_IN_PLACE, MotorState.Id.MOVE]:
+		return true
+	return Vector2(st.vel.x, st.vel.z).length() > physical_below_speed
+
+
+func _update_parts(dt: float) -> void:
+	if _dyn.size() != parts.size():
+		_all_parts(false, 0.0)
+	for k in _hit_t.keys():
+		_hit_t[k] = float(_hit_t[k]) - dt
+		if _hit_t[k] <= 0.0:
+			_hit_t.erase(k)
+	var calm := not _upper_animated()
+	var legs := _stagger_t >= 0.0 or _handback_t >= 0.0
+	for i in parts.size():
+		if not bool(world.physics.call("character_attached", _id, i)):
+			part_w[i] = 1.0          # a cut-off piece is all physics
+			continue
+		var want: bool
+		if _walks(i):
+			want = legs
+		else:
+			want = calm or _stagger_t >= 0.0 or _hit_t.has(i)
+		if _walks(i):
+			# The legs go physical with a stagger and come back through the hand-back glide (whose
+			# kinematic targets ARE the glide): show them for exactly as long.
+			if want:
+				_set_dyn(i, _stagger_t >= 0.0)
+			part_w[i] = 1.0 if want else 0.0
+			continue
+		if want:
+			_set_dyn(i, true)
+			part_w[i] = minf(part_w[i] + dt / 0.15, 1.0)
+		else:
+			# Ease the picture back to the animation while the part is still physical, then
+			# let the animation drive it (no pop: by then nothing of the physics shows).
+			part_w[i] = maxf(part_w[i] - dt / 0.3, 0.0)
+			if part_w[i] <= 0.0:
+				_set_dyn(i, false)
+
+
+## The chain a hit on `part` makes physical: an arm from its shoulder down; else the upper body.
+func _hit_chain(part: int) -> Array:
+	var torso := UltraLimbs.Region.TORSO
+	if int(parts[part].region) != torso and int(parts[part].region) != UltraLimbs.Region.HEAD:
+		var top := part
+		while int(parts[top].parent) >= 0 and int(parts[int(parts[top].parent)].region) != torso:
+			top = int(parts[top].parent)
+		return _subtree(top)
+	var out := []
+	for i in parts.size():
+		if not _walks(i):
+			out.append(i)
+	return out
+
+
 ## A hit: push the part it struck (the body flinches for real; the muscles bring it back).
 ## Called on every machine from the replicated `hit` event, like the hit clip.
 func hit(region: int, dir: Vector3, amount: float) -> void:
@@ -343,6 +469,12 @@ func hit(region: int, dir: Vector3, amount: float) -> void:
 		part = _part("Spine")          # the legs walk the animation: the shot rocks the body
 		if part < 0:
 			return
+	if _powered_on and _dyn.size() == parts.size():
+		# The struck chain turns physical (at once: its physics pose is the animated one) for a while.
+		for i in _hit_chain(part):
+			_hit_t[i] = hit_window
+			_set_dyn(i, true)
+			part_w[i] = 1.0
 	# The struck part's middle: a capsule's centre in world space.
 	var xf: Transform3D = pose_now[part] if part < pose_now.size() else Transform3D()
 	var impulse := dir.normalized() * minf(amount * hit_impulse_per_damage, hit_impulse_max)
@@ -366,8 +498,9 @@ func start_stagger() -> void:
 	_steady_t = 0.0
 	_handback_t = -1.0
 	for i in parts.size():
-		if _walks(i) and bool(world.physics.call("character_attached", _id, i)):
-			world.physics.call("character_set_part_kinematic", _id, i, false)
+		if bool(world.physics.call("character_attached", _id, i)):
+			_set_dyn(i, true)          # the whole body (the upper body balances too)
+			part_w[i] = 1.0
 	world.physics.call("character_balance_enable", _id, true, balance_settings)
 	world.physics.call("character_balance_reset", _id)
 
@@ -420,7 +553,7 @@ func _end_stagger(handback: bool, legs_kinematic := true) -> void:
 	world.physics.call("character_balance_enable", _id, false, {})
 	for i in parts.size():
 		if _walks(i) and legs_kinematic:
-			world.physics.call("character_set_part_kinematic", _id, i, true)
+			_set_dyn(i, false)
 	if not handback or pose_now.is_empty():
 		return
 	var anim := _anim_world()
@@ -495,7 +628,7 @@ func start() -> void:
 		if not was_physical:
 			world.physics.call("character_set_pose", _id, anim, character.state.vel)
 		world.physics.call("character_set_targets", _id, anim)
-	world.physics.call("character_set_kinematic", _id, false)
+	_all_parts(true, 1.0)
 	# The knock-down push (a powered body keeps its own motion and gets the push on top).
 	if was_physical:
 		world.physics.call("character_add_velocity", _id, character.state.vel, 1.0, 1.0)
@@ -530,7 +663,7 @@ func stop() -> void:
 	_fade = 0.0
 	modifier.blend = 0.0
 	_powered_on = false
-	world.physics.call("character_set_kinematic", _id, true)
+	_all_parts(false, 0.0)
 	var anim := _anim_world()
 	if not anim.is_empty():
 		world.physics.call("character_set_pose", _id, anim, Vector3.ZERO)
