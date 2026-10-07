@@ -950,6 +950,9 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   -DGODOTCPP_TARGET=template_debug && cmake --build build/godot --config Release`. Box3D links the MSVC
   runtime statically: every target must too (`CMAKE_MSVC_RUNTIME_LIBRARY` set in both CMakeLists -
   godot-cpp sets it on its own target only; the binding's objects came out /MD and the link failed).
+  Each build job uploads ONLY its own platform's files (`libsinew.<platform>.*`): uploading `bin/*.dll`
+  from the Linux runner carried the stale committed DLLs, the commit job's merge let them win, and
+  Windows players got the S3 DLL with the S5 scripts ("Nonexistent function character_muscle_effort").
   CI job logs are on a host this cloud session can't reach: failing build lines are echoed as
   annotations (`gh api repos/<owner>/<repo>/check-runs/<job id>/annotations`).
 - **Main menu Character section** (`demo/characters/character_models.gd` = `CharacterModels`): Controller

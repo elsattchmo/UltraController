@@ -77,9 +77,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: sinew-${{ matrix.name }}
-          path: |
-            addons/sinew/bin/*.dll
-            addons/sinew/bin/*.so
+          # ONLY this runner's own platform: the checkout also holds the other platform's committed
+          # (stale) binaries, and the commit job merges every artifact - last one in wins.
+          path: addons/sinew/bin/libsinew.${{ matrix.name }}.*
+          if-no-files-found: error
 
   commit:
     needs: extension
@@ -96,6 +97,11 @@ jobs:
           merge-multiple: true
       - name: Commit the binaries
         run: |
+          # Every platform's debug + release library must be here, fresh from this run.
+          for f in libsinew.windows.template_debug.x86_64.dll libsinew.windows.template_release.x86_64.dll \
+                   libsinew.linux.template_debug.x86_64.so libsinew.linux.template_release.x86_64.so; do
+            test -f addons/sinew/bin/$f || { echo "::error::missing $f"; exit 1; }
+          done
           git config user.name "sinew-ci"
           git config user.email "sinew-ci@users.noreply.github.com"
           git add -f addons/sinew/bin/*.dll addons/sinew/bin/*.so
