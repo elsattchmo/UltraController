@@ -1084,6 +1084,12 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   where it was put down (locked). Step length <= `step_max_walk` 0.62 / `step_max_run` 1.15 x leg length
   (cadence rises for short legs, up to 5 steps/s). Measuring a planted foot: the smaller of the ankle's and
   the toe's frame-to-frame move (one of them is the pivot). Tour `sinew_gait_review` (side on).
+- **Unarmed push** (test tool, `SinewCharacter.push` / `can_push`): empty hands (no prop held,
+  nothing equipped, on the ground) + the throw button (`uc_throw`, the one that throws a held box):
+  a tap shoves the character in front 3 m/s (rocks it back ~20 cm), holding charges to 5 m/s over
+  0.8 s (past `shove_knockdown` 3.5: knocked over); loose props get the same dv x mass (<= 80 kg).
+  A 0-damage `impact` DamageInfo with `shove`, applied PUSH_CONTACT 0.18 s after the release by the
+  authority; arms = SinewAnimDriver `play_push` (UAL Push, upper-body one-shot). Suite s8.
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
   data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
   coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),

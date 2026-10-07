@@ -20,6 +20,10 @@ var _ref_walk := 0.8
 var _ref_run := 4.8
 var _ref_sprint := 7.1
 var _hit_left := 0.0
+var _push_left := 0.0
+## Push clip: when its arms are out (s, as authored) / how long they stay out.
+const PUSH_OUT_AT := 0.35
+const PUSH_OUT_HOLD := 0.3
 var _sw_left := 0.0
 var _item_clip_role := &""
 var item_w := 0.0
@@ -160,7 +164,22 @@ func _build_sinew() -> AnimationNodeBlendTree:
 	root.connect_node("hit_ts", 0, "hit_src")
 	root.connect_node("hit", 0, "swing")
 	root.connect_node("hit", 1, "hit_ts")
-	root.connect_node("output", 0, "hit")
+	# --- unarmed push: both arms out from the chest (upper body)
+	var push := AnimationNodeOneShot.new()
+	push.fadein_time = 0.1
+	push.fadeout_time = 0.3
+	push.fadein_curve = _ease_curve()
+	push.fadeout_curve = _ease_curve()
+	push.filter_enabled = true
+	for b in _upper_body_bones():
+		push.set_filter_path(NodePath("%" + String(skeleton.name) + ":" + b), true)
+	root.add_node("push", push, Vector2(900, 0))
+	root.add_node("push_src", _role_node(&"push" if _role_anim(&"push") else &"idle", false), Vector2(150, 560))
+	root.add_node("push_ts", AnimationNodeTimeScale.new(), Vector2(350, 560))
+	root.connect_node("push_ts", 0, "push_src")
+	root.connect_node("push", 0, "hit")
+	root.connect_node("push", 1, "push_ts")
+	root.connect_node("output", 0, "push")
 	return root
 
 
@@ -189,6 +208,10 @@ func _process(delta: float) -> void:
 		if _hit_left <= 0.0:
 			tree.set("parameters/hit/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
 	_sw_left = maxf(_sw_left - delta, 0.0)
+	if _push_left > 0.0:
+		_push_left -= delta
+		if _push_left <= 0.0:
+			tree.set("parameters/push/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
 
 
 func _wanted() -> String:
@@ -334,9 +357,19 @@ func play_swing(sw: Dictionary) -> void:
 	_sw_left = (seg.y - seg.x) / rate
 
 
+## The unarmed push: the push clip's arms-out part, sped up so the hands are out at `contact` s,
+## held a moment, then faded.
+func play_push(contact: float) -> void:
+	if tree == null or _role_anim(&"push") == null:
+		return
+	tree.set("parameters/push_ts/scale", clampf(PUSH_OUT_AT / maxf(contact, 0.05), 0.5, 3.0))
+	tree.set("parameters/push/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+	_push_left = contact + PUSH_OUT_HOLD
+
+
 ## A one-shot owns the upper body (Sinew's gait leaves it to the clip meanwhile).
 func upper_busy() -> bool:
-	return _hit_left > 0.0 or _sw_left > 0.0
+	return _hit_left > 0.0 or _sw_left > 0.0 or _push_left > 0.0
 
 
 func item_event(_kind: StringName, _data := {}) -> void:
