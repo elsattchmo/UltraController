@@ -447,12 +447,17 @@ Gait::ClipLegs Gait::clip_legs(float speed, float theta) const {
 		out.across[f].assign(n, 0.0f);
 		out.yaw[f].assign(n, 0.0f);
 	}
+	float top = 0.0f;
 	for (auto& [i, w0] : ws) {
 		if (w0 <= 1e-4f) {
 			continue;
 		}
 		const float w = w0 / total;
 		const ClipLegs& C = _clip[i];
+		if (w > top) {
+			top = w;
+			out.angle = C.angle;     // (the way the blend travels: its main clip's - forward clips are all 0)
+		}
 		out.stride += C.stride * w;
 		out.duty += C.duty * w;
 		out.ahead += C.ahead * w;
@@ -853,7 +858,17 @@ void Gait::step_feet(float dt) {
 		// (A swinging foot's own way of travel: it turns toward a new one at a foot's pace - a reversal
 		// mid-step flipped the path and the foot jumped across at 45 m/s.)
 		const Vec3 pd = _feet[i].swinging && length(_feet[i].path_dir) > 0.5f ? _feet[i].path_dir : path_dir;
-		const Vec3 ps = length(pd) > 0.5f ? normalized(cross(U, pd)) : path_side;
+		Vec3 ps = length(pd) > 0.5f ? normalized(cross(U, pd)) : path_side;
+		if (length(pd) > 0.5f) {
+			// Across is the clip's own sideways (off ITS way of travel), turned toward the real one by no
+			// more than a warp: a forward clip's paths laid along a backward travel mirrored the feet - a
+			// foot that lifted standing (forward clip) and was sent back-right landed on the other side.
+			Vec3 F = flat(rotate(_root.q, _rig.forward), U);
+			F = length(F) > 1e-4f ? normalized(F) : Vec3{ 0, 0, 1 };
+			const Vec3 dc = rotate(axis_angle(U, C.angle), F);
+			const float a = std::atan2(dot(cross(dc, pd), U), dot(dc, pd));
+			ps = normalized(cross(U, rotate(axis_angle(U, std::clamp(a, -_s.across_warp, _s.across_warp)), dc)));
+		}
 		return pd * (sample_at(C.fwd[i], ph) * 2.0f * _step_max) + ps * sample_at(C.across[i], ph);
 	};
 	auto path_at = [&](const ClipLegs& C, int i, float ph) { return flat(_root.p, U) + clip_off(C, i, ph); };
