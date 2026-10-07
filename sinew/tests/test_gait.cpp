@@ -162,18 +162,34 @@ TEST_CASE("gait: ramps - planted soles lie on the slope as they do on the flat")
 	// (The rig's foot is one rigid box: up on the ball its toe end dips ~3.5 cm even on the flat - in the game
 	// the toes bend. A slope must be no worse than that.)
 	float flat_in = 0.0f, flat_lying = 0.0f;
-	for (const float deg : { 0.0f, 15.0f, 25.0f }) {
+	struct Case {
+		float deg;
+		bool down;
+	};
+	for (const Case cs : { Case{ 0.0f, false }, Case{ 15.0f, false }, Case{ 25.0f, false }, Case{ 15.0f, true }, Case{ 25.0f, true } }) {
+		const float deg = cs.deg;
 		Walker w;
-		// A slab rising toward +Z from z = 1 (its top through y 0 there).
+		// A slab rising toward +Z from z = 1 (its top through y 0 there); down: from its top, facing -Z.
 		const float a = deg * 3.14159265f / 180.0f;
 		const Quat q = axis_angle(Vec3{ 1, 0, 0 }, -a);
 		const Vec3 dir{ 0, std::sin(a), std::cos(a) }, n = rotate(q, Vec3{ 0, 1, 0 });
 		w.world.add_static_box(Transform{ Vec3{ 0, 0, 1 } + dir * 4.0f - n * 0.05f, q }, Vec3{ 2, 0.05f, 4 });
+		if (cs.down) {
+			w.root.p = Vec3{ 0, 0, 1 } + dir * 7.5f;
+			w.root.q = axis_angle(Vec3{ 0, 1, 0 }, 3.14159265f);
+			w.gait->reset(w.root);
+			for (int i = 0; i < 2; ++i) {
+				w.last[i] = w.gait->plant(i);
+				w.last_ball[i] = w.gait->plant_ball(i);
+				w.last_heel[i] = w.gait->plant_heel(i);
+			}
+		}
+		const Vec3 vel = cs.down ? Vec3{ 0, 0, -1.0f } : Vec3{ 0, 0, 1.0f };
 		const int foot[2] = { w.limbs->limb(LimbId::LegL).end, w.limbs->limb(LimbId::LegR).end };
 		float worst_in = 0.0f;
 		int lying = 0, checked = 0;
 		for (int t = 0; t < 300; ++t) {
-			w.run(Vec3{ 0, 0, 1.0f }, DT);
+			w.run(vel, DT);
 			for (int i = 0; i < 2; ++i) {
 				const Vec3 an = w.gait->plant(i);
 				if (!w.gait->foot_planted(i) || an.z < 1.6f || an.z > 7.0f) {
@@ -198,7 +214,7 @@ TEST_CASE("gait: ramps - planted soles lie on the slope as they do on the flat")
 				lying += hi < 0.03f ? 1 : 0;
 			}
 		}
-		MESSAGE("ramp ", deg, " deg: worst sole corner inside ", worst_in * 100.0f, " cm, flat on it ", lying, " of ", checked, " planted frames");
+		MESSAGE("ramp ", deg, cs.down ? " deg down" : " deg up", ": worst sole corner inside ", worst_in * 100.0f, " cm, flat on it ", lying, " of ", checked, " planted frames");
 		CHECK(checked > 50);
 		if (deg == 0.0f) {
 			flat_in = worst_in;
