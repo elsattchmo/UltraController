@@ -49,7 +49,8 @@ func test_single_player_plays_the_picked_character() -> void:
 		return
 	check(c.body_profile.cut_scene.resource_path.begins_with("res://assets/characters/zombie/"), "wearing the zombie model (cut set %s)" % c.body_profile.cut_scene.resource_path)
 	check(c.body_profile.visual_tier == BodyProfile.Tier.FULL, "at the player's FULL visual tier")
-	check((c as SinewCharacter).physics != null, "with a live Sinew world")
+	# The Sinew body is the visual body: headless main builds none (suite s2 builds them).
+	check(c.build_visuals or (c as SinewCharacter).physics == null, "headless: no visual body, so no Sinew body")
 	main.call("set_controller", "ultra")
 	check(main.get("controller") == "sinew", "the pick can't change mid-session")
 	var dummy := UltraNet.spawn_bot("Dummy T", Transform3D(Basis(), c.state.pos + Vector3(3, 0, 0)))

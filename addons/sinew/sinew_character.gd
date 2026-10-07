@@ -4,8 +4,9 @@ extends UltraCharacter
 ## addons/sinew/bin). It inherits movement, weapons, input, net and HUD from UltraCharacter
 ## untouched; Sinew takes over the body: ragdoll, hit reactions, balance, behaviours.
 ##
-## Stage S0: a stand-in. It plays exactly like the UltraController and only proves the
-## extension loads (`physics` is a live Sinew world). S2 swaps the body in.
+## Stage S2: the body you see is Sinew's. Standing it follows the animation; knocked down,
+## dead or falling it's a muscled physics body (SinewRagdoll replaces the UltraRagdoll the base
+## builds), lying in Sinew's mirror of the level and handing back to the get-up clips.
 
 ## The Sinew physics world this character's body lives in (null if the extension didn't load).
 var physics: RefCounted
@@ -13,10 +14,27 @@ var physics: RefCounted
 
 func _ready() -> void:
 	super._ready()
-	if ClassDB.class_exists(&"SinewPhysics"):
-		physics = ClassDB.instantiate(&"SinewPhysics")
-	else:
+	if not SinewWorld.available():
 		push_warning("Sinew: the GDExtension isn't loaded (addons/sinew/bin) - playing as a plain UltraCharacter")
+
+
+func _build_visual() -> void:
+	super._build_visual()
+	if not SinewWorld.available() or ragdoll == null or skeleton == null:
+		return
+	# The base made an UltraRagdoll (a PhysicalBoneSimulator3D in the skeleton's stack): out.
+	var old := ragdoll
+	if old.sim:
+		old.sim.get_parent().remove_child(old.sim)
+		old.sim.queue_free()
+	remove_child(old)
+	old.queue_free()
+	var r := SinewRagdoll.new()
+	r.name = "RagdollFX"
+	ragdoll = r
+	add_child(r)
+	r.setup(self)
+	physics = r.world.physics
 
 
 ## "sinew 0.1.0 (box3d <commit>)", or "" without the extension.
