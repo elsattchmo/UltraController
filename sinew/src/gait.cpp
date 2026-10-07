@@ -1,5 +1,7 @@
 #include "sinew/gait.hpp"
 
+#include "sinew/balance.hpp"
+
 #include "sinew/math.hpp"
 
 #include <algorithm>
@@ -128,6 +130,9 @@ void Gait::reset(const Transform& root) {
 	_vel = Vec3{};
 	_warp = 0.0f;
 	_warp_back = false;
+	_drop = 0.0f;
+	_drive_acc = Vec3{};
+	_trim = Vec3{};
 	_lean = _lean_v = _acc = _prev_vel = Vec3{};
 	_phase = 0.0f;
 	_stepping = false;
@@ -147,8 +152,11 @@ void Gait::reset(const Transform& root) {
 }
 
 void Gait::update(const GaitInput& in) {
+	_dt = std::max(in.dt, 1e-4f);
 	_root = in.root;
 	_vel = flat(in.velocity, up());
+	_has_cmd = in.has_command;
+	_cmd = in.has_command ? flat(in.command, up()) : _vel;
 	// A teleport: start again where it is now.
 	if (length(flat(_feet[0].pos - home(0), up())) > 2.5f || length(flat(_feet[1].pos - home(1), up())) > 2.5f) {
 		reset(in.root);
@@ -198,7 +206,8 @@ void Gait::update_lean(float dt) {
 void Gait::step_feet(float dt) {
 	const Vec3 U = up();
 	_speed = length(_vel);
-	const bool moving = _speed > _s.stop_speed;
+	const float want_speed = std::max(_speed, length(_cmd));
+	const bool moving = want_speed > _s.stop_speed;
 	_duty = moving ? _s.duty_walk + (_s.duty_run - _s.duty_walk) * smoothstep(_s.walk_speed, _s.run_speed, _speed) : _s.duty_walk;
 	const float run = smoothstep(_s.walk_speed, _s.run_speed, _speed);
 	// Hip warp toward the travel (off the facing), eased.
@@ -236,7 +245,7 @@ void Gait::step_feet(float dt) {
 	}
 	const float step_max = (_s.step_max_walk + (_s.step_max_run - _s.step_max_walk) * run) * _leg_len * dir_scale;
 	_step_max = step_max;
-	_cadence = moving ? std::clamp(std::max(_s.cadence_base + _s.cadence_per_ms * _speed, _speed / std::max(step_max, 0.1f)),
+	_cadence = moving ? std::clamp(std::max(_s.cadence_base + _s.cadence_per_ms * want_speed, want_speed / std::max(step_max, 0.1f)),
 								_s.cadence_idle * 0.8f, _s.cadence_max)
 					  : _s.cadence_idle;
 	// Keep stepping while moving, while a foot is in the air, or while a foot is off its spot
@@ -260,7 +269,7 @@ void Gait::step_feet(float dt) {
 		auto score = [&](int i) {
 			const Foot& f = _feet[i];
 			if (moving) {
-				return -dot(flat(f.pos - _root.p, U), _vel);
+				return -dot(flat(f.pos - _root.p, U), _speed > 0.05f ? _vel : _cmd);
 			}
 			return length(flat(f.pos - home(i), U)) + 0.2f * angle_between(f.yaw, legs_q());
 		};
@@ -309,6 +318,8 @@ void Gait::step_feet(float dt) {
 		// Heel strike and roll only walking forward (backing / side-stepping: flat-footed).
 		const float toe_up = _s.toe_up * m * (1.0f - 0.8f * run) * fwdness;
 		const float heel_rise = _s.heel_rise * m * (0.35f + 0.65f * fwdness);
+		// Running: up on the ball of the foot the whole stance (landing on the forefoot), more at a sprint.
+		const float fore = (_s.forefoot_run * run + (_s.forefoot_sprint - _s.forefoot_run) * smoothstep(_s.run_speed, _s.sprint_speed, _speed)) * fwdness;
 		if (swing && !f.swinging) {
 			f.swinging = true;
 			f.lift = f.eff;
@@ -329,7 +340,9 @@ void Gait::step_feet(float dt) {
 			f.target = f.pos;
 			// Heel strike (toes up, rolling flat), then the heel rising round the ball.
 			const float q = std::clamp(p / std::max(_duty, 1e-3f), 0.0f, 1.0f);
-			float pitch = -toe_up * (1.0f - smoothstep(0.0f, 0.2f, q)) + heel_rise * smoothstep(0.5f, 1.0f, q);
+			const float walk_pitch = -toe_up * (1.0f - smoothstep(0.0f, 0.2f, q)) + heel_rise * smoothstep(0.5f, 1.0f, q);
+			const float run_pitch = fore + std::max(heel_rise - fore, 0.0f) * smoothstep(0.6f, 1.0f, q);
+			float pitch = walk_pitch + (run_pitch - walk_pitch) * run;
 			// At the foot's own pace (a hurried cycle mustn't whip the planted foot over).
 			const float lim = _s.roll_rate * dt;
 			pitch = f.pitch + std::clamp(pitch - f.pitch, -lim, lim);
@@ -342,7 +355,27 @@ void Gait::step_feet(float dt) {
 		if (moving) {
 			const float t_rem = (1.0f - p) / rate;
 			const float stance_t = _duty / rate;
-			land = hip_ground(i) + _vel * (t_rem + 0.5f * stance_t);
+			// Where the hip will be at touchdown, plus half the coming stance at the wanted motion,
+			// plus the capture offset of the difference (a body to brake: further ahead).
+			const Vec3 at_td = hip_ground(i) + _vel * t_rem;
+			const float omega = std::sqrt(9.81f / std::max(_pelvis_h, 0.4f));
+			const Vec3 want = _cmd + _trim;
+			Vec3 reach = _cmd * (0.5f * stance_t) + (_vel - want) * (_s.capture_gain / omega);
+			// Never behind the hip along the way it's going: speeding up puts the foot under the body,
+			// not back where an upright leg can't reach it (the push comes off the heel instead).
+			const Vec3 heading = _speed > 0.2f ? _vel : _cmd;   // (just starting: the way it wants to go)
+			if (length(heading) > 0.05f) {
+				const Vec3 dir = normalized(heading);
+				const float along = dot(reach, dir);
+				if (along < 0.0f) {
+					reach = reach - dir * along;
+				}
+			}
+			const float lim = _s.land_max * _leg_len;
+			if (length(reach) > lim) {
+				reach = normalized(reach) * lim;
+			}
+			land = at_td + reach;
 		} else {
 			land = home(i);
 		}
@@ -362,7 +395,7 @@ void Gait::step_feet(float dt) {
 			f.target = land;
 		} else {
 			const Vec3 d = land - f.target;
-			const float lim = _s.retarget_speed * dt;
+			const float lim = (_s.retarget_speed + _speed) * dt;
 			f.target = length(d) > lim ? f.target + d * (lim / length(d)) : land;
 		}
 		f.lift_t++;
@@ -373,7 +406,8 @@ void Gait::step_feet(float dt) {
 		const float y = dot(f.lift, U) + (dot(land, U) - dot(f.lift, U)) * k + swing_h * std::sin(PI * s);
 		f.pos = h + U * y;
 		// In the air the foot turns from its push-off roll to toes up for the landing.
-		f.pitch = f.lift_pitch + (-toe_up - f.lift_pitch) * smooth(s);
+		const float land_pitch = -toe_up * (1.0f - run) + fore * run;    // heel first walking, forefoot running
+		f.pitch = f.lift_pitch + (land_pitch - f.lift_pitch) * smooth(s);
 		// Drawn: coming down onto the heel with the toes up - the ankle where the heel-strike
 		// roll will have it on touchdown (else it pops up by the roll as the foot lands).
 		Foot drawn = f;
@@ -417,7 +451,15 @@ void Gait::base_pose(std::vector<Quat>& local, Quat& pelvis_model, float& pelvis
 		for (size_t k = 0; k < n; ++k) {
 			out[k] = normalized(slerp(c.samples[i0][k], c.samples[i1][k], t));
 		}
-		h = c.pelvis_height.size() == m ? c.pelvis_height[i0] + (c.pelvis_height[i1] - c.pelvis_height[i0]) * t : pelvis_h;
+		h = pelvis_h;
+		if (c.pelvis_height.size() == m) {
+			float mean = 0.0f;
+			for (float x : c.pelvis_height) {
+				mean += x / float(m);
+			}
+			const float raw = c.pelvis_height[i0] + (c.pelvis_height[i1] - c.pelvis_height[i0]) * t;
+			h = mean + (raw - mean) * _s.cycle_bob;   // (the clip's bob, softened)
+		}
 	};
 	// The two cycles either side of the speed (below the slowest: blended with standing).
 	size_t hi = 0;
@@ -447,7 +489,164 @@ void Gait::base_pose(std::vector<Quat>& local, Quat& pelvis_model, float& pelvis
 	pelvis_h = ha + (hb - ha) * w;
 }
 
+std::vector<Vec3> Gait::support() const {
+	const Vec3 U = up();
+	std::vector<Vec3> pts;
+	for (const Foot& f : _feet) {
+		if (f.swinging) {
+			continue;
+		}
+		Vec3 fwd = flat(rotate(f.yaw, _rig.forward), U);
+		fwd = length(fwd) > 1e-4f ? normalized(fwd) : Vec3{ 0, 0, 1 };
+		const Vec3 side = normalized(cross(U, fwd)) * _s.sole_half_width;
+		const Vec3 o = flat(f.pos, U);
+		const float heel = -_heel_d, toe = _ball_d + _s.toe_ahead;
+		// Rolled: only the edge it stands on.
+		const float from = f.pitch > 0.05f ? _ball_d : heel;
+		const float to = f.pitch < -0.05f ? heel : toe;
+		for (float x : { from, to }) {
+			pts.push_back(o + fwd * x + side);
+			pts.push_back(o + fwd * x - side);
+		}
+	}
+	return pts.empty() ? pts : ground_hull(pts, U);
+}
+
+namespace {
+
+// The point of a convex hull (ground plane) nearest p (p itself if inside).
+Vec3 clamp_to_hull(const std::vector<Vec3>& hull, Vec3 p, Vec3 up) {
+	if (hull.size() >= 3 && hull_distance(hull, p, up) <= 0.0f) {
+		return p;
+	}
+	Vec3 best = hull.empty() ? p : hull[0];
+	float bd = 1e30f;
+	const size_t n = hull.size();
+	for (size_t i = 0; i < n; ++i) {
+		const Vec3 a = flat(hull[i], up), b = flat(hull[(i + 1) % n], up);
+		const Vec3 ab = b - a;
+		const float l2 = dot(ab, ab);
+		const float t = l2 > 1e-9f ? std::clamp(dot(flat(p, up) - a, ab) / l2, 0.0f, 1.0f) : 0.0f;
+		const Vec3 q = a + ab * t;
+		const float d = length(flat(p, up) - q);
+		if (d < bd) {
+			bd = d;
+			best = q;
+		}
+	}
+	return best + up * dot(p, up);
+}
+
+} // namespace
+
+Vec3 Gait::drive(Vec3 com, Vec3 velocity, Vec3 command, float dt) {
+	const Vec3 U = up();
+	const float g = _world ? std::max(length(_world->gravity()), 1.0f) : 9.81f;
+	const Vec3 v = flat(velocity, U), u = flat(command, U);
+	const float w2 = g / std::max(_pelvis_h, 0.4f);
+	const float a_max = _s.friction * g;
+	// Trim: the integral of the speed error (none while stopping / standing).
+	const std::vector<Vec3> hull = support();
+	// Only near the speed asked for (a steady offset), with a foot down: starting / stopping /
+	// in flight it would wind up and throw the body past the speed afterwards.
+	if (length(u) > 0.1f && !hull.empty() && length(u - v) < 0.25f * length(u)) {
+		_trim = _trim + (u - v) * (_s.trim_gain * dt);
+		const float lim = _s.trim_max * length(u);
+		if (length(_trim) > lim) {
+			_trim = normalized(_trim) * lim;
+		}
+	} else {
+		_trim = _trim * std::max(0.0f, 1.0f - 4.0f * dt);
+	}
+	Vec3 a_des = (u + _trim - v) * (1.0f / std::max(_s.drive_tau, dt));
+	// Barely moving and not asked to: plain capped acceleration (standing, stepping on the spot).
+	const float k = smoothstep(0.1f, 0.4f, std::max(length(v), length(u)));
+	Vec3 a_stand = a_des;
+	if (length(a_stand) > _s.standing_accel) {
+		a_stand = normalized(a_stand) * _s.standing_accel;
+	}
+	Vec3 a_pend;
+	const Vec3 c = flat(com, U);
+	if (hull.empty()) {
+		_cop = c;                                  // in the air: nothing to push on
+	} else {
+		const Vec3 p_des = c - a_des * (1.0f / w2);
+		_cop = flat(clamp_to_hull(hull, p_des, U), U);
+		a_pend = (c - _cop) * w2;
+	}
+	Vec3 a = a_stand * (1.0f - k) + a_pend * k;
+	if (length(a) > a_max) {
+		a = normalized(a) * a_max;
+	}
+	_cop = _cop + U * dot(com, U);
+	_drive_acc = a;
+	return v + a * dt;
+}
+
+float Gait::capture_margin() const {
+	const float g = _world ? std::max(length(_world->gravity()), 1.0f) : 9.81f;
+	const float omega = std::sqrt(g / std::max(_pelvis_h, 0.4f));
+	return _s.land_max * _leg_len - length(_vel - _cmd) / omega;
+}
+
+std::vector<float> Gait::leg_effort() const {
+	const Rig& rig = _rig;
+	std::vector<float> out(rig.parts.size(), -1.0f);
+	const Vec3 U = up();
+	const float g = _world ? std::max(length(_world->gravity()), 1.0f) : 9.81f;
+	const float M = rig.total_mass();
+	const Vec3 com = flat(_root.p, U);
+	// Each planted foot's share of the weight and its point of contact (the centre of pressure,
+	// clamped onto that foot's sole).
+	Vec3 contact[2];
+	float dist[2] = { 0.0f, 0.0f };
+	int planted = 0;
+	for (int i = 0; i < 2; ++i) {
+		const Foot& f = _feet[i];
+		Vec3 fwd = flat(rotate(f.yaw, rig.forward), U);
+		fwd = length(fwd) > 1e-4f ? normalized(fwd) : Vec3{ 0, 0, 1 };
+		const Vec3 side = normalized(cross(U, fwd));
+		const Vec3 o = flat(f.eff, U);
+		const Vec3 d = flat(_cop, U) - o;
+		contact[i] = o + fwd * std::clamp(dot(d, fwd), -_heel_d, _ball_d + _s.toe_ahead) +
+				side * std::clamp(dot(d, side), -_s.sole_half_width, _s.sole_half_width) + U * (dot(f.eff, U) - _ankle_h);
+		dist[i] = length(flat(contact[i], U) - com);
+		planted += f.swinging ? 0 : 1;
+	}
+	for (int i = 0; i < 2; ++i) {
+		if (_leg[i] < 0) {
+			continue;
+		}
+		const LimbInfo& l = _limbs.limb(LimbId(_leg[i]));
+		const int parts[3] = { l.upper, l.lower, l.end };
+		const Vec3 hip = _pose[size_t(l.upper)].p, knee = _pose[size_t(l.lower)].p, ankle = _pose[size_t(l.end)].p;
+		const Vec3 joints[3] = { hip, knee, ankle };
+		float share = 0.0f;
+		if (!_feet[i].swinging) {
+			share = planted == 2 ? 1.0f - dist[i] / std::max(dist[0] + dist[1], 1e-4f) : 1.0f;
+		}
+		// Ground force on this foot: its share of the weight, pointing (as for an inverted pendulum)
+		// from the contact toward the centre of mass - it runs close by the hip, as a real one does.
+		const Vec3 c3 = com + U * (dot(_root.p, U) + std::max(_pelvis_h, 0.4f));
+		const Vec3 r = c3 - contact[i];
+		const float rz = std::max(dot(r, U), 0.2f);
+		const Vec3 F = (U * g + flat(r, U) * (g / rz)) * (share * M);
+		// The leg's own segments (centres between the joints), held against gravity.
+		const Vec3 seg[3] = { (hip + knee) * 0.5f, (knee + ankle) * 0.5f, ankle };
+		for (int j = 0; j < 3; ++j) {
+			const PartDef& d = rig.parts[size_t(parts[j])];
+			Vec3 t = cross(contact[i] - joints[j], F);
+			for (int k = j; k < 3; ++k) {
+				t = t + cross(seg[k] - joints[j], U * (-g * rig.parts[size_t(parts[k])].mass));
+			}
+			out[size_t(parts[j])] = length(t) / std::max(d.muscle.strength, 1.0f);
+		}
+	}
+	return out;
+}
+
 void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis_h) {
+	_pelvis_h = pelvis_h;
 	const Rig& rig = _rig;
 	const size_t n = rig.parts.size();
 	const Vec3 U = up();
@@ -459,7 +658,10 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 	const bool procedural = _cycles.empty();
 	// Pelvis: over the ground point at its height, bobbing (lowest at each contact), swaying
 	// toward the standing foot, lower at a run.
-	Vec3 P = _root.p + U * pelvis_h;
+	// Knees bend more the faster it goes.
+	const float bend = _s.knee_bend * smoothstep(0.0f, _s.walk_speed, _stepping ? _speed : 0.0f) + (_s.knee_bend_run - _s.knee_bend) * run +
+			(_s.knee_bend_sprint - _s.knee_bend_run) * smoothstep(_s.run_speed, _s.sprint_speed, _speed);
+	Vec3 P = _root.p + U * (pelvis_h - bend);
 	if (procedural) {
 		P += U * (-_s.bob * m * std::cos(4.0f * PI * _phase) - _s.run_crouch * run);
 		P += left * (_s.sway * m * std::sin(2.0f * PI * _phase));
@@ -478,10 +680,12 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		Pq = normalized(axis_angle(lean_axis, lean_a * _s.lean_pelvis) * Pq);
 		P += d * std::min(pelvis_h * lean_a * _s.lean_shift, _s.lean_shift_max);
 	}
-	// The hips must reach both ankles: lower the pelvis for a low foothold.
+	// The hips must reach the planted ankles: lower the pelvis for a low or far foothold. (A foot in
+	// the air is pulled in to the leg's reach below instead - a run's trailing foot just after push-off
+	// dragged the hips 30 cm down.)
 	float drop = 0.0f;
 	for (int i = 0; i < 2; ++i) {
-		if (_leg[i] < 0) {
+		if (_leg[i] < 0 || _feet[i].swinging) {
 			continue;
 		}
 		const LimbInfo& l = _limbs.limb(LimbId(_leg[i]));
@@ -493,7 +697,14 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		const float allowed = std::sqrt(std::max(L * L - dh * dh, 0.0f));
 		drop = std::max(drop, dz - allowed);
 	}
-	P -= U * drop;
+	// Eased: the hips sink into a stride's stretch and stay low through it (no dip at every step);
+	// what's beyond the eased drop by more than the slack is taken at once (a leg must reach).
+	if (drop > _drop) {
+		_drop = std::min(drop, _drop + _s.drop_rise * _dt);
+	} else {
+		_drop = std::max(drop, _drop - _s.drop_fall * _dt);
+	}
+	P -= U * (_drop + std::max(0.0f, drop - _drop - _s.drop_slack));
 	// Forward kinematics of the base pose.
 	_pose[0] = Transform{ P, Pq };
 	for (size_t i = 1; i < n; ++i) {
@@ -548,6 +759,13 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		const LimbInfo& l = _limbs.limb(LimbId(_leg[i]));
 		const PartDef& th = rig.parts[size_t(l.upper)];
 		const Vec3 hip = xform(_pose[size_t(th.parent)], th.frame_parent.p);
+		if (_feet[i].swinging) {
+			const float reach = (l.upper_len + l.lower_len) * _s.max_reach;
+			const Vec3 d = _feet[i].eff - hip;
+			if (length(d) > reach) {
+				_feet[i].eff = hip + normalized(d) * reach;
+			}
+		}
 		Quat upper_world, lower_local;
 		two_bone_ik(rig, l, hip, _pose[size_t(l.upper)].q, _feet[i].eff, upper_world, lower_local);
 		_pose[size_t(l.upper)] = Transform{ hip, upper_world };

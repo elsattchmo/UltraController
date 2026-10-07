@@ -138,7 +138,16 @@ public:
 	void character_gait_set_idle(int character, const Array& locals, double pelvis_height);
 	void character_gait_reset(int character, const Transform3D& root);
 	/// Advance by dt with the character's ground point / facing and velocity; the world pose per part.
-	Array character_gait_update(int character, const Transform3D& root, const Vector3& velocity, double dt);
+	/// `command` (a Vector3, optional): the motion wanted - footholds brake / catch toward it.
+	Array character_gait_update(int character, const Transform3D& root, const Vector3& velocity, double dt,
+			const Variant& command = Variant());
+	/// Physical motion: the velocity after dt for a body at `com` moving at `velocity` toward
+	/// `command`, as far as its planted feet allow (Gait::drive).
+	/// A ball (dynamic, continuous collision) in the world: hits character parts and the level.
+	int64_t add_ball(const Vector3& position, const Vector3& velocity, double radius, double mass, double restitution = 0.35);
+	/// Estimated leg muscle effort per part from the gait's pose (Gait::leg_effort; -1: not a leg).
+	PackedFloat32Array character_gait_leg_effort(int character) const;
+	Vector3 character_gait_drive(int character, const Vector3& com, const Vector3& velocity, const Vector3& command, double dt);
 	/// {phase, stepping, cadence, duty, planted_l / r, ankle_l / r (drawn, rolling), plant_l / r (where
 	///  it was put down: locked), foothold_l / r}
 	Dictionary character_gait_state(int character) const;

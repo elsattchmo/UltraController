@@ -55,8 +55,8 @@ func test_single_player_plays_the_picked_character() -> void:
 	check(main.get("controller") == "sinew", "the pick can't change mid-session")
 	var dummy := UltraNet.spawn_bot("Dummy T", Transform3D(Basis(), c.state.pos + Vector3(3, 0, 0)))
 	await ticks(2)
-	check(dummy != null and not (dummy.character is SinewCharacter) and dummy.character.body_profile.resource_path.ends_with("mannequin_body_profile.tres"),
-			"a dummy spawned meanwhile stays a plain mannequin UltraCharacter")
+	check(dummy != null and dummy.character is SinewCharacter and dummy.character.body_profile.resource_path.ends_with("mannequin_body_profile.tres"),
+			"a dummy spawned meanwhile follows the Controller pick (Sinew, to be pushed about) but keeps the mannequin")
 	# Pause > Main menu reloads the scene: the pick stays.
 	UltraNet.stop()
 	main.queue_free()

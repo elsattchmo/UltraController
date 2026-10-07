@@ -725,15 +725,46 @@ void SinewPhysics::character_gait_reset(int character, const Transform3D& root) 
 	}
 }
 
-Array SinewPhysics::character_gait_update(int character, const Transform3D& root, const Vector3& velocity, double dt) {
+Array SinewPhysics::character_gait_update(int character, const Transform3D& root, const Vector3& velocity, double dt,
+		const Variant& command) {
 	Array out;
 	auto it = _gaits.find(character);
 	if (it == _gaits.end()) {
 		return out;
 	}
-	it->second->update(sinew::GaitInput{ to_sinew(root), to_sinew(velocity), float(dt) });
+	sinew::GaitInput in{ to_sinew(root), to_sinew(velocity), float(dt) };
+	if (command.get_type() == Variant::VECTOR3) {
+		in.command = to_sinew(Vector3(command));
+		in.has_command = true;
+	}
+	it->second->update(in);
 	for (const sinew::Transform& t : it->second->pose()) {
 		out.push_back(to_godot(t));
+	}
+	return out;
+}
+
+int64_t SinewPhysics::add_ball(const Vector3& position, const Vector3& velocity, double radius, double mass, double restitution) {
+	return int64_t(_world->add_ball(to_sinew(position), to_sinew(velocity), float(radius), float(mass), float(restitution)));
+}
+
+Vector3 SinewPhysics::character_gait_drive(int character, const Vector3& com, const Vector3& velocity, const Vector3& command,
+		double dt) {
+	auto it = _gaits.find(character);
+	if (it == _gaits.end()) {
+		return command;
+	}
+	return to_godot(it->second->drive(to_sinew(com), to_sinew(velocity), to_sinew(command), float(dt)));
+}
+
+PackedFloat32Array SinewPhysics::character_gait_leg_effort(int character) const {
+	PackedFloat32Array out;
+	auto it = _gaits.find(character);
+	if (it == _gaits.end()) {
+		return out;
+	}
+	for (float e : it->second->leg_effort()) {
+		out.push_back(e);
 	}
 	return out;
 }
@@ -750,6 +781,13 @@ Dictionary SinewPhysics::character_gait_state(int character) const {
 	d["cadence"] = g.cadence();
 	d["duty"] = g.duty();
 	d["warp"] = g.warp();
+	d["cop"] = to_godot(g.cop());
+	d["capture_margin"] = g.capture_margin();
+	Array sup;
+	for (const sinew::Vec3& p : g.support()) {
+		sup.push_back(to_godot(p));
+	}
+	d["support"] = sup;
 	d["hurry"] = g.hurry();
 	d["early_lifts"] = g.early_lifts();
 	d["planted_l"] = g.foot_planted(0);
@@ -806,6 +844,7 @@ void SinewPhysics::_bind_methods() {
 	BIND_ENUM_CONSTANT(KIND_KINEMATIC);
 	BIND_ENUM_CONSTANT(KIND_DYNAMIC);
 	ClassDB::bind_method(D_METHOD("add_body", "kind", "xform"), &SinewPhysics::add_body);
+	ClassDB::bind_method(D_METHOD("add_ball", "position", "velocity", "radius", "mass", "restitution"), &SinewPhysics::add_ball, DEFVAL(0.35));
 	ClassDB::bind_method(D_METHOD("add_box_shape", "body", "local", "half_extents", "friction"), &SinewPhysics::add_box_shape, DEFVAL(0.6));
 	ClassDB::bind_method(D_METHOD("add_sphere_shape", "body", "center", "radius", "friction"), &SinewPhysics::add_sphere_shape, DEFVAL(0.6));
 	ClassDB::bind_method(D_METHOD("add_capsule_shape", "body", "a", "b", "radius", "friction"), &SinewPhysics::add_capsule_shape, DEFVAL(0.6));
@@ -865,7 +904,10 @@ void SinewPhysics::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("character_gait_set_cycles", "character", "cycles"), &SinewPhysics::character_gait_set_cycles);
 	ClassDB::bind_method(D_METHOD("character_gait_set_idle", "character", "locals", "pelvis_height"), &SinewPhysics::character_gait_set_idle);
 	ClassDB::bind_method(D_METHOD("character_gait_reset", "character", "root"), &SinewPhysics::character_gait_reset);
-	ClassDB::bind_method(D_METHOD("character_gait_update", "character", "root", "velocity", "dt"), &SinewPhysics::character_gait_update);
+	ClassDB::bind_method(D_METHOD("character_gait_update", "character", "root", "velocity", "dt", "command"), &SinewPhysics::character_gait_update,
+			DEFVAL(Variant()));
+	ClassDB::bind_method(D_METHOD("character_gait_leg_effort", "character"), &SinewPhysics::character_gait_leg_effort);
+	ClassDB::bind_method(D_METHOD("character_gait_drive", "character", "com", "velocity", "command", "dt"), &SinewPhysics::character_gait_drive);
 	ClassDB::bind_method(D_METHOD("character_gait_state", "character"), &SinewPhysics::character_gait_state);
 	ClassDB::bind_method(D_METHOD("ground_below", "point", "max_distance"), &SinewPhysics::ground_below, DEFVAL(3.0));
 	ClassDB::bind_method(D_METHOD("edge_ahead", "from", "dir", "range", "min_drop"), &SinewPhysics::edge_ahead, DEFVAL(1.5), DEFVAL(0.45));

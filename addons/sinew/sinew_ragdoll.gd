@@ -101,6 +101,15 @@ var _gait_on := false
 var _gait_running := false
 
 
+## Every Sinew body in the scene (balls look for bodies to wake here).
+static var all: Array[SinewRagdoll] = []
+
+
+func _enter_tree() -> void:
+	if not all.has(self):
+		all.append(self)
+
+
 func setup(c: UltraCharacter) -> void:
 	character = c
 	var sk := c.skeleton
@@ -133,6 +142,7 @@ func setup(c: UltraCharacter) -> void:
 
 
 func _exit_tree() -> void:
+	all.erase(self)
 	if world:
 		world.bodies.erase(self)
 		if _id:
@@ -179,20 +189,27 @@ func _gait_root() -> Transform3D:
 	return _rigid(Transform3D(Basis(Vector3.UP, character.state.body_yaw), character.state.pos) * rel)
 
 
+## The gait is walking the body (on the ground, not ragdolling): physical motion can drive.
+func gait_walking() -> bool:
+	return _gait_on and _gait_running and not active
+
+
 func _update_gait(dt: float) -> void:
 	if not _gait_on:
 		gait_w = 0.0
 		return
 	var st := character.state
 	var Id := MotorState.Id
-	var want := not active and st.is_grounded() and st.state in [Id.IDLE, Id.MOVE, Id.TURN_IN_PLACE, Id.LAND]
+	# (Not while staggering: the balancer has the legs.)
+	var want := not active and _stagger_t < 0.0 and st.is_grounded() and st.state in [Id.IDLE, Id.MOVE, Id.TURN_IN_PLACE, Id.LAND]
 	if want and not _gait_running:
 		world.physics.call("character_gait_reset", _id, _gait_root())
 		gait_now = []
 		_gait_running = true
 	if _gait_running:
 		var pose: Array[Transform3D] = []
-		pose.assign(world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt))
+		var cmd: Variant = character.get("motion_command")
+		pose.assign(world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt, cmd))
 		gait_prev = gait_now if gait_now.size() == pose.size() else pose
 		gait_now = pose
 	gait_w = move_toward(gait_w, 1.0 if want else 0.0, dt / 0.2)
@@ -476,6 +493,11 @@ func _upper_animated() -> bool:
 		return true
 	if st.state not in [MotorState.Id.IDLE, MotorState.Id.CROUCH, MotorState.Id.TURN_IN_PLACE, MotorState.Id.MOVE]:
 		return true
+	# Moving, or about to (physical motion: the wish comes before the speed - a slow start left the
+	# arms physical while the walk's arm swing came in, and a hand whipped at 14 m/s).
+	var cmd: Variant = character.get("motion_command")
+	if cmd is Vector3 and Vector2((cmd as Vector3).x, (cmd as Vector3).z).length() > 0.3:
+		return true
 	return Vector2(st.vel.x, st.vel.z).length() > physical_below_speed
 
 
@@ -562,6 +584,28 @@ func hit(region: int, dir: Vector3, amount: float) -> void:
 		var arms := [UltraLimbs.Region.ARM_L, UltraLimbs.Region.ARM_R, UltraLimbs.Region.FOREARM_L, UltraLimbs.Region.FOREARM_R, UltraLimbs.Region.HAND_L, UltraLimbs.Region.HAND_R]
 		if stagger and _stagger_t < 0.0 and not region in arms and impulse.length() >= stagger_min_impulse and character.state.is_grounded():
 			start_stagger()
+
+
+## A shove's jolt to the upper body (`impulse` N s along `dir` at the chest) without starting the
+## physical-legs stagger: the stumble is the gait's (SinewCharacter.receive_push).
+func jolt(dir: Vector3, impulse: float) -> void:
+	jolt_region(UltraLimbs.Region.TORSO, dir, impulse)
+
+
+## The same on any region (an arm swings, the head snaps back...).
+func jolt_region(region: int, dir: Vector3, impulse: float) -> void:
+	var keep := stagger
+	stagger = false
+	hit(region, dir, impulse / maxf(hit_impulse_per_damage, 1e-3))
+	stagger = keep
+
+
+## Something is about to strike the body (a ball): make it all physical now - the stagger mode (legs on
+## the balancer) - so the contact itself decides what happens. Standing powered bodies only.
+func brace() -> void:
+	if _id == 0 or active or not _powered_on or _stagger_t >= 0.0 or not character.state.is_grounded():
+		return
+	start_stagger()
 
 
 ## Legs physical, the balancer on: the body has to stay up by itself for a moment.

@@ -211,3 +211,30 @@ TEST_CASE("world mirror: bodies land on hull, mesh and kinematic shapes") {
 	CHECK(w.body_transform(on_lift).p.y > 0.95f);       // riding the lift up to its top at 1.0 m
 	CHECK(w.body_transform(on_rock).p.y > 0.06f);       // on the wedge's slope, not the floor
 }
+
+TEST_CASE("ball: hands its momentum over to what it hits, and can't pass through a thin part") {
+	WorldSettings ws;
+	ws.gravity = Vec3{};               // (just the collision)
+	PhysicsWorld w(ws);
+	const BodyHandle ball = w.add_ball(Vec3{ 0, 0, 2.0f }, Vec3{ 0, 0, -20.0f }, 0.11f, 2.0f);
+	CapsuleDesc cd;
+	cd.xform = Transform{ Vec3{}, Quat{} };
+	cd.a = Vec3{ -0.2f, 0, 0 };
+	cd.b = Vec3{ 0.2f, 0, 0 };
+	cd.radius = 0.04f;                 // a forearm
+	cd.density = 1000.0f;
+	const BodyHandle arm = w.add_capsule_body(cd);
+	CHECK(w.body_mass(ball) == doctest::Approx(2.0f).epsilon(0.02));
+	const float m_arm = w.body_mass(arm);
+	const float p0 = 2.0f * -20.0f;
+	for (int k = 0; k < 30; ++k) {
+		w.step(1.0f / 60.0f);
+	}
+	const float vb = w.linear_velocity(ball).z, va = w.linear_velocity(arm).z;
+	const float p1 = 2.0f * vb + m_arm * va;
+	MESSAGE("ball 2 kg at 20 m/s on a ", m_arm, " kg forearm: ball now ", vb, " m/s, arm ", va, " m/s; momentum ", p0, " -> ", p1);
+	CHECK(va < -5.0f);                                 // knocked away hard
+	CHECK(vb > -20.0f);                                // the ball gave it up
+	CHECK(w.body_transform(ball).p.z > w.body_transform(arm).p.z);   // ... and didn't pass through it
+	CHECK(p1 == doctest::Approx(p0).epsilon(0.05));    // momentum kept
+}
