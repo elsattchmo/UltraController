@@ -37,6 +37,9 @@ struct GaitSettings {
 	/// Foot roll: heel strike with the toes up, then the heel rising round the ball of the foot
 	/// before push-off (rad; full at walking speed, toe-up fading at a run: mid-foot landing).
 	float toe_up = 0.22f, heel_rise = 0.6f;
+	/// Running on the balls of the feet: heel up this much (rad) through the stance at a run / sprint
+	/// (a flat planted foot pinned the ankle low: the hips had to dip to reach it at every stride).
+	float forefoot_run = 0.25f, forefoot_sprint = 0.4f;
 	float roll_rate = 6.0f;                     ///< a standing foot's roll changes at most this fast, rad/s
 	/// Share of a foot's cycle on the ground: a walk's (with double support) down to a run's.
 	float duty_walk = 0.62f, duty_run = 0.36f;
@@ -142,6 +145,12 @@ public:
 	Vec3 drive(Vec3 com, Vec3 velocity, Vec3 command, float dt);
 	/// The centre of pressure drive() used last (world, on the ground plane).
 	Vec3 cop() const { return _cop; }
+	/// How hard each leg muscle would be working in the pose last solved (torque over the rig's
+	/// strength, as Character::muscle_effort; -1 for parts that aren't legs) - for showing animated
+	/// (kinematic) legs: a standing leg carries its share of the weight (split by how near the centre
+	/// of mass is to each planted foot) and the push of drive()'s acceleration, applied at its part of
+	/// the centre of pressure, against each joint's lever arm; a swinging leg holds itself up.
+	std::vector<float> leg_effort() const;
 	/// The support polygon: planted soles (ground plane, counter-clockwise from above). Empty in flight.
 	std::vector<Vec3> support() const;
 	/// The legs' turn toward the travel off the facing (rad, + = to the left).
@@ -191,7 +200,7 @@ private:
 	Vec3 hip_ground(int foot) const;
 	float _warp = 0.0f;
 	float _drop = 0.0f, _dt = 1.0f / 60.0f;
-	Vec3 _cmd, _cop, _trim;
+	Vec3 _cmd, _cop, _trim, _drive_acc;
 	float _pelvis_h = 0.95f;     ///< last pelvis height over the ground (the pendulum's length)
 	bool _has_cmd = false;
 	Vec3 _lean, _lean_v, _acc, _prev_vel;

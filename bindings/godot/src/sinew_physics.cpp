@@ -753,6 +753,18 @@ Vector3 SinewPhysics::character_gait_drive(int character, const Vector3& com, co
 	return to_godot(it->second->drive(to_sinew(com), to_sinew(velocity), to_sinew(command), float(dt)));
 }
 
+PackedFloat32Array SinewPhysics::character_gait_leg_effort(int character) const {
+	PackedFloat32Array out;
+	auto it = _gaits.find(character);
+	if (it == _gaits.end()) {
+		return out;
+	}
+	for (float e : it->second->leg_effort()) {
+		out.push_back(e);
+	}
+	return out;
+}
+
 Dictionary SinewPhysics::character_gait_state(int character) const {
 	Dictionary d;
 	auto it = _gaits.find(character);
@@ -888,6 +900,7 @@ void SinewPhysics::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("character_gait_reset", "character", "root"), &SinewPhysics::character_gait_reset);
 	ClassDB::bind_method(D_METHOD("character_gait_update", "character", "root", "velocity", "dt", "command"), &SinewPhysics::character_gait_update,
 			DEFVAL(Variant()));
+	ClassDB::bind_method(D_METHOD("character_gait_leg_effort", "character"), &SinewPhysics::character_gait_leg_effort);
 	ClassDB::bind_method(D_METHOD("character_gait_drive", "character", "com", "velocity", "command", "dt"), &SinewPhysics::character_gait_drive);
 	ClassDB::bind_method(D_METHOD("character_gait_state", "character"), &SinewPhysics::character_gait_state);
 	ClassDB::bind_method(D_METHOD("ground_below", "point", "max_distance"), &SinewPhysics::ground_below, DEFVAL(3.0));

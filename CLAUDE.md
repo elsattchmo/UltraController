@@ -1124,6 +1124,14 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   PLANTED leg needs is eased (in 0.15, out 0.06 m/s, the rest beyond `drop_slack` at once); a swinging foot out
   of reach is pulled into it (a run's trailing foot dragged the hips 30 cm down). Hips: walk 2 cm / 0.25 m/s,
   run 2.8 cm (were 6 cm / 0.86 m/s) - core test `gait: flow`. Side steps `step_side` 0.65 of a forward one.
+- **Running feet + leg effort**: at a run the foot lands on the forefoot and stays on the ball
+  (`forefoot_run` 0.25 / `forefoot_sprint` 0.4 rad heel up; a flat planted foot pinned the ankle low and the
+  hips dipped every stride - run hips 2.65 cm / 0.25 m/s). `Gait::leg_effort()` (binding
+  `character_gait_leg_effort`) estimates each animated leg muscle's effort (torque / rig strength): a
+  planted leg's share of the weight (split by distance to the COM) as a ground force from the centre of
+  pressure (clamped onto that sole) toward the COM, against each joint's lever arm, plus the leg's own
+  segments; the debug view uses it for kinematic legs. The debug view draws from the POSED skeleton at
+  `skeleton_updated` (the kinematic bodies follow a tick or two late: at a sprint the shapes trailed 0.5 m).
 - **Unarmed push** (test tool, `SinewCharacter.push` / `can_push`): empty hands (no prop held,
   nothing equipped, on the ground) + the throw button (`uc_throw`, the one that throws a held box):
   a tap shoves the character in front 3 m/s (rocks it back ~20 cm), holding charges to 5 m/s over

@@ -2,7 +2,8 @@ class_name SinewDebugDraw
 extends Node3D
 ## Sinew's body made visible: every physical part drawn as its collision shape (capsules, box
 ## feet) coloured by how hard its muscle is working - blue relaxed, green, yellow, red flat out
-## (torque over strength, red from 60 %); grey = driven by the animation (kinematic), dark = cut off - the
+## (torque over strength, red from 60 %); walking legs (animated) show the gait's estimate of the same;
+## grey = driven by the animation (kinematic), dark = cut off - the
 ## bones as lines between the joints, and while it balances the centre of mass (yellow), the
 ## capture point (green inside the support, red outside) and the support polygon (cyan).
 ## A label over the head says what the body is doing.
@@ -46,22 +47,45 @@ func _unhandled_input(event: InputEvent) -> void:
 		view = (maxi(view, 0) + 1) % 3
 
 
+var _hooked: Skeleton3D
+
+
 func _process(_delta: float) -> void:
 	var v := maxi(view, 0)
 	if v != _shown_view:
 		_apply_view(v)
-	if v == View.OFF or ragdoll == null or ragdoll._id == 0 or ragdoll.pose_now.is_empty():
+	# Drawn when the skeleton has been posed (the only time the shown pose can be read): what's on
+	# screen - an animated part where the animation put it (its kinematic body follows a tick or two
+	# behind: at a sprint the shapes trailed half a metre), a physical one where the physics has it.
+	var sk: Skeleton3D = ragdoll.character.skeleton if ragdoll and ragdoll.character else null
+	if sk != _hooked:
+		if _hooked and is_instance_valid(_hooked) and _hooked.skeleton_updated.is_connected(_draw):
+			_hooked.skeleton_updated.disconnect(_draw)
+		_hooked = sk
+		if sk:
+			sk.skeleton_updated.connect(_draw)
+
+
+func _draw() -> void:
+	var v := maxi(view, 0)
+	if v == View.OFF or ragdoll == null or ragdoll._id == 0 or ragdoll.pose_now.is_empty() or _hooked == null:
 		return
 	if _shapes.is_empty():
 		_build()
 	var phys = ragdoll.world.physics
-	var f := Engine.get_physics_interpolation_fraction()
+	var to_world := _hooked.global_transform
 	var pose: Array[Transform3D] = []
 	for i in ragdoll.pose_now.size():
-		var a: Transform3D = ragdoll.pose_prev[i] if i < ragdoll.pose_prev.size() else ragdoll.pose_now[i]
-		pose.append(a.interpolate_with(ragdoll.pose_now[i], f))
+		pose.append(to_world * _hooked.get_bone_global_pose(ragdoll.parts[i].bone))
 	# Muscles: the shapes coloured by effort (smoothed: it's a per-tick reading).
 	var effort: PackedFloat32Array = phys.call("character_muscle_effort", ragdoll._id)
+	# Animated (kinematic) legs have no muscle at work in the physics: show the gait's estimate of
+	# what they carry instead - the weight and push on a standing leg, a swinging leg holding itself up.
+	if ragdoll.gait_walking():
+		var legs: PackedFloat32Array = phys.call("character_gait_leg_effort", ragdoll._id)
+		for i in mini(effort.size(), legs.size()):
+			if effort[i] < 0.0 and legs[i] >= 0.0:
+				effort[i] = legs[i]
 	if _effort.size() != effort.size():
 		_effort = effort.duplicate()
 	for i in mini(_shapes.size(), pose.size()):
@@ -202,6 +226,9 @@ func _apply_view(v: int) -> void:
 
 
 func _exit_tree() -> void:
+	if _hooked and is_instance_valid(_hooked) and _hooked.skeleton_updated.is_connected(_draw):
+		_hooked.skeleton_updated.disconnect(_draw)
+	_hooked = null
 	for g in _hidden:
 		if is_instance_valid(g):
 			g.visible = true

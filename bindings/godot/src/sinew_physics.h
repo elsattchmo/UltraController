@@ -143,6 +143,8 @@ public:
 			const Variant& command = Variant());
 	/// Physical motion: the velocity after dt for a body at `com` moving at `velocity` toward
 	/// `command`, as far as its planted feet allow (Gait::drive).
+	/// Estimated leg muscle effort per part from the gait's pose (Gait::leg_effort; -1: not a leg).
+	PackedFloat32Array character_gait_leg_effort(int character) const;
 	Vector3 character_gait_drive(int character, const Vector3& com, const Vector3& velocity, const Vector3& command, double dt);
 	/// {phase, stepping, cadence, duty, planted_l / r, ankle_l / r (drawn, rolling), plant_l / r (where
 	///  it was put down: locked), foothold_l / r}

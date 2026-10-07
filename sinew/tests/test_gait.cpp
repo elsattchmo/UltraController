@@ -472,3 +472,29 @@ TEST_CASE("gait: flow - the hips glide, they don't bob at every step") {
 		CHECK(fastest < 0.65f);                        // (a side-step's quicker rhythm rises a little faster)
 	}
 }
+
+TEST_CASE("gait: leg effort - the standing leg works, more at a run, the swinging leg little") {
+	Walker w;
+	w.run(Vec3{}, 0.5f);
+	auto leg = [&](int side) {
+		const LimbInfo& l = w.limbs->limb(side == 0 ? LimbId::LegL : LimbId::LegR);
+		const std::vector<float> e = w.gait->leg_effort();
+		return std::fmax(std::fmax(e[size_t(l.upper)], e[size_t(l.lower)]), e[size_t(l.end)]);
+	};
+	const float standing = std::fmax(leg(0), leg(1));
+	const std::vector<float> e0 = w.gait->leg_effort();
+	CHECK(e0[0] < 0.0f);                              // the pelvis isn't a leg muscle
+	float stance_walk = 0.0f, swing_walk = 0.0f;
+	for (int k = 0; k < 120; ++k) {
+		w.run(Vec3{ 0, 0, 1.4f }, DT);
+		for (int i = 0; i < 2; ++i) {
+			(w.gait->foot_planted(i) && !w.gait->foot_planted(1 - i) ? stance_walk : swing_walk) =
+					std::fmax(w.gait->foot_planted(i) && !w.gait->foot_planted(1 - i) ? stance_walk : swing_walk, leg(i));
+		}
+	}
+	MESSAGE("leg effort: standing ", standing, ", walking stance ", stance_walk, " / swing ", swing_walk);
+	CHECK(standing > 0.0f);
+	CHECK(stance_walk > standing);                    // one leg carrying everything works harder
+	CHECK(swing_walk < stance_walk);
+	CHECK(stance_walk < 3.0f);                        // and the numbers are muscle-sized
+}

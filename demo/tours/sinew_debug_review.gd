@@ -1,6 +1,6 @@
 extends "res://demo/tours/sinew_review.gd"
 ## Review tour for the Sinew debug view (K / --sinew-debug): standing powered (muscles coloured
-## by effort, legs grey = animated), a hard hit -> stagger on physical legs with the COM,
+## by effort), walking and sprinting (the legs show the gait's estimate), a hard hit -> stagger on physical legs with the COM,
 ## capture point and support polygon, the x-ray view, a blow it can't take -> knocked down.
 ##   godot --path . --resolution 1280x720 -- --tour=sinew_debug_review --controller=sinew --out=<dir>
 
@@ -10,6 +10,15 @@ func _build() -> void:
 	steps = [
 		{"teleport": "speed_start", "t": 0.6, "yaw": 0, "pitch": -4, "view_tp": true, "slot": 0},
 		{"call": _setup_debug, "t": 2.5, "shot": "overlay_stand"},
+		# Walking / sprinting: the animated legs show the gait's estimate (standing leg loaded, swing light).
+		{"t": 1.2, "move": Vector2(0, 1), "yaw": 0},
+		{"t": 0.1, "move": Vector2(0, 1), "yaw": 0, "shot": "walk_0"},
+		{"t": 0.12, "move": Vector2(0, 1), "yaw": 0, "shot": "walk_1"},
+		{"t": 0.12, "move": Vector2(0, 1), "yaw": 0, "shot": "walk_2"},
+		{"t": 1.6, "move": Vector2(0, 1), "yaw": 0, "buttons": InputFrame.B_SPRINT},
+		{"t": 0.08, "move": Vector2(0, 1), "yaw": 0, "buttons": InputFrame.B_SPRINT, "shot": "sprint_0"},
+		{"t": 0.08, "move": Vector2(0, 1), "yaw": 0, "buttons": InputFrame.B_SPRINT, "shot": "sprint_1"},
+		{"t": 2.0, "move": Vector2.ZERO, "yaw": 0, "shot": "stopped"},
 		{"call": _slow.bind(true), "t": 0.0},
 		{"call": _hit_chest, "t": 0.08, "shot": "stagger_0"},
 		{"t": 0.15, "shot": "stagger_1"},
