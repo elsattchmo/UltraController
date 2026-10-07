@@ -589,6 +589,12 @@ void Gait::reset(const Transform& root) {
 
 void Gait::update(const GaitInput& in) {
 	_dt = std::max(in.dt, 1e-4f);
+	// A teleport (a respawn, a short hop across the map): start again where it is - the old footholds
+	// stepped across to the new place, the first steps crossed the legs. (Before the standing feet are
+	// read, so the fresh feet go straight down on them.)
+	if (length(in.root.p - _root.p) > _s.teleport_dist) {
+		reset(in.root);
+	}
 	_root = in.root;
 	_vel = flat(in.velocity, up());
 	_has_cmd = in.has_command;

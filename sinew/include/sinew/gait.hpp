@@ -86,6 +86,7 @@ struct GaitSettings {
 	/// stride instead of dipping at every step); only what's beyond that by `drop_slack` is taken at once.
 	float cycle_bob = 0.6f, drop_rise = 0.15f, drop_fall = 0.06f, drop_slack = 0.06f;
 	float drop_fall_standing = 0.3f;            ///< stopped: the hips come back up this fast (m/s)
+	float teleport_dist = 0.6f;                 ///< the root moving further than this in one update = a teleport (m)
 	float drop_snap_rate = 1.0f, drop_snap_speed = 3.0f;   ///< the hips' drop never changes faster than rate + speed x this (m/s)
 	float drop_fall_clip = 0.4f;                ///< walking on a clip's legs: the hips come back up this fast (m/s)
 	/// 8-way: the longest step backing / sideways as a share of the forward one (the cadence rises
