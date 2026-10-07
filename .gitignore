@@ -4,3 +4,6 @@
 __pycache__/
 art_src/zombie/*.fbx
 tools/tmp/
+/build/
+# Sinew extension binaries: committed by CI only (git add -f); local builds stay out
+/addons/sinew/bin/

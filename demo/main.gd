@@ -9,6 +9,7 @@ extends Node
 ##   -- --launch=host_client                start a preset of instances and exit
 ##   -- --tour=m1                           scripted capture tour (single-player bot)
 ##   -- --map=mansion                       the level (also picked in the main menu)
+##   -- --controller=sinew --model=zombie   the local player's controller / model (main menu too)
 
 ## The levels the main menu offers (and `--map=<key>`): key, title, one line about it, scene.
 const LEVELS := [
@@ -26,6 +27,8 @@ const BODY := "res://assets/characters/mannequin/mannequin_body_profile.tres"
 var args := {}
 var map: Node3D
 var level := ""                     ## key of the loaded level
+var controller := "ultra"           ## local players' controller (CharacterModels.CONTROLLERS)
+var model := "mannequin"            ## local players' model (CharacterModels.MODELS)
 var locals: UltraLocalPlayers
 var menu: CanvasLayer
 var player: UltraCharacter          ## first local player (tours, single-player tools)
@@ -59,6 +62,8 @@ func _ready() -> void:
 		return
 	var back_to_menu := Engine.has_meta("ultra_to_menu") and Engine.has_meta("ultra_level")
 	_load_level(String(Engine.get_meta("ultra_level")) if back_to_menu else UltraArgs.get_str("map", "playground"))
+	set_controller(String(Engine.get_meta("ultra_controller")) if Engine.has_meta("ultra_controller") else UltraArgs.get_str("controller", "ultra"))
+	set_model(String(Engine.get_meta("ultra_model")) if Engine.has_meta("ultra_model") else UltraArgs.get_str("model", "mannequin"))
 	locals = UltraLocalPlayers.new()
 	locals.name = "LocalPlayers"
 	locals.join_enabled = args.has("join-screen")
@@ -164,9 +169,10 @@ func _reserve_devices(n: int) -> void:
 func _make_character(np: NetPlayer) -> UltraCharacter:
 	if ZombieFactory.is_zombie(np):
 		return ZombieFactory.make(np, not headless)
-	var c := UltraCharacter.new()
+	# The menu's Character pick is for players only: dummies and the companion stay as they are.
+	var c := CharacterModels.make(controller) if not np.is_bot else UltraCharacter.new()
 	c.profile = (load(PROFILES.get(UltraArgs.get_str("profile", "fps"), PROFILES["fps"])) as MovementProfile).duplicate(true)
-	c.body_profile = load(BODY)
+	c.body_profile = CharacterModels.body_profile(model) if not np.is_bot else load(BODY)
 	c.build_visuals = not headless
 	return c
 
@@ -331,6 +337,32 @@ func menu_start(kind: String, value := "") -> void:
 			UltraLauncher.launch(p)
 			UltraArgs.all()["window"] = "left"
 			UltraArgs.apply_window()
+
+
+# ------------------------------------------------------------------ character
+
+func controller_list() -> Array:
+	return CharacterModels.CONTROLLERS
+
+
+func model_list() -> Array:
+	return CharacterModels.MODELS
+
+
+## The local player's controller / model, picked in the main menu (not while a session runs:
+## the players are already built). Kept across Pause > Main menu like the level.
+func set_controller(key: String) -> void:
+	if UltraNet.is_active() or not CharacterModels.has_controller(key):
+		return
+	controller = key
+	Engine.set_meta("ultra_controller", key)
+
+
+func set_model(key: String) -> void:
+	if UltraNet.is_active() or not CharacterModels.has_model(key):
+		return
+	model = key
+	Engine.set_meta("ultra_model", key)
 
 
 # ------------------------------------------------------------------ levels
