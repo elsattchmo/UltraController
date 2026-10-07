@@ -1230,9 +1230,18 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   * Pace = speed + accel x `pace_lead` (a sprint start took full sprint strides round a still body); footholds
     capped at `brake_reach` 0.3 m off the natural one on voluntary changes, the full capture catch only for
     `disturb()` (pushes): reversals lunged 0.64 m. Swing clears the ground under the toes (`swing_clear`, stairs).
-  * Pelvis drop: a planted foot beyond 0.98 of the leg is skipped when slow (backing off a ledge sank the hips to
-    17 cm), counted as 0.85 at a run (push-off: else the sprint's planted foot slid 25 mm a frame); `max_drop` 0.6;
-    `drop_fall_clip` 0.4 m/s (hips stayed 30 cm low at the foot of the stairs).
+  * Pelvis drop: a planted foot beyond 0.98 of the leg is skipped (backing off a ledge sank the hips to 17 cm,
+    it steps instead); at a run (> 2 m/s) a planted foot the hips would sink more than `run_drop_max` 6 cm for
+    lifts early (`Foot::overreach`) - sinking for the sprint's trailing foot dipped the hips 35-45 cm in five
+    ticks. On clip legs the drop changes <= `drop_snap_rate` 1 + `drop_snap_speed` 3 x speed m/s; `max_drop`
+    0.35; `drop_fall_clip` 0.4 m/s (hips stayed 30 cm low at the foot of the stairs).
+  * A clip's `across` foot offsets are off ITS way of travel (`ClipLegs.angle`, the blend's main clip's), turned
+    toward the real travel by <= `across_warp` 1 rad: a foot that lifted standing (forward clip) and was sent
+    back-right landed on the wrong side. Feet keep `stance_gap` to their own side on every clip but a side
+    step's (braking a sideways walk put the trailing foot 30 cm across behind the leading one).
+  * Teleports: the gait resets on any root jump > `teleport_dist` 0.6 m (it only did past 2.5 m: the old
+    footholds stepped across); `SinewCharacter.teleport` clears the physical motion (`_motion_vel` walked the
+    body on after a respawn).
   * Third person at speed the facing follows the travel and turns slower (`PIVOT_SPRINT_SHARE`): a sprint can't
     spin round on the spot.
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
