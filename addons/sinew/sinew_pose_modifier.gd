@@ -13,6 +13,8 @@ var ragdoll: SinewRagdoll
 var blend := 0.0
 ## The animated pose of each part's bone, skeleton space, as of the last frame.
 var anim_pose: Array[Transform3D] = []
+## The clip's own pose (before the gait goes over it), skeleton space: the gait's standing feet.
+var clip_pose: Array[Transform3D] = []
 ## Torso twist shares, by bone (the head's part sits on the neck bone).
 const TWIST_SHARE := {"Spine": 0.15, "Chest": 0.15, "UpperChest": 0.2, "Neck": 0.5}
 var _twist_parts: Array = []     ## [[part index, share, [subtree part indices]], ...]
@@ -27,6 +29,7 @@ func _process_modification_with_delta(_delta: float) -> void:
 		anim_pose.resize(n)
 	for i in n:
 		anim_pose[i] = sk.get_bone_global_pose(ragdoll.parts[i].bone)
+	clip_pose = anim_pose.duplicate()
 	var to_skel := sk.global_transform.affine_inverse()
 	var f := Engine.get_physics_interpolation_fraction()
 	# The gait's pose over the clip's (it IS the animated pose then: what shows and what the body tracks).
