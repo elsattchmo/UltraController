@@ -110,6 +110,61 @@ func _process(delta: float) -> void:
 		anim.hand_ik = (anim as SinewAnimDriver).prop_hand_ik if state.held_id != 0 else null
 
 
+# ------------------------------------------------------------------ physical motion
+## The body moves the way its feet allow (single player): the motor still decides what you want
+## (direction, speed for the stance / sprint / injuries), but on the ground the capsule moves with
+## Sinew's gait - its centre of mass an inverted pendulum over the planted soles, footholds that
+## brake and catch it (Gait::drive). Starting takes a step, stopping carries a little, a reversal
+## plants a foot and pushes back; nothing is snappier than legs can make it.
+## Off: the motor's own movement (as UltraController). Networked play keeps the motor (it has to
+## predict) - only OFFLINE / NONE sessions use it.
+@export var physical_motion := true
+## The motion wanted this tick (world, m/s) while physical motion is on, else null - the gait
+## places its feet toward it.
+var motion_command: Variant = null
+const MOTION_STATES := [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TURN_IN_PLACE]
+var _motion_vel := Vector3.ZERO
+var _motion_on := false
+
+
+func _drive_motion(input: InputFrame, delta: float) -> void:
+	var r := ragdoll as SinewRagdoll
+	var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
+	var on := physical_motion and offline and is_authority() and r != null and r.gait_walking() \
+			and state.state in MOTION_STATES and state.is_grounded() and state.platform_id == 0
+	if not on:
+		_motion_on = false
+		motion_command = null
+		return
+	# What the motor wants: its own target speed along the stick (a copy: it sets flags).
+	var wish := input.move_world(input.yaw)
+	var speed := motor.target_ground_speed(state.copy(), input) if wish.length() > 0.01 else 0.0
+	var u := Vector3(wish.x, 0.0, wish.z).normalized() * speed if speed > 0.0 else Vector3.ZERO
+	var hv := Vector3(state.vel.x, 0.0, state.vel.z)
+	var v0 := _motion_vel if _motion_on else hv
+	var v: Vector3 = r.world.physics.call("character_gait_drive", r._id, state.pos, v0, u, delta)
+	v.y = 0.0
+	# The motor already moved the capsule at its own velocity: move it by the difference.
+	var dv := v - hv
+	if dv.length_squared() > 1e-8:
+		# Through the motor's own move (steps up, snaps down onto stairs, pushes props, keeps the
+		# grounded flags) - a bare slide left the floor on stairs and at a sprint.
+		var before := global_position
+		velocity = Vector3(dv.x, minf(velocity.y, 0.0), dv.z)
+		motor.move(state, true)
+		# What the floor / walls let it actually do.
+		var moved := global_position - before
+		v = hv + Vector3(moved.x, 0.0, moved.z) / delta
+		state.pos = global_position
+	velocity = Vector3(v.x, velocity.y, v.z)
+	state.vel = Vector3(v.x, state.vel.y, v.z)
+	if quantize_state:
+		state.quantize()
+	_motion_vel = v
+	_motion_on = true
+	motion_command = u
+
+
 # ------------------------------------------------------------------ unarmed push (testing)
 ## Empty-handed, the throw button pushes whatever is in front: tap for a shove that rocks a
 ## character back, hold (up to PUSH_CHARGE_TIME) for one that knocks it over (DamageInfo.shove
@@ -135,6 +190,7 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	super.simulate(input, delta, replaying)
 	if replaying:
 		return
+	_drive_motion(input, delta)
 	_push_wait = maxf(_push_wait - delta, 0.0)
 	if _push_due >= 0.0:
 		_push_due -= delta

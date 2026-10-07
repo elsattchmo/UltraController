@@ -1104,6 +1104,26 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
     zero speed made it physical while the pelvis swung round: it folded over).
   * s7 slide = smallest move of heel, ankle and toe (a heel-strike pivot isn't a slide).
   Tour `sinew_8way_review` (facing fixed: 8 directions, reversals).
+- **Physical motion (S7a)** (`SinewCharacter.physical_motion`, on; OFFLINE / NONE only - networked play keeps the
+  predicting motor): the motor still says what you want (`target_ground_speed` along the stick), but on the
+  ground (IDLE / MOVE / TURN_IN_PLACE, no platform) the capsule moves at `Gait::drive` - the centre of mass an
+  inverted pendulum (omega = sqrt(g / pelvis height)) over the centre of pressure, which can only be inside the
+  planted soles (heel up: the balls; toes up: the heels; in flight: nothing), aiming for the command in
+  `drive_tau` 0.2 s, push <= `friction` 0.45 g (0.8 outran the legs: planted feet ended out of reach). After
+  the motor's step, `_drive_motion` moves the capsule by (drive - motor) THROUGH `motor.move` (step-up / snap /
+  pushes; a bare slide left the floor on stairs) and sets body.velocity, so the motor carries on from it.
+  Footholds brake / catch: hip at touchdown + command x half the stance + (velocity - command - trim) x
+  `capture_gain` 1.5 / omega, never behind the hip along the way it's going (accelerating, the upright legs
+  couldn't reach), <= `land_max` x leg. A speed trim (integral, only near the command with a foot down -
+  else it wound up and overshot 45 %) removes the steady offset of the asymmetric sole. `motion_command` goes
+  to the gait; the upper body turns animated on the WISH (a slow start left it physical while the arm swing
+  came in: a hand whipped 14 m/s). Walk: 90 % speed ~0.65 s, stop ~0.4 m; run 3.5 -> stop 1.9 m / 5 steps.
+  Tests: core `gait drive`, suite s9.
+- **Knees and flow** (user: straight knees, bobbing): `max_reach` 0.95; the body lowers with speed (`knee_bend`
+  2.5 / 8 / 11 cm walk / run / sprint); the clips' pelvis bob kept at `cycle_bob` 0.6; the drop a stretched
+  PLANTED leg needs is eased (in 0.15, out 0.06 m/s, the rest beyond `drop_slack` at once); a swinging foot out
+  of reach is pulled into it (a run's trailing foot dragged the hips 30 cm down). Hips: walk 2 cm / 0.25 m/s,
+  run 2.8 cm (were 6 cm / 0.86 m/s) - core test `gait: flow`. Side steps `step_side` 0.65 of a forward one.
 - **Unarmed push** (test tool, `SinewCharacter.push` / `can_push`): empty hands (no prop held,
   nothing equipped, on the ground) + the throw button (`uc_throw`, the one that throws a held box):
   a tap shoves the character in front 3 m/s (rocks it back ~20 cm), holding charges to 5 m/s over

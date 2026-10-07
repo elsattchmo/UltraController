@@ -179,6 +179,11 @@ func _gait_root() -> Transform3D:
 	return _rigid(Transform3D(Basis(Vector3.UP, character.state.body_yaw), character.state.pos) * rel)
 
 
+## The gait is walking the body (on the ground, not ragdolling): physical motion can drive.
+func gait_walking() -> bool:
+	return _gait_on and _gait_running and not active
+
+
 func _update_gait(dt: float) -> void:
 	if not _gait_on:
 		gait_w = 0.0
@@ -192,7 +197,8 @@ func _update_gait(dt: float) -> void:
 		_gait_running = true
 	if _gait_running:
 		var pose: Array[Transform3D] = []
-		pose.assign(world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt))
+		var cmd: Variant = character.get("motion_command")
+		pose.assign(world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt, cmd))
 		gait_prev = gait_now if gait_now.size() == pose.size() else pose
 		gait_now = pose
 	gait_w = move_toward(gait_w, 1.0 if want else 0.0, dt / 0.2)
@@ -475,6 +481,11 @@ func _upper_animated() -> bool:
 	if st.held_uid != 0 or st.held_id != 0:
 		return true
 	if st.state not in [MotorState.Id.IDLE, MotorState.Id.CROUCH, MotorState.Id.TURN_IN_PLACE, MotorState.Id.MOVE]:
+		return true
+	# Moving, or about to (physical motion: the wish comes before the speed - a slow start left the
+	# arms physical while the walk's arm swing came in, and a hand whipped at 14 m/s).
+	var cmd: Variant = character.get("motion_command")
+	if cmd is Vector3 and Vector2((cmd as Vector3).x, (cmd as Vector3).z).length() > 0.3:
 		return true
 	return Vector2(st.vel.x, st.vel.z).length() > physical_below_speed
 

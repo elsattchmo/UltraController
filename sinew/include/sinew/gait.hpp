@@ -42,19 +42,25 @@ struct GaitSettings {
 	float duty_walk = 0.62f, duty_run = 0.36f;
 	float walk_speed = 1.4f, run_speed = 3.5f;  ///< duty goes from walk to run between these
 	float swing_height = 0.07f, swing_height_run = 0.16f;
-	float bob = 0.022f;                         ///< pelvis up / down, m (twice a stride)
+	float bob = 0.012f;                         ///< pelvis up / down, m (twice a stride)
 	float sway = 0.028f;                        ///< pelvis toward the standing foot, m
-	float run_crouch = 0.05f;                   ///< pelvis lower at a run, m
+	float run_crouch = 0.0f;                    ///< procedural: pelvis lower at a run, m (knee_bend does it now)
 	float arm_swing = 0.32f, arm_swing_run = 0.7f;  ///< procedural arm swing amplitude, rad
 	float arms_down = 1.25f;                    ///< procedural: upper arms down from the rest (T) pose, rad
 	float spine_twist = 0.09f;                  ///< procedural spine counter-twist, rad
 	float stop_speed = 0.08f;                   ///< slower than this = standing
 	float home_tolerance = 0.1f;                ///< a standing foot this far off its spot steps home
 	float turn_tolerance = 0.55f;               ///< rad between a foot and the facing: step round
-	float max_reach = 0.985f;                   ///< share of the leg length the hip may be from an ankle
+	float max_reach = 0.95f;                    ///< share of the leg length the hip may be from an ankle (knees never locked)
+	/// Knees: the body carries itself lower the faster it goes (m): walking, running, sprinting.
+	float knee_bend = 0.025f, knee_bend_run = 0.08f, knee_bend_sprint = 0.11f, sprint_speed = 6.0f;
+	/// Flow: the reference cycles' own pelvis bob kept at this share; the drop a stretched leg
+	/// needs is eased - in at `drop_rise` m/s, out at `drop_fall` (the hips settle low through a
+	/// stride instead of dipping at every step); only what's beyond that by `drop_slack` is taken at once.
+	float cycle_bob = 0.6f, drop_rise = 0.15f, drop_fall = 0.06f, drop_slack = 0.06f;
 	/// 8-way: the longest step backing / sideways as a share of the forward one (the cadence rises
 	/// to make up the speed: short quick side-steps, never a lunge).
-	float step_back = 0.72f, step_side = 0.5f;
+	float step_back = 0.72f, step_side = 0.65f;
 	/// Ankles at least this far apart sideways (body frame): a side-step never crosses the feet.
 	float stance_gap = 0.13f;
 	/// A standing foot left this far from its hip (share of the longest step), behind the motion,
@@ -63,7 +69,7 @@ struct GaitSettings {
 	/// ... and while one is, the cycle runs up to this many times faster (the other foot lands sooner).
 	float hurry_max = 2.5f, hurry_ease = 20.0f;   ///< (eased at hurry_ease per second)
 	/// A swinging foot's foothold moves at most this fast when the motion changes (m/s).
-	float retarget_speed = 6.0f;
+	float retarget_speed = 3.0f;                ///< (+ the current speed)
 	/// Hip warp: the legs walk in a frame turned toward the travel (a share of the angle off the
 	/// facing, at most `warp_max` rad; backing diagonals turn toward the backward direction), the
 	/// pelvis takes `warp_pelvis` of it and the spine turns the rest back so the chest keeps
@@ -77,12 +83,31 @@ struct GaitSettings {
 	/// so the weight goes over the feet; the arms trail the old motion by `arm_lag` x the lean.
 	float lean_gain = 0.3f, lean_max = 0.25f, lean_hz = 2.2f, lean_zeta = 0.55f, lean_rate = 2.5f;
 	float lean_pelvis = 0.35f, lean_shift = 0.0f, lean_shift_max = 0.07f, arm_lag = 0.7f;
+	/// Physical motion (drive()): the body's centre of mass as an inverted pendulum (height h,
+	/// omega = sqrt(g / h)) over its centre of pressure, which can only be inside the planted soles
+	/// (heel up: the balls; toes up: the heels; no foot down: nowhere - no push in flight).
+	/// It aims to reach the command in `drive_tau` s, never pushing harder than `friction` x g.
+	float drive_tau = 0.2f, friction = 0.45f;
+	float capture_gain = 1.5f;                  ///< foothold feedback on (velocity - command) / omega
+	float land_max = 0.85f;                     ///< a foothold at most this share of the leg from the hip
+	float sole_half_width = 0.045f;             ///< the support's half width at each foot, m
+	float toe_ahead = 0.06f;                    ///< sole support past the ball, m
+	float standing_accel = 3.0f;                ///< barely moving: plain capped acceleration (no pendulum)
+	/// Speed trim: the feet reach further ahead of the ankle than behind it, so pushing on and
+	/// braking aren't equal - an integral on (command - velocity), <= `trim_max` x the command,
+	/// lets a steady walk settle at the speed asked for. Fades when stopping.
+	float trim_gain = 1.5f, trim_max = 0.4f;
 };
 
 struct GaitInput {
 	Transform root;      ///< the character's ground point and facing (model space -> world)
 	Vec3 velocity;       ///< world, m/s (the ground part is used)
 	float dt = 1.0f / 60.0f;
+	/// The motion wanted (world, m/s). With it, footholds brake and catch the body: a foot goes
+	/// down ahead of where the body is heading by its capture offset ((velocity - command) / omega),
+	/// so a change of motion takes real steps. Without it, the feet follow `velocity`.
+	Vec3 command;
+	bool has_command = false;
 };
 
 class Gait {
@@ -111,6 +136,14 @@ public:
 	Vec3 foothold(int foot) const { return _feet[size_t(foot)].target; }
 	Vec3 home(int foot) const;
 	float cadence() const { return _cadence; }
+	/// Physical motion: the velocity after `dt` for a body at `com` (ground point under the centre
+	/// of mass) moving at `velocity`, wanting `command` - accelerated only as its feet allow (see
+	/// GaitSettings::drive_tau). Uses the feet as of the last update(); call once per tick.
+	Vec3 drive(Vec3 com, Vec3 velocity, Vec3 command, float dt);
+	/// The centre of pressure drive() used last (world, on the ground plane).
+	Vec3 cop() const { return _cop; }
+	/// The support polygon: planted soles (ground plane, counter-clockwise from above). Empty in flight.
+	std::vector<Vec3> support() const;
 	/// The legs' turn toward the travel off the facing (rad, + = to the left).
 	float warp() const { return _warp; }
 	/// The momentum lean: world, horizontal, direction x angle (rad).
@@ -157,6 +190,10 @@ private:
 	float _step_max = 0.5f;  ///< longest step this tick (direction and gait), m
 	Vec3 hip_ground(int foot) const;
 	float _warp = 0.0f;
+	float _drop = 0.0f, _dt = 1.0f / 60.0f;
+	Vec3 _cmd, _cop, _trim;
+	float _pelvis_h = 0.95f;     ///< last pelvis height over the ground (the pendulum's length)
+	bool _has_cmd = false;
 	Vec3 _lean, _lean_v, _acc, _prev_vel;
 	void update_lean(float dt);
 	float _hurry = 1.0f, _hurry_want = 1.0f;

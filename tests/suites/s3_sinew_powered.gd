@@ -43,17 +43,22 @@ func test_walking_powered_keeps_up() -> void:
 	var fastest := 0.0
 	var b := bot(c)
 	b.set_steps([{"ticks": 150, "move": Vector2(0, 1)}])
+	var last := r._pose()
 	for i in 150:
 		await ticks(1)
+		var now := r._pose()
 		if i > 30:
 			worst = maxf(worst, _track_error(r))
-			fastest = maxf(fastest, r.max_speed())
+			# Flailing = a PHYSICAL part flying about; the walking legs are animated (the gait's own
+			# swing - a catch-up stride as it gets going reaches ~8 m/s - is the gait tests' business).
+			for k in now.size():
+				if k < r._dyn.size() and r._dyn[k]:
+					fastest = maxf(fastest, (now[k].origin - last[k].origin).length() * 60.0)
+		last = now
 	info("walking: worst part %.3f m off the animation, fastest part %.1f m/s" % [worst, fastest])
 	check(r._powered_on, "still powered while walking")
 	check(worst < 0.15, "keeps up with the walk (worst %.3f m)" % worst)
-	# (The gait's swinging foot / shin peaks ~6.5 m/s as a walk starts - the foot left behind by the
-	# acceleration catches up; flailing physics is far beyond that.)
-	check(fastest < 7.5, "no part flailing (%.1f m/s)" % fastest)
+	check(fastest < 6.0, "no physical part flailing (%.1f m/s)" % fastest)
 
 
 func test_a_hit_pushes_the_part_and_it_recovers() -> void:

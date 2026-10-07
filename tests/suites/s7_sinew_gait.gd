@@ -134,12 +134,13 @@ func test_stairs_put_each_foot_on_a_step() -> void:
 	c.teleport(Vector3(30.0, 0.05, -17.0), 0.0)
 	await ticks(10)
 	var r := c.ragdoll as SinewRagdoll
-	bot(c).set_steps([{"ticks": 200, "yaw": 0.0, "move": Vector2(0, 1)}])
+	# (Physical motion: a walk takes ~0.7 s to get going - 4.3 s to reach the steps and climb.)
+	bot(c).set_steps([{"ticks": 280, "yaw": 0.0, "move": Vector2(0, 1)}])
 	var planted := 0
 	var y0 := c.state.pos.y
 	var worst := 0.0
 	var ankle_h := -1.0
-	for k in 180:
+	for k in 260:
 		await ticks(1)
 		var st: Dictionary = r.world.physics.call("character_gait_state", r._id)
 		for side in ["l", "r"]:
