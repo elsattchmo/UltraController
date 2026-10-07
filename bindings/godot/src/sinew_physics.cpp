@@ -744,6 +744,10 @@ Array SinewPhysics::character_gait_update(int character, const Transform3D& root
 	return out;
 }
 
+int64_t SinewPhysics::add_ball(const Vector3& position, const Vector3& velocity, double radius, double mass, double restitution) {
+	return int64_t(_world->add_ball(to_sinew(position), to_sinew(velocity), float(radius), float(mass), float(restitution)));
+}
+
 Vector3 SinewPhysics::character_gait_drive(int character, const Vector3& com, const Vector3& velocity, const Vector3& command,
 		double dt) {
 	auto it = _gaits.find(character);
@@ -778,6 +782,7 @@ Dictionary SinewPhysics::character_gait_state(int character) const {
 	d["duty"] = g.duty();
 	d["warp"] = g.warp();
 	d["cop"] = to_godot(g.cop());
+	d["capture_margin"] = g.capture_margin();
 	Array sup;
 	for (const sinew::Vec3& p : g.support()) {
 		sup.push_back(to_godot(p));
@@ -839,6 +844,7 @@ void SinewPhysics::_bind_methods() {
 	BIND_ENUM_CONSTANT(KIND_KINEMATIC);
 	BIND_ENUM_CONSTANT(KIND_DYNAMIC);
 	ClassDB::bind_method(D_METHOD("add_body", "kind", "xform"), &SinewPhysics::add_body);
+	ClassDB::bind_method(D_METHOD("add_ball", "position", "velocity", "radius", "mass", "restitution"), &SinewPhysics::add_ball, DEFVAL(0.35));
 	ClassDB::bind_method(D_METHOD("add_box_shape", "body", "local", "half_extents", "friction"), &SinewPhysics::add_box_shape, DEFVAL(0.6));
 	ClassDB::bind_method(D_METHOD("add_sphere_shape", "body", "center", "radius", "friction"), &SinewPhysics::add_sphere_shape, DEFVAL(0.6));
 	ClassDB::bind_method(D_METHOD("add_capsule_shape", "body", "a", "b", "radius", "friction"), &SinewPhysics::add_capsule_shape, DEFVAL(0.6));

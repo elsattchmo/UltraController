@@ -15,6 +15,7 @@ var physics: RefCounted
 
 func _ready() -> void:
 	super._ready()
+	item_event.connect(_on_item_event)
 	if not SinewWorld.available():
 		push_warning("Sinew: the GDExtension isn't loaded (addons/sinew/bin) - playing as a plain UltraCharacter")
 
@@ -126,10 +127,90 @@ const MOTION_STATES := [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TU
 var _motion_vel := Vector3.ZERO
 var _motion_on := false
 
+# ------------------------------------------------------------------ being pushed
+## A shove taken on the feet (single player, physical motion): its momentum goes into the body's
+## motion and the gait's catching steps take it out again - a stumble, over a ledge or down the
+## stairs if that's where the steps go - and when the next step can't catch it (Gait::capture_margin
+## negative for TRIP_TIME .. TRIP_TIME_FAR s) the body trips and goes down with the speed it has.
+const STUMBLE_TIME := 1.0
+const TRIP_TIME := 0.5        ## s the next step mustn't be able to catch it, barely gone ..
+const TRIP_TIME_FAR := 0.25   ## .. and when it's TRIP_FAR (m) beyond a step's reach
+const TRIP_FAR := 0.6
+signal tripped(velocity: Vector3)
+var _stumble_t := 0.0
+var _trip_t := 0.0
+
+
+## Take a shove of `dv` (m/s, world). False if it can't be taken on the feet (not walking under
+## physical motion) - the caller shoves it the plain way then.
+func receive_push(dv: Vector3) -> bool:
+	if not _motion_on:
+		return false
+	var h := Vector3(dv.x, 0.0, dv.z)
+	_motion_vel += h
+	velocity = Vector3(_motion_vel.x, velocity.y, _motion_vel.z)
+	state.vel = Vector3(_motion_vel.x, state.vel.y, _motion_vel.z)
+	_stumble_t = STUMBLE_TIME
+	_trip_t = 0.0
+	if ragdoll is SinewRagdoll and h.length() > 0.01:
+		(ragdoll as SinewRagdoll).jolt(h.normalized(), 12.0 * h.length())
+	return true
+
+
+func stumbling() -> bool:
+	return _stumble_t > 0.0
+
+
+## The ball launcher (a test tool): its shot is a dud (no range, no damage); a real ball flies.
+func _on_item_event(kind: StringName, d: Dictionary) -> void:
+	if kind != &"fire" or not is_authority():
+		return
+	var def := held_def()
+	if def == null or def.id != &"ball_launcher" or not d.has("dir"):
+		return
+	var dir: Vector3 = d.dir
+	var eq := get_node_or_null("Equipment") as UltraEquipmentVisual
+	var from: Vector3 = eq.muzzle_transform().origin if eq else (d.origin as Vector3)
+	# From the muzzle toward where the aim ray points (the crosshair), clear of the hands.
+	var target: Vector3 = (d.origin as Vector3) + dir * 30.0
+	var aim := (target - from).normalized()
+	SinewBall.launch(self, from + aim * 0.3, aim, def)
+
+
 
 func _drive_motion(input: InputFrame, delta: float) -> void:
 	var r := ragdoll as SinewRagdoll
 	var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
+	# Staggering (the whole body physical, the balancer stepping it out): the character goes where the
+	# simulated body goes - its centre of mass carries the capsule, through the motor's own move, so a
+	# body knocked back off a ledge goes over it. (It used to wait behind and floor the body once it was
+	# 0.9 m away.)
+	if physical_motion and offline and is_authority() and r != null and r.staggering() and state.is_grounded() \
+			and state.state in MOTION_STATES:
+		var st := r.balance_state()
+		if st.has("com"):
+			var com: Vector3 = st.com
+			var to := Vector3(com.x - state.pos.x, 0.0, com.z - state.pos.z)
+			var v := to / delta
+			if v.length() > 8.0:
+				v = v.normalized() * 8.0
+			var before := global_position
+			velocity = Vector3(v.x, minf(velocity.y, 0.0), v.z)
+			motor.move(state, true)
+			var moved := global_position - before
+			v = Vector3(moved.x, 0.0, moved.z) / delta
+			state.pos = global_position
+			# The animation must not walk meanwhile (the muscles would chase a walk cycle that moves
+			# with the body: a feedback loop that kicked the legs and launched it): it stands still,
+			# the momentum is kept for when the stagger hands back.
+			velocity = Vector3(0.0, velocity.y, 0.0)
+			state.vel = Vector3(0.0, state.vel.y, 0.0)
+			if quantize_state:
+				state.quantize()
+			_motion_vel = v
+			_motion_on = false
+			motion_command = null
+			return
 	var on := physical_motion and offline and is_authority() and r != null and r.gait_walking() \
 			and state.state in MOTION_STATES and state.is_grounded() and state.platform_id == 0
 	if not on:
@@ -140,6 +221,10 @@ func _drive_motion(input: InputFrame, delta: float) -> void:
 	var wish := input.move_world(input.yaw)
 	var speed := motor.target_ground_speed(state.copy(), input) if wish.length() > 0.01 else 0.0
 	var u := Vector3(wish.x, 0.0, wish.z).normalized() * speed if speed > 0.0 else Vector3.ZERO
+	# Stumbling: nobody walks off while their feet are busy catching them.
+	if _stumble_t > 0.0:
+		_stumble_t = maxf(_stumble_t - delta, 0.0)
+		u *= 1.0 - _stumble_t / STUMBLE_TIME
 	var hv := Vector3(state.vel.x, 0.0, state.vel.z)
 	var v0 := _motion_vel if _motion_on else hv
 	var v: Vector3 = r.world.physics.call("character_gait_drive", r._id, state.pos, v0, u, delta)
@@ -163,6 +248,19 @@ func _drive_motion(input: InputFrame, delta: float) -> void:
 	_motion_vel = v
 	_motion_on = true
 	motion_command = u
+	# A stumble the feet can't catch: it trips (the body goes down with the momentum it has).
+	if _stumble_t > 0.0 and is_authority():
+		var st: Dictionary = r.world.physics.call("character_gait_state", r._id)
+		var margin := float(st.get("capture_margin", 1.0))
+		_trip_t = _trip_t + delta if margin < 0.0 else 0.0
+		# (Not at once: a body that can't be caught still scrambles a step or two first - the
+		# further gone, the sooner it goes down.)
+		if _trip_t > lerpf(TRIP_TIME, TRIP_TIME_FAR, clampf(-margin / TRIP_FAR, 0.0, 1.0)):
+			_stumble_t = 0.0
+			_motion_on = false
+			motion_command = null
+			tripped.emit(v)
+			knock_down(v + Vector3.UP * 0.6)
 
 
 # ------------------------------------------------------------------ unarmed push (testing)
@@ -175,6 +273,7 @@ const PUSH_CONTACT := 0.18
 const PUSH_REACH := 0.75            ## chest to the hands' reach, m
 const PUSH_SHOVE := Vector2(3.0, 5.0)   ## m/s given to a character: tap .. full charge
 const PUSH_COOLDOWN := 0.6
+const PUSH_STUMBLE := Vector2(1.2, 4.5)  ## m/s into a Sinew body's motion: tap .. full charge
 const PUSH_STATES := [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.CROUCH, MotorState.Id.LAND, MotorState.Id.TURN_IN_PLACE]
 
 signal pushed(target: Object, shove: Vector3)
@@ -184,6 +283,28 @@ var _push_held := false
 var _push_due := -1.0               ## s until the pending push lands (-1: none)
 var _push_power := 0.0
 var _push_wait := 0.0
+var _push_arm_t := 0.0
+const PUSH_ARMS_HOLD := 0.3
+
+
+## The arms do the pushing (Sinew's reach, physical): drawn in to the chest while it's charged, then
+## straight out at the target's chest - the Push clip threw them up into the air.
+func _push_arms(delta: float) -> void:
+	var r := ragdoll as SinewRagdoll
+	if r == null or not can_push():
+		_push_arm_t = 0.0
+		return
+	var out := _push_arm_t > 0.0
+	_push_arm_t = maxf(_push_arm_t - delta, 0.0)
+	if not out and push_charge <= 0.0:
+		return
+	var fwd := _push_dir()
+	var side := fwd.cross(Vector3.UP).normalized()       # (to the right)
+	var chest := state.pos + Vector3.UP * state.height * 0.74
+	var ahead := PUSH_REACH + 0.05 if out else 0.22 - 0.06 * push_charge
+	for s in [-1.0, 1.0]:
+		var limb := SinewRagdoll.Limb.ARM_R if s > 0.0 else SinewRagdoll.Limb.ARM_L
+		r.reach(limb, chest + fwd * ahead + side * (0.17 * s) - Vector3.UP * 0.04)
 
 
 func simulate(input: InputFrame, delta: float, replaying := false) -> void:
@@ -191,6 +312,7 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	if replaying:
 		return
 	_drive_motion(input, delta)
+	_push_arms(delta)
 	_push_wait = maxf(_push_wait - delta, 0.0)
 	if _push_due >= 0.0:
 		_push_due -= delta
@@ -220,8 +342,7 @@ func push(power: float) -> void:
 	_push_due = PUSH_CONTACT
 	_push_wait = PUSH_COOLDOWN
 	push_charge = 0.0
-	if anim is SinewAnimDriver:
-		(anim as SinewAnimDriver).play_push(PUSH_CONTACT)
+	_push_arm_t = PUSH_CONTACT + PUSH_ARMS_HOLD
 
 
 func _push_dir() -> Vector3:
@@ -253,6 +374,9 @@ func _push_land(power: float) -> void:
 			best = o
 	var dv := lerpf(PUSH_SHOVE.x, PUSH_SHOVE.y, power)
 	var shove := (fwd + Vector3.UP * 0.1).normalized() * dv
+	# A Sinew body takes it on its feet: a tap is a step or two back, a full push a stumble it may
+	# not catch (it trips). Anyone else is shoved the controller's way.
+	var on_feet := best is SinewCharacter and (best as SinewCharacter).receive_push(fwd * lerpf(PUSH_STUMBLE.x, PUSH_STUMBLE.y, power))
 	if best is UltraCharacter:
 		var c := best as UltraCharacter
 		var info := UltraCombat.DamageInfo.new()
@@ -263,7 +387,7 @@ func _push_land(power: float) -> void:
 		info.point = c.state.pos + Vector3.UP * c.state.height * 0.7
 		info.attacker_id = net_id
 		info.collider = c
-		info.shove = shove
+		info.shove = Vector3.ZERO if on_feet else shove     # (the hit event still flinches it)
 		c.apply_damage(info)
 	elif best is RigidBody3D:
 		var rb := best as RigidBody3D

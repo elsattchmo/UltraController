@@ -498,3 +498,31 @@ TEST_CASE("gait: leg effort - the standing leg works, more at a run, the swingin
 	CHECK(swing_walk < stance_walk);
 	CHECK(stance_walk < 3.0f);                        // and the numbers are muscle-sized
 }
+
+TEST_CASE("gait drive: a shove is stumbled out of in steps; one too hard can't be caught") {
+	struct R {
+		int steps;
+		float travelled, worst_margin;
+	};
+	auto shove = [](float dv) {
+		Driven d;
+		d.run(Vec3{}, 0.5f);
+		const int s0 = d.landings;
+		d.vel = Vec3{ 0, 0, -dv };                       // shoved backwards
+		float worst = 1e9f;
+		const float z0 = d.w.root.p.z;
+		for (int k = 0; k < 120; ++k) {
+			d.run(Vec3{}, DT);
+			worst = std::fmin(worst, d.w.gait->capture_margin());
+		}
+		return R{ d.landings - s0, z0 - d.w.root.p.z, worst };
+	};
+	const R light = shove(1.2f), hard = shove(2.5f), huge = shove(4.5f);
+	MESSAGE("shove 1.2 m/s: ", light.steps, " steps, ", light.travelled, " m, margin ", light.worst_margin, "; 2.5: ", hard.steps,
+			" steps, ", hard.travelled, " m, margin ", hard.worst_margin, "; 4.5: margin ", huge.worst_margin);
+	CHECK(light.steps >= 1);                           // even a light shove takes a step back
+	CHECK(light.worst_margin > 0.0f);                  // ... and is caught
+	CHECK(hard.steps > light.steps);                   // a hard one stumbles further
+	CHECK(hard.travelled > light.travelled);
+	CHECK(huge.worst_margin < 0.0f);                   // this one the feet can't catch
+}

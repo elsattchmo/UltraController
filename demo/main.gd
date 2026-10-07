@@ -169,8 +169,9 @@ func _reserve_devices(n: int) -> void:
 func _make_character(np: NetPlayer) -> UltraCharacter:
 	if ZombieFactory.is_zombie(np):
 		return ZombieFactory.make(np, not headless)
-	# The menu's Character pick is for players only: dummies and the companion stay as they are.
-	var c := CharacterModels.make(controller) if not np.is_bot else UltraCharacter.new()
+	# The menu's Controller pick goes for the yard's dummies and the companion too (Sinew ones can be
+	# pushed into a stumble); the Model pick is for players only. `--plain-bots`: bots stay plain.
+	var c := CharacterModels.make(controller) if not np.is_bot or not args.has("plain-bots") else UltraCharacter.new()
 	c.profile = (load(PROFILES.get(UltraArgs.get_str("profile", "fps"), PROFILES["fps"])) as MovementProfile).duplicate(true)
 	c.body_profile = CharacterModels.body_profile(model) if not np.is_bot else load(BODY)
 	c.build_visuals = not headless
@@ -245,6 +246,9 @@ func _give_starting_kit(c: UltraCharacter) -> void:
 	if ItemDB.get_def(&"ammo_12g"):
 		UltraItems.give(c, &"ammo_12g", 30)
 	UltraItems.give(c, &"medkit", 1)
+	# Sinew's test tool: balls to knock the dummies about with.
+	if c is SinewCharacter and ItemDB.get_def(&"ball_launcher"):
+		UltraItems.give(c, &"ball_launcher", 1)
 
 
 ## The shooting range bench also has a carbine and a box of 5.56 on it (server-spawned

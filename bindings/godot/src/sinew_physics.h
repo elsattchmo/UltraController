@@ -143,6 +143,8 @@ public:
 			const Variant& command = Variant());
 	/// Physical motion: the velocity after dt for a body at `com` moving at `velocity` toward
 	/// `command`, as far as its planted feet allow (Gait::drive).
+	/// A ball (dynamic, continuous collision) in the world: hits character parts and the level.
+	int64_t add_ball(const Vector3& position, const Vector3& velocity, double radius, double mass, double restitution = 0.35);
 	/// Estimated leg muscle effort per part from the gait's pose (Gait::leg_effort; -1: not a leg).
 	PackedFloat32Array character_gait_leg_effort(int character) const;
 	Vector3 character_gait_drive(int character, const Vector3& com, const Vector3& velocity, const Vector3& command, double dt);

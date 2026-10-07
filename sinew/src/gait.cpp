@@ -583,6 +583,12 @@ Vec3 Gait::drive(Vec3 com, Vec3 velocity, Vec3 command, float dt) {
 	return v + a * dt;
 }
 
+float Gait::capture_margin() const {
+	const float g = _world ? std::max(length(_world->gravity()), 1.0f) : 9.81f;
+	const float omega = std::sqrt(g / std::max(_pelvis_h, 0.4f));
+	return _s.land_max * _leg_len - length(_vel - _cmd) / omega;
+}
+
 std::vector<float> Gait::leg_effort() const {
 	const Rig& rig = _rig;
 	std::vector<float> out(rig.parts.size(), -1.0f);

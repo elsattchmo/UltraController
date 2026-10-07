@@ -108,6 +108,9 @@ public:
 	/// An empty body; give it shapes with the add_*_shape calls. Static and kinematic bodies
 	/// stand in for the host's level geometry and its moving things (doors, platforms, props).
 	BodyHandle add_body(BodyKind kind, const Transform& xform);
+	/// A thrown / fired ball: dynamic, continuous collision (a bullet: it can't pass through a part
+	/// between steps), `mass` kg, bouncing by `restitution`. It hits character parts and the level.
+	BodyHandle add_ball(Vec3 position, Vec3 velocity, float radius, float mass, float restitution = 0.35f, float friction = 0.6f);
 	void add_box_shape(BodyHandle body, const Transform& local, Vec3 half_extents, float friction = 0.6f);
 	void add_sphere_shape(BodyHandle body, Vec3 center, float radius, float friction = 0.6f);
 	void add_capsule_shape(BodyHandle body, Vec3 a, Vec3 b, float radius, float friction = 0.6f);

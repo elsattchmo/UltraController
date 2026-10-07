@@ -1,0 +1,53 @@
+[gd_resource type="Resource" script_class="ItemDefinition" format=3]
+
+[ext_resource type="PackedScene" path="res://assets/items/pistol/pistol.glb" id="1_hbxyx"]
+[ext_resource type="Script" path="res://addons/ultra_controller/items/item_definition.gd" id="2_7i21w"]
+[ext_resource type="PackedScene" path="res://assets/items/pistol/pistol_world.tscn" id="3_baedf"]
+
+[resource]
+script = ExtResource("2_7i21w")
+id = &"ball_launcher"
+display_name = "Ball launcher"
+description = "Test tool (Sinew): fires 2 kg balls at 20 m/s - knock the dummies about. No damage."
+kind = 1
+mass = 0.85
+world_scene = ExtResource("3_baedf")
+equip_scene = ExtResource("1_hbxyx")
+equip_slots = 5
+grip_offset = Transform3D(-0.003428325, 0.9541288, 0.29937682, 0.3295974, 0.2837276, -0.9004801, -0.94411534, 0.09558682, -0.31545106, 0.025873184, 0.10596973, 0.03248129)
+support_offset = Transform3D(0.551208, 0.62993485, 0.5471306, -0.76462936, 0.11892674, 0.63340235, 0.33393368, -0.7674884, 0.5472199, -0.05000797, -0.15438497, 0.12738942)
+two_handed = true
+holster_offset = Transform3D(-0.9636113, 0.2304622, -0.13542672, -0.16065863, -0.09440953, 0.9824844, 0.21363993, 0.9684906, 0.12799984, -0.211644, -0.050415277, 0.13448593)
+anim_roles = {
+"aim": "pistol_aim_neutral",
+"aim_down": "pistol_aim_down",
+"aim_up": "pistol_aim_up",
+"fire": "pistol_shoot",
+"idle": "pistol_idle",
+"reload": "pistol_reload"
+}
+anim_clips = {
+"butt_pistol": ["mixamo/M_PistolStrike"]
+}
+recoil_gun_deg = 2.0
+stats = {
+"ads_fov": 60.0,
+"ammo": "ammo_9mm",
+"ball_life": 2.5,
+"ball_mass": 2.0,
+"ball_radius": 0.11,
+"ball_speed": 20.0,
+"damage": 0.0,
+"fire_interval": 0.3,
+"impulse": 0.0,
+"mag_size": 20,
+"noise": 6.0,
+"range": 0.01,
+"recoil_pitch_deg": 2.0,
+"recoil_yaw_deg": 0.4,
+"reload_commit": 1.55,
+"reload_time": 2.08,
+"sfx": "pistol",
+"smoke": 0.15,
+"spread_deg": 0.0
+}

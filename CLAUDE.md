@@ -958,8 +958,9 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - **Main menu Character section** (`demo/characters/character_models.gd` = `CharacterModels`): Controller
   (UltraController | Sinew) and Model (Mannequin | Zombie) toggle rows between the levels and Play
   (`main.set_controller` / `set_model`, `--controller=` / `--model=`, kept in Engine meta `ultra_controller`
-  / `ultra_model` across Pause > Main menu; refused mid-session). Players only: bots (dummies, companion,
-  zombies) stay plain mannequin UltraCharacters. The zombie MODEL for a player = Romero's mesh, cut set and
+  / `ultra_model` across Pause > Main menu; refused mid-session). The Controller pick goes for the yard dummies and the
+  companion too (Sinew dummies can be pushed / shot with balls; `--plain-bots` keeps them plain); the Model pick
+  is players only; zombies stay plain. The zombie MODEL for a player = Romero's mesh, cut set and
   hit capsules on the mannequin's FULL animation set (same humanoid skeleton); the zombie NPC profile is LITE.
 - Tests: `sinew_tests` (doctest, core), suite `s0` (extension loads + simulates, Single player plays the pick,
   zombie model walks on the full stack), `ui_menus.test_main_menu_character_select_with_pad`. A GDScript parse
@@ -1132,6 +1133,19 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   pressure (clamped onto that sole) toward the COM, against each joint's lever arm, plus the leg's own
   segments; the debug view uses it for kinematic legs. The debug view draws from the POSED skeleton at
   `skeleton_updated` (the kinematic bodies follow a tick or two late: at a sprint the shapes trailed 0.5 m).
+- **Pushes, stumbles, trips, test balls (S7b)**: a push on a Sinew body goes into its physical motion
+  (`SinewCharacter.receive_push`: tap 1.2 .. full 4.5 m/s): the gait's capture footholds stumble it out
+  (a tap ~0.9 m / 2-3 steps); `Gait::capture_margin` (a step's reach minus the capture offset) negative for
+  0.5 .. 0.25 s (sooner the further gone) trips it (knock_down with its speed). The pusher's arms are Sinew
+  `reach` effectors (in to the chest while charging, out at the target's chest) - the Push clip threw them up.
+  Ball launcher (`demo/items/ball_launcher_item.tres`, Sinew players' kit): the shot is a dud, `SinewBall`
+  is a Box3D body (`PhysicsWorld::add_ball`: 2 kg, 20 m/s, bullet, restitution 0.35, gone after 2.5 s); a
+  body on its path within 0.15 s is woken whole (`SinewRagdoll.brace` = the stagger mode; `SinewRagdoll.all`
+  registry) so the CONTACT decides the reaction (no scripted shares). Staggering, the capsule follows the
+  body's COM through `motor.move` (it waited behind and the 0.9 m "careering" rule floored a body that was
+  stepping fine) and the animation stands still (a walk cycle moving with the capsule made the muscles kick
+  the legs: a feedback loop that launched it). Known: the balancer drifts sideways ~1 m recovering from a
+  straight chest hit.
 - **Unarmed push** (test tool, `SinewCharacter.push` / `can_push`): empty hands (no prop held,
   nothing equipped, on the ground) + the throw button (`uc_throw`, the one that throws a held box):
   a tap shoves the character in front 3 m/s (rocks it back ~20 cm), holding charges to 5 m/s over

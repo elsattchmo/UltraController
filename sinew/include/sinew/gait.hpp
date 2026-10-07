@@ -143,6 +143,10 @@ public:
 	/// of mass) moving at `velocity`, wanting `command` - accelerated only as its feet allow (see
 	/// GaitSettings::drive_tau). Uses the feet as of the last update(); call once per tick.
 	Vec3 drive(Vec3 com, Vec3 velocity, Vec3 command, float dt);
+	/// Can a step still catch the body? The reach of a step (land_max x leg) minus how far the
+	/// capture point is off ((velocity - command) / omega), metres: negative = a stumble the
+	/// next step can't catch (the host trips it if that lasts).
+	float capture_margin() const;
 	/// The centre of pressure drive() used last (world, on the ground plane).
 	Vec3 cop() const { return _cop; }
 	/// How hard each leg muscle would be working in the pose last solved (torque over the rig's

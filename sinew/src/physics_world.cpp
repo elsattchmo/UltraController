@@ -64,6 +64,23 @@ BodyHandle PhysicsWorld::add_body(BodyKind kind, const Transform& xform) {
 	return b3StoreBodyId(b3CreateBody(_impl->world, &def));
 }
 
+BodyHandle PhysicsWorld::add_ball(Vec3 position, Vec3 velocity, float radius, float mass, float restitution, float friction) {
+	b3BodyDef def = b3DefaultBodyDef();
+	def.type = b3_dynamicBody;
+	def.position = to_b3(position);
+	def.linearVelocity = to_b3(velocity);
+	def.isBullet = true;
+	b3BodyId body = b3CreateBody(_impl->world, &def);
+	b3ShapeDef shape = b3DefaultShapeDef();
+	shape.density = mass / std::max(4.0f / 3.0f * PI * radius * radius * radius, 1e-6f);
+	shape.baseMaterial.friction = friction;
+	shape.baseMaterial.restitution = restitution;
+	b3Sphere sphere = { b3Vec3{ 0.0f, 0.0f, 0.0f }, radius };
+	b3CreateSphereShape(body, &shape, &sphere);
+	_impl->bodies++;
+	return b3StoreBodyId(body);
+}
+
 namespace {
 b3ShapeDef shape_def(float friction) {
 	b3ShapeDef def = b3DefaultShapeDef();
