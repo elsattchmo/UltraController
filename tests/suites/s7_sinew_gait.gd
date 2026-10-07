@@ -30,7 +30,13 @@ func _track_feet(c: SinewCharacter, frames: int) -> Dictionary:
 	var sk := c.skeleton
 	var feet := [sk.find_bone("LeftFoot"), sk.find_bone("RightFoot")]
 	var toes := [sk.find_bone("LeftToes"), sk.find_bone("RightToes")]
-	var rec := {"pos": [[], []], "toe": [[], []], "planted": [[], []], "off": 0.0}
+	var rec := {"pos": [[], []], "toe": [[], []], "heel": [[], []], "planted": [[], []], "off": 0.0}
+	# The heel: on the sole under the ankle, 6 cm back (in the foot bone's frame, from the rest pose;
+	# the model faces +Z in skeleton space).
+	var heel_local := []
+	for f in feet:
+		var rest := sk.get_bone_global_rest(f)
+		heel_local.append(rest.affine_inverse() * Vector3(rest.origin.x, 0.0, rest.origin.z - 0.06))
 	var cb := func() -> void:
 		var st: Dictionary = r.world.physics.call("character_gait_state", r._id)
 		for i in 2:
@@ -38,6 +44,7 @@ func _track_feet(c: SinewCharacter, frames: int) -> Dictionary:
 			var a := (sk.global_transform * sk.get_bone_global_pose(feet[i])).origin
 			rec.pos[i].append(a)
 			rec.toe[i].append((sk.global_transform * sk.get_bone_global_pose(toes[i])).origin if toes[i] >= 0 else a)
+			rec.heel[i].append(sk.global_transform * sk.get_bone_global_pose(feet[i]) * (heel_local[i] as Vector3))
 			var planted := bool(st.get("planted_" + side, false))
 			rec.planted[i].append(planted)
 			if planted:
@@ -50,17 +57,19 @@ func _track_feet(c: SinewCharacter, frames: int) -> Dictionary:
 
 
 ## Worst frame-to-frame slide of a planted foot (both frames planted, not just after landing), mm:
-## the pivot holds still - the heel at the strike, the ball rolling off - so the smaller of the
-## ankle's and the toe's moves.
+## the pivot holds still - the heel at the strike, the ball rolling off - so the smallest of the
+## heel's, the ankle's and the toe's moves.
 func _worst_slide(rec: Dictionary) -> float:
 	var worst := 0.0
 	for i in 2:
 		var p: Array = rec.pos[i]
 		var t: Array = rec.toe[i]
+		var h: Array = rec.heel[i]
 		var pl: Array = rec.planted[i]
 		for k in range(3, p.size()):
 			if pl[k] and pl[k - 1] and pl[k - 2] and pl[k - 3]:
-				var d := minf((p[k] as Vector3).distance_to(p[k - 1]), (t[k] as Vector3).distance_to(t[k - 1]))
+				var d := minf(minf((p[k] as Vector3).distance_to(p[k - 1]), (t[k] as Vector3).distance_to(t[k - 1])),
+						(h[k] as Vector3).distance_to(h[k - 1]))
 				worst = maxf(worst, d)
 	return worst * 1000.0
 

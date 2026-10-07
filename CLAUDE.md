@@ -1084,6 +1084,26 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   where it was put down (locked). Step length <= `step_max_walk` 0.62 / `step_max_run` 1.15 x leg length
   (cadence rises for short legs, up to 5 steps/s). Measuring a planted foot: the smaller of the ankle's and
   the toe's frame-to-frame move (one of them is the pivot). Tour `sinew_gait_review` (side on).
+- **8-way gait + momentum** (core `Gait`, sinew/src/gait.cpp; tests `gait: 8-way`, `gait: reversing`,
+  `gait: momentum` measured against plain forward walking, with velocities ramped like fps.tres:
+  accel 11, brake 20 m/s2 - a velocity step is not what the game does):
+  * Hip warp: the legs walk in a frame turned toward the travel (0.5 x the angle, <= 0.7 rad; backing
+    diagonals toward the backward direction, hysteresis at the side), pelvis 80 % of it, the spine turns
+    it back (chest keeps facing). A pure side-shuffle at 1.4 m/s with uncrossed feet can't keep up.
+  * Step length per direction (back 0.72, side 0.5 of forward; cadence rises); no crossing: a foothold
+    keeps `stance_gap` 13 cm sideways (legs' frame) from the other foot.
+  * A swinging foot lands only when ITS swing is through (the cycle wraps; progress from the phase it
+    lifted at) - a duty change while braking from a run dropped a mid-swing foot 1.5 m ahead.
+  * A standing foot left stretched behind the motion hurries the cycle (<= 2.5x, eased 20/s; full
+    hurry with both feet down) - never a jump in phase: that snapped the other foot's roll. A planted
+    foot's roll changes <= `roll_rate` 6 rad/s; the swinging foot is drawn rolled into the heel strike.
+  * Swing footholds follow a change of motion at <= `retarget_speed` 6 m/s.
+  * Momentum lean: a damped spring (2.2 Hz, zeta 0.55) toward 0.3 x a/g, <= 0.25 rad, <= 2.5 rad/s;
+    pelvis tips 35 %, spine the rest, arms trail 0.7 x; no pelvis shift (the braking foot is already ahead).
+  * SinewRagdoll: the upper body goes physical only after `calm_delay` 0.35 s still (a reversal passing
+    zero speed made it physical while the pelvis swung round: it folded over).
+  * s7 slide = smallest move of heel, ankle and toe (a heel-strike pivot isn't a slide).
+  Tour `sinew_8way_review` (facing fixed: 8 directions, reversals).
 - **Unarmed push** (test tool, `SinewCharacter.push` / `can_push`): empty hands (no prop held,
   nothing equipped, on the ground) + the throw button (`uc_throw`, the one that throws a held box):
   a tap shoves the character in front 3 m/s (rocks it back ~20 cm), holding charges to 5 m/s over

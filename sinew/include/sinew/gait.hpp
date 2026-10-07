@@ -37,6 +37,7 @@ struct GaitSettings {
 	/// Foot roll: heel strike with the toes up, then the heel rising round the ball of the foot
 	/// before push-off (rad; full at walking speed, toe-up fading at a run: mid-foot landing).
 	float toe_up = 0.22f, heel_rise = 0.6f;
+	float roll_rate = 6.0f;                     ///< a standing foot's roll changes at most this fast, rad/s
 	/// Share of a foot's cycle on the ground: a walk's (with double support) down to a run's.
 	float duty_walk = 0.62f, duty_run = 0.36f;
 	float walk_speed = 1.4f, run_speed = 3.5f;  ///< duty goes from walk to run between these
@@ -51,6 +52,31 @@ struct GaitSettings {
 	float home_tolerance = 0.1f;                ///< a standing foot this far off its spot steps home
 	float turn_tolerance = 0.55f;               ///< rad between a foot and the facing: step round
 	float max_reach = 0.985f;                   ///< share of the leg length the hip may be from an ankle
+	/// 8-way: the longest step backing / sideways as a share of the forward one (the cadence rises
+	/// to make up the speed: short quick side-steps, never a lunge).
+	float step_back = 0.72f, step_side = 0.5f;
+	/// Ankles at least this far apart sideways (body frame): a side-step never crosses the feet.
+	float stance_gap = 0.13f;
+	/// A standing foot left this far from its hip (share of the longest step), behind the motion,
+	/// lifts at once (the motion reversed): the hips never sink to reach a foot left behind.
+	float stretch = 0.8f;
+	/// ... and while one is, the cycle runs up to this many times faster (the other foot lands sooner).
+	float hurry_max = 2.5f, hurry_ease = 20.0f;   ///< (eased at hurry_ease per second)
+	/// A swinging foot's foothold moves at most this fast when the motion changes (m/s).
+	float retarget_speed = 6.0f;
+	/// Hip warp: the legs walk in a frame turned toward the travel (a share of the angle off the
+	/// facing, at most `warp_max` rad; backing diagonals turn toward the backward direction), the
+	/// pelvis takes `warp_pelvis` of it and the spine turns the rest back so the chest keeps
+	/// facing. Eased at `warp_rate` rad/s. A side-step at walking speed is then a turned walk.
+	float warp_gain = 0.5f, warp_max = 0.7f, warp_pelvis = 0.8f, warp_rate = 3.0f;
+	/// Momentum: the body leans into its acceleration (braking leans back, setting off forward, a
+	/// reversal swings from one to the other), `lean_gain` x a/g rad, through a damped spring
+	/// (`lean_hz`, `lean_zeta`: it lags the change, overshoots a little and settles). Bounded so
+	/// nothing flies: at most `lean_max` rad, turning at most `lean_rate` rad/s; the pelvis takes
+	/// `lean_pelvis` of it and moves `lean_shift` x its height x the lean (<= `lean_shift_max` m)
+	/// so the weight goes over the feet; the arms trail the old motion by `arm_lag` x the lean.
+	float lean_gain = 0.3f, lean_max = 0.25f, lean_hz = 2.2f, lean_zeta = 0.55f, lean_rate = 2.5f;
+	float lean_pelvis = 0.35f, lean_shift = 0.0f, lean_shift_max = 0.07f, arm_lag = 0.7f;
 };
 
 struct GaitInput {
@@ -85,6 +111,14 @@ public:
 	Vec3 foothold(int foot) const { return _feet[size_t(foot)].target; }
 	Vec3 home(int foot) const;
 	float cadence() const { return _cadence; }
+	/// The legs' turn toward the travel off the facing (rad, + = to the left).
+	float warp() const { return _warp; }
+	/// The momentum lean: world, horizontal, direction x angle (rad).
+	Vec3 lean() const { return _lean; }
+	/// How much faster than its cadence the cycle ran last tick (a foot left stretched behind).
+	float hurry() const { return _hurry; }
+	/// Times the cycle was hurried at full rate (a standing foot left far behind: the motion turned).
+	int early_lifts() const { return _early_lifts; }
 	float duty() const { return _duty; }
 	GaitSettings& settings() { return _s; }
 
@@ -98,6 +132,9 @@ private:
 		Quat yaw;            ///< world facing the foot was put down with
 		Quat lift_yaw;
 		bool swinging = false;
+		int lift_t = 0;      ///< ticks into the swing
+		int down_t = 100;    ///< ticks since it was put down
+		float lift_p = 0.62f; ///< the foot's phase when it lifted (the swing runs from there to 1)
 		float p = 0.0f;      ///< foot phase last tick
 	};
 	const Rig& _rig;
@@ -117,6 +154,17 @@ private:
 	float _ankle_h = 0.08f;
 	float _heel_d = 0.06f, _ball_d = 0.1f;  ///< heel behind / ball ahead of the ankle, m
 	float _leg_len = 0.9f;
+	float _step_max = 0.5f;  ///< longest step this tick (direction and gait), m
+	Vec3 hip_ground(int foot) const;
+	float _warp = 0.0f;
+	Vec3 _lean, _lean_v, _acc, _prev_vel;
+	void update_lean(float dt);
+	float _hurry = 1.0f, _hurry_want = 1.0f;
+	int _early_lifts = 0;
+	bool _warp_back = false;
+	Quat legs_q() const;
+	float swing_s(const Foot& f, float p) const;    ///< 0..1 through the swing
+	float _phase_step = 0.02f;                      ///< phase advanced last tick     ///< the legs' frame: the facing turned by the warp   ///< the hip's lateral spot on the ground plane under the root
 	void roll(Foot& f, float pitch) const;
 	Vec3 _hip_model[2];      ///< the thighs' joints in model space (lateral offsets)
 	int _leg[2] = { -1, -1 };

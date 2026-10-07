@@ -465,6 +465,11 @@ func _all_parts(dyn: bool, w: float) -> void:
 
 
 ## Hands busy or on the move: the upper body plays the animation (and the IK on it).
+## Seconds of standing still before the upper body turns physical (see _update_parts).
+@export var calm_delay := 0.35
+var _calm_t := 0.0
+
+
 func _upper_animated() -> bool:
 	var st := character.state
 	if st.held_uid != 0 or st.held_id != 0:
@@ -481,7 +486,10 @@ func _update_parts(dt: float) -> void:
 		_hit_t[k] = float(_hit_t[k]) - dt
 		if _hit_t[k] <= 0.0:
 			_hit_t.erase(k)
-	var calm := not _upper_animated()
+	# Physical upper body only once it has been still a moment: a reversal passes through zero
+	# speed while the pelvis is being swung round (a physical torso folded over in that jolt).
+	_calm_t = _calm_t + dt if not _upper_animated() else 0.0
+	var calm := _calm_t >= calm_delay
 	var legs := _stagger_t >= 0.0 or _handback_t >= 0.0
 	for i in parts.size():
 		if not bool(world.physics.call("character_attached", _id, i)):

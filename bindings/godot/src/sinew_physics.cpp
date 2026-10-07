@@ -749,6 +749,9 @@ Dictionary SinewPhysics::character_gait_state(int character) const {
 	d["stepping"] = g.stepping();
 	d["cadence"] = g.cadence();
 	d["duty"] = g.duty();
+	d["warp"] = g.warp();
+	d["hurry"] = g.hurry();
+	d["early_lifts"] = g.early_lifts();
 	d["planted_l"] = g.foot_planted(0);
 	d["planted_r"] = g.foot_planted(1);
 	d["ankle_l"] = to_godot(g.ankle(0));
