@@ -1068,6 +1068,22 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   phase, phase 0 = left contact, blended by speed) or, without cycles, procedural (arms down from the rest
   T + swing against the legs, spine counter-twist, lean at a run). Legs: `two_bone_ik` (factored out of
   Limbs: works on a pose) onto the ankles; feet flat with the yaw they were put down with.
+- **Gait in the game (S6c)**: `SinewRagdoll.gait` (on) - `_setup_gait` (after every `_make_character`) gives
+  the core gait the cycles `SinewGaitCycles.build` samples off SinewAnimationSet.gait_walk / run / sprint
+  (24 phases from the clip's `plant_phase` = left contact: each part's rotation in its parent PART's frame,
+  the pelvis in model = skeleton space, position tracks x `motion_scale`) and the idle clip's first frame.
+  `_update_gait` (each Sinew tick, IDLE / MOVE / TURN_IN_PLACE / LAND on the ground) feeds the root
+  (`Basis(UP, body_yaw)` at state.pos x visual_root->skeleton) and state.vel; SinewPoseModifier blends the
+  interpolated gait pose into the recorded animated pose DOWN THE CHAIN in local space (blending world
+  poses left the clip's arms floating 9 cm off the gait's pelvis), weights `gait_w` (0.2 s) x `gait_part_w`:
+  pelvis + legs 1; the upper body 0 standing / with an item / during a one-shot (`SinewAnimDriver.upper_busy`:
+  a hit flinch, a swing - the gait hid the hit clip), up to 1 by 0.6 m/s. That pose is what shows and what
+  the body tracks / kinematic parts follow. Foot roll (core): heel strike toes-up (`toe_up` 0.22, fading at a
+  run), heel rising round the ball before push-off (`heel_rise` 0.6) - without it the planted ankle pinned
+  flat couldn't span a stride and the pelvis sank into lunges; `ankle()` = drawn (rolling), `plant()` =
+  where it was put down (locked). Step length <= `step_max_walk` 0.62 / `step_max_run` 1.15 x leg length
+  (cadence rises for short legs, up to 5 steps/s). Measuring a planted foot: the smaller of the ankle's and
+  the toe's frame-to-frame move (one of them is the pivot). Tour `sinew_gait_review` (side on).
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
   data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
   coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),
@@ -1077,4 +1093,5 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Tests: core `sinew_tests` (40; gait: standing, walking, stopping, running, turning, stairs), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
   knock-down, death, sever, zombie) / s4 (reach, look, contacts, probes) / s3 also: animated when running / armed, a hit on the gun arm / s5 (stagger recovers, a blow it
   can't take knocks it down, light hits don't stagger) / s6 (no IK on the skeleton, clips play, references
-  re-point, a gun still shows). Tours `sinew_review`, `sinew_debug_review`.
+  re-point, a gun still shows) / s7 (gait: cycles, planted feet while walking / sprinting, stairs, off).
+  Tours `sinew_review`, `sinew_debug_review`, `sinew_gait_review`.

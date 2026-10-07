@@ -87,6 +87,19 @@ var _handback_from: Array[Transform3D] = []
 @export_range(0, 1, 0.01) var torso_relax_tone := 0.6
 @export var hit_relax_time := 0.4
 
+## The procedural walk (S6c): on the ground Sinew's gait makes the pose - footsteps from the motion,
+## planted feet locked, legs fitted to the footholds, the rest from key poses sampled off the
+## reference clips (SinewAnimationSet.gait_*). Off: the clips' own cycles.
+@export var gait := true
+## Any GaitSettings field by name (cadence_base, duty_walk, swing_height, bob, arm_swing...).
+@export var gait_settings := {}
+var gait_w := 0.0                            ## how much of the gait pose shows (eased)
+var gait_part_w := PackedFloat32Array()      ## per part: the gait's share (the upper body keeps an item's clip)
+var gait_prev: Array[Transform3D] = []       ## the gait pose (world) at the last two ticks
+var gait_now: Array[Transform3D] = []
+var _gait_on := false
+var _gait_running := false
+
 
 func setup(c: UltraCharacter) -> void:
 	character = c
@@ -140,6 +153,58 @@ func _make_character() -> void:
 	_severed = 0
 	pose_now = _pose()
 	pose_prev = pose_now.duplicate()
+	_setup_gait()
+
+
+func _setup_gait() -> void:
+	_gait_on = false
+	_gait_running = false
+	gait_w = 0.0
+	if not gait or character.anim == null or character.anim.skeleton == null:
+		return
+	world.physics.call("character_gait_enable", _id, true, gait_settings)
+	var cycles := SinewGaitCycles.build(character.anim, parts)
+	world.physics.call("character_gait_set_cycles", _id, cycles)
+	var idle := SinewGaitCycles.idle_pose(character.anim, parts)
+	if not idle.is_empty():
+		world.physics.call("character_gait_set_idle", _id, idle.locals, idle.pelvis_height)
+	gait_part_w.resize(parts.size())
+	gait_part_w.fill(1.0)
+	_gait_on = true
+
+
+## The character's ground point and facing in the rig's model space (= the skeleton's).
+func _gait_root() -> Transform3D:
+	var rel := character.visual_root.global_transform.affine_inverse() * character.skeleton.global_transform
+	return _rigid(Transform3D(Basis(Vector3.UP, character.state.body_yaw), character.state.pos) * rel)
+
+
+func _update_gait(dt: float) -> void:
+	if not _gait_on:
+		gait_w = 0.0
+		return
+	var st := character.state
+	var Id := MotorState.Id
+	var want := not active and st.is_grounded() and st.state in [Id.IDLE, Id.MOVE, Id.TURN_IN_PLACE, Id.LAND]
+	if want and not _gait_running:
+		world.physics.call("character_gait_reset", _id, _gait_root())
+		gait_now = []
+		_gait_running = true
+	if _gait_running:
+		var pose: Array[Transform3D] = []
+		pose.assign(world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt))
+		gait_prev = gait_now if gait_now.size() == pose.size() else pose
+		gait_now = pose
+	gait_w = move_toward(gait_w, 1.0 if want else 0.0, dt / 0.2)
+	if gait_w <= 0.0 and not want:
+		_gait_running = false
+	# Pelvis and legs walk the gait. The upper body takes the gait's arm swing as it moves; standing,
+	# holding an item or playing a one-shot (a hit flinch, a swing) it keeps the clips.
+	var drv := character.anim as SinewAnimDriver
+	var busy := st.held_uid != 0 or st.held_id != 0 or (drv != null and drv.upper_busy())
+	var upper := 0.0 if busy else smoothstep(0.1, 0.6, Vector2(st.vel.x, st.vel.z).length())
+	for i in parts.size():
+		gait_part_w[i] = 1.0 if _walks(i) else move_toward(gait_part_w[i], upper, dt / 0.25)
 
 
 # ------------------------------------------------------------------ per tick (SinewWorld)
@@ -148,6 +213,7 @@ func sinew_pre_step(dt: float) -> void:
 	if character == null or _id == 0:
 		return
 	_follow_cuts()
+	_update_gait(dt)
 	if not active:
 		var anim := _anim_world()
 		if anim.is_empty():

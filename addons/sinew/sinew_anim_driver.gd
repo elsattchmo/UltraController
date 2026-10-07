@@ -334,6 +334,11 @@ func play_swing(sw: Dictionary) -> void:
 	_sw_left = (seg.y - seg.x) / rate
 
 
+## A one-shot owns the upper body (Sinew's gait leaves it to the clip meanwhile).
+func upper_busy() -> bool:
+	return _hit_left > 0.0 or _sw_left > 0.0
+
+
 func item_event(_kind: StringName, _data := {}) -> void:
 	pass
 

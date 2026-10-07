@@ -48,9 +48,9 @@ func test_the_body_is_sinew_and_follows_the_animation() -> void:
 			mods.append(String(n.name))
 	check(mods.find("Sinew") >= 0 and mods.find("Sinew") < mods.find("Dismember"), "Sinew sits before Dismember (%s)" % [mods])
 	# Standing: the parts ride the animated pose (the hips within a few cm of the skeleton's).
-	var hips_bone: int = r.parts[0].bone
-	var skel_hips := c.skeleton.global_transform * c.skeleton.get_bone_global_pose(hips_bone)
-	check(r.pose_now[0].origin.distance_to(skel_hips.origin) < 0.08, "the physics hips track the animated hips (%.3f m)" % r.pose_now[0].origin.distance_to(skel_hips.origin))
+	# (The animated pose = what the modifier records: the clip, or Sinew's gait over it.)
+	var anim_hips: Transform3D = r._anim_world()[0]
+	check(r.pose_now[0].origin.distance_to(anim_hips.origin) < 0.08, "the physics hips track the animated hips (%.3f m)" % r.pose_now[0].origin.distance_to(anim_hips.origin))
 	if not powered:
 		check(not r.active and r.modifier.blend == 0.0, "standing, the animation shows")
 

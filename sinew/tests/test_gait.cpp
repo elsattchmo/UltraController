@@ -53,14 +53,14 @@ struct Walker {
 			for (int i = 0; i < 2; ++i) {
 				const bool planted = gait->foot_planted(i);
 				if (planted && was_planted[i]) {
-					worst_slide = std::fmax(worst_slide, length(gait->ankle(i) - last[i]));
+					worst_slide = std::fmax(worst_slide, length(gait->plant(i) - last[i]));
 				}
 				if (planted && !was_planted[i]) {
 					landings[i]++;
 				}
 				both_air = both_air && !planted;
 				was_planted[i] = planted;
-				last[i] = gait->ankle(i);
+				last[i] = gait->plant(i);
 				const int foot = limbs->limb(i == 0 ? LimbId::LegL : LimbId::LegR).end;
 				worst_reach = std::fmax(worst_reach, length(gait->pose()[size_t(foot)].p - gait->ankle(i)));
 			}
@@ -97,7 +97,7 @@ TEST_CASE("gait: walking - alternating steps, planted feet never slide, legs rea
 	MESSAGE("walk 1.4 m/s, 6 s: ", steps, " steps (cadence ", w.gait->cadence(), "/s), worst planted slide ",
 			w.worst_slide * 1000.0f, " mm, worst ankle miss ", w.worst_reach * 100.0f, " cm");
 	CHECK(steps >= 10);
-	CHECK(steps <= 14);
+	CHECK(steps <= 18);
 	CHECK(std::abs(w.landings[0] - w.landings[1]) <= 1);   // they take turns
 	CHECK(w.worst_slide < 1e-4f);                             // by construction
 	CHECK(w.worst_reach < 0.02f);
@@ -158,16 +158,16 @@ TEST_CASE("gait: stairs - every foothold on a step") {
 		w.world.add_static_box(Transform{ Vec3{ 0, top * 0.5f, 1.0f + 0.3f * float(k) + 0.15f + 3.0f }, Quat{} },
 				Vec3{ 2.0f, top * 0.5f, 3.15f });
 	}
-	const float ankle_h = w.gait->ankle(0).y;     // on the flat floor at y 0
+	const float ankle_h = w.gait->plant(0).y;     // on the flat floor at y 0
 	float worst = 0.0f;
 	for (int t = 0; t < 360; ++t) {
 		w.run(Vec3{ 0, 0, 0.9f }, DT);
 		for (int i = 0; i < 2; ++i) {
 			if (w.gait->foot_planted(i)) {
-				const Vec3 a = w.gait->ankle(i);
+				const Vec3 a = w.gait->plant(i);
 				const RayHit g = probes::ground_below(w.world, a + Vec3{ 0, 0.3f, 0 }, 1.0f);
 				REQUIRE(g.hit);
-				worst = std::fmax(worst, std::fabs(a.y - g.point.y - ankle_h));   // sole on the step under it
+				worst = std::fmax(worst, std::fabs(a.y - g.point.y - ankle_h));   // put down flat on the step under it
 			}
 		}
 	}

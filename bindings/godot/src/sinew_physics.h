@@ -4,6 +4,7 @@
 
 #include "sinew/balance.hpp"
 #include "sinew/character.hpp"
+#include "sinew/gait.hpp"
 #include "sinew/limbs.hpp"
 #include "sinew/physics_world.hpp"
 #include "sinew/rig.hpp"
@@ -129,6 +130,19 @@ public:
 	///  support: PackedVector3Array, planted_l, planted_r}
 	Dictionary character_balance_state(int character) const;
 
+	// ---- gait: procedural walking (see sinew/gait.hpp) ----
+	/// Settings: any GaitSettings field by name (cadence_base, duty_walk, swing_height, bob, ...).
+	void character_gait_enable(int character, bool on, const Dictionary& settings);
+	/// Reference cycles: [{speed, samples: [[Quaternion per part] per phase], pelvis_height: PackedFloat32Array}]
+	void character_gait_set_cycles(int character, const Array& cycles);
+	void character_gait_set_idle(int character, const Array& locals, double pelvis_height);
+	void character_gait_reset(int character, const Transform3D& root);
+	/// Advance by dt with the character's ground point / facing and velocity; the world pose per part.
+	Array character_gait_update(int character, const Transform3D& root, const Vector3& velocity, double dt);
+	/// {phase, stepping, cadence, duty, planted_l / r, ankle_l / r (drawn, rolling), plant_l / r (where
+	///  it was put down: locked), foothold_l / r}
+	Dictionary character_gait_state(int character) const;
+
 	// ---- probes (the level only: character parts are never hit) ----
 	/// {hit, point, normal, body}
 	Dictionary ground_below(const Vector3& point, double max_distance) const;
@@ -147,6 +161,7 @@ private:
 	std::map<int, std::unique_ptr<sinew::Character>> _characters;
 	std::map<int, std::unique_ptr<sinew::Limbs>> _limbs;
 	std::map<int, std::unique_ptr<sinew::Balancer>> _balancers;
+	std::map<int, std::unique_ptr<sinew::Gait>> _gaits;
 	int _next_character = 1;
 	sinew::Character* _char(int id) const;
 	const sinew::Limbs* _limbs_of(int id) const;

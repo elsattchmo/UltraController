@@ -48,6 +48,18 @@ Gait::Gait(const Rig& rig, const Limbs& limbs, const PhysicsWorld* world, const 
 			sole = dot(box.p, rig.up) - d.box_half.y;
 		}
 		_ankle_h = dot(d.rest.p, rig.up) - sole;
+		if (d.box) {
+			const Transform box = d.rest * d.box_xform;
+			const float heel_f = dot(box.p, rig.forward) - d.box_half.z;
+			const float toe_f = dot(box.p, rig.forward) + d.box_half.z;
+			const float ankle_f = dot(d.rest.p, rig.forward);
+			_heel_d = std::max(ankle_f - heel_f, 0.02f);
+			_ball_d = std::max(heel_f + 0.72f * (toe_f - heel_f) - ankle_f, 0.03f);
+		}
+	}
+	{
+		const LimbInfo& l = limbs.limb(LimbId::LegL);
+		_leg_len = l.upper_len + l.lower_len + _ankle_h;
 	}
 	reset(Transform{});
 }
@@ -102,7 +114,8 @@ void Gait::reset(const Transform& root) {
 	_stepping = false;
 	for (int i = 0; i < 2; ++i) {
 		Foot& f = _feet[i];
-		f.pos = f.lift = f.target = home(i);
+		f.pos = f.eff = f.lift = f.target = home(i);
+		f.pitch = f.lift_pitch = 0.0f;
 		f.yaw = f.lift_yaw = root.q;
 		f.swinging = false;
 		f.p = frac(-0.5f * float(i));
@@ -135,7 +148,11 @@ void Gait::step_feet(float dt) {
 	_speed = length(_vel);
 	const bool moving = _speed > _s.stop_speed;
 	_duty = moving ? _s.duty_walk + (_s.duty_run - _s.duty_walk) * smoothstep(_s.walk_speed, _s.run_speed, _speed) : _s.duty_walk;
-	_cadence = moving ? std::clamp(_s.cadence_base + _s.cadence_per_ms * _speed, _s.cadence_idle * 0.8f, _s.cadence_max) : _s.cadence_idle;
+	const float run = smoothstep(_s.walk_speed, _s.run_speed, _speed);
+	const float step_max = (_s.step_max_walk + (_s.step_max_run - _s.step_max_walk) * run) * _leg_len;
+	_cadence = moving ? std::clamp(std::max(_s.cadence_base + _s.cadence_per_ms * _speed, _speed / std::max(step_max, 0.1f)),
+								_s.cadence_idle * 0.8f, _s.cadence_max)
+					  : _s.cadence_idle;
 	// Keep stepping while moving, while a foot is in the air, or while a foot is off its spot
 	// (stopped mid-stride, nudged) or turned away from the facing (turning on the spot).
 	bool settle = false;
@@ -171,10 +188,13 @@ void Gait::step_feet(float dt) {
 		Foot& f = _feet[i];
 		const float p = frac(_phase - 0.5f * float(i));
 		const bool swing = p >= _duty;
+		const float m = moving ? std::clamp(_speed / std::max(_s.walk_speed, 0.1f), 0.0f, 1.0f) : 0.0f;
+		const float toe_up = _s.toe_up * m * (1.0f - 0.8f * run);
 		if (swing && !f.swinging) {
 			f.swinging = true;
-			f.lift = f.pos;
+			f.lift = f.eff;
 			f.lift_yaw = f.yaw;
+			f.lift_pitch = f.pitch;
 		} else if (!swing && f.swinging) {
 			// Down: the foot stays exactly here until it lifts again.
 			f.swinging = false;
@@ -184,6 +204,10 @@ void Gait::step_feet(float dt) {
 		f.p = p;
 		if (!f.swinging) {
 			f.target = f.pos;
+			// Heel strike (toes up, rolling flat), then the heel rising round the ball.
+			const float q = std::clamp(p / std::max(_duty, 1e-3f), 0.0f, 1.0f);
+			const float pitch = -toe_up * (1.0f - smoothstep(0.0f, 0.2f, q)) + _s.heel_rise * m * smoothstep(0.5f, 1.0f, q);
+			roll(f, pitch);
 			continue;
 		}
 		// Where to land: where the hip will be at touchdown, a little ahead of it (so the hip is
@@ -204,6 +228,26 @@ void Gait::step_feet(float dt) {
 		const Vec3 h = flat(f.lift, U) + (flat(land, U) - flat(f.lift, U)) * k;
 		const float y = dot(f.lift, U) + (dot(land, U) - dot(f.lift, U)) * k + swing_h * std::sin(PI * s);
 		f.pos = h + U * y;
+		// In the air the foot turns from its push-off roll to toes up for the landing.
+		f.pitch = f.lift_pitch + (-toe_up - f.lift_pitch) * smooth(s);
+		f.eff = f.pos;
+	}
+}
+
+void Gait::roll(Foot& f, float pitch) const {
+	f.pitch = pitch;
+	const Vec3 U = up();
+	Vec3 fwd = flat(rotate(f.yaw, _rig.forward), U);
+	fwd = length(fwd) > 1e-4f ? normalized(fwd) : Vec3{ 0, 0, 1 };
+	const Vec3 left = normalized(cross(U, fwd));
+	if (pitch >= 0.0f) {
+		// Round the ball of the foot (on the ground ahead of the ankle): the heel and ankle rise.
+		const Vec3 ball = f.pos + fwd * _ball_d - U * _ankle_h;
+		f.eff = ball + rotate(axis_angle(left, pitch), f.pos - ball);
+	} else {
+		// Round the heel (on the ground behind the ankle): the toes are up.
+		const Vec3 heel = f.pos - fwd * _heel_d - U * _ankle_h;
+		f.eff = heel + rotate(axis_angle(left, pitch), f.pos - heel);
 	}
 }
 
@@ -284,7 +328,7 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		const LimbInfo& l = _limbs.limb(LimbId(_leg[i]));
 		const float L = (l.upper_len + l.lower_len) * _s.max_reach;
 		const Vec3 hip = P + rotate(Pq, rig.parts[size_t(l.upper)].frame_parent.p);
-		const Vec3 d = hip - _feet[i].pos;
+		const Vec3 d = hip - _feet[i].eff;
 		const float dh = length(flat(d, U));
 		const float dz = dot(d, U);
 		const float allowed = std::sqrt(std::max(L * L - dh * dh, 0.0f));
@@ -329,7 +373,7 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		const PartDef& th = rig.parts[size_t(l.upper)];
 		const Vec3 hip = xform(_pose[size_t(th.parent)], th.frame_parent.p);
 		Quat upper_world, lower_local;
-		two_bone_ik(rig, l, hip, _pose[size_t(l.upper)].q, _feet[i].pos, upper_world, lower_local);
+		two_bone_ik(rig, l, hip, _pose[size_t(l.upper)].q, _feet[i].eff, upper_world, lower_local);
 		_pose[size_t(l.upper)] = Transform{ hip, upper_world };
 		const PartDef& sh = rig.parts[size_t(l.lower)];
 		_pose[size_t(l.lower)] = Transform{ xform(_pose[size_t(l.upper)], sh.frame_parent.p), normalized(upper_world * lower_local) };
@@ -340,8 +384,11 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 			const float s = std::clamp((f.p - _duty) / std::max(1.0f - _duty, 1e-3f), 0.0f, 1.0f);
 			yaw = normalized(slerp(f.lift_yaw, _root.q, smooth(s)));
 		}
+		Vec3 ffwd = flat(rotate(yaw, rig.forward), U);
+		ffwd = length(ffwd) > 1e-4f ? normalized(ffwd) : fwd;
+		const Quat pitch = axis_angle(normalized(cross(U, ffwd)), f.pitch);
 		const PartDef& ft = rig.parts[size_t(l.end)];
-		_pose[size_t(l.end)] = Transform{ xform(_pose[size_t(l.lower)], ft.frame_parent.p), normalized(yaw * ft.rest.q) };
+		_pose[size_t(l.end)] = Transform{ xform(_pose[size_t(l.lower)], ft.frame_parent.p), normalized(pitch * yaw * ft.rest.q) };
 	}
 }
 

@@ -30,7 +30,13 @@ struct GaitCycle {
 
 struct GaitSettings {
 	/// Steps per second: base + per_ms * speed, capped; turning / settling on the spot: `idle`.
-	float cadence_base = 1.35f, cadence_per_ms = 0.42f, cadence_max = 3.3f, cadence_idle = 1.7f;
+	float cadence_base = 1.35f, cadence_per_ms = 0.42f, cadence_max = 5.0f, cadence_idle = 1.7f;
+	/// Longest step, as a share of the leg's length (hip to sole): walking / running. Shorter legs
+	/// step faster at the same speed (the cadence rises until the step fits).
+	float step_max_walk = 0.62f, step_max_run = 1.15f;
+	/// Foot roll: heel strike with the toes up, then the heel rising round the ball of the foot
+	/// before push-off (rad; full at walking speed, toe-up fading at a run: mid-foot landing).
+	float toe_up = 0.22f, heel_rise = 0.6f;
 	/// Share of a foot's cycle on the ground: a walk's (with double support) down to a run's.
 	float duty_walk = 0.62f, duty_run = 0.36f;
 	float walk_speed = 1.4f, run_speed = 3.5f;  ///< duty goes from walk to run between these
@@ -71,8 +77,10 @@ public:
 	float phase() const { return _phase; }
 	bool stepping() const { return _stepping; }
 	bool foot_planted(int foot) const { return !_feet[size_t(foot)].swinging; }
-	/// The ankle's world position (0 left, 1 right): planted or on its way.
-	Vec3 ankle(int foot) const { return _feet[size_t(foot)].pos; }
+	/// The ankle's world position (0 left, 1 right) as drawn: rolling on the heel / ball, or on its way.
+	Vec3 ankle(int foot) const { return _feet[size_t(foot)].eff; }
+	/// Where a planted foot was put down (its flat ankle position): it never moves while planted.
+	Vec3 plant(int foot) const { return _feet[size_t(foot)].pos; }
 	/// Where a foot is heading (its foothold) / where it would stand still.
 	Vec3 foothold(int foot) const { return _feet[size_t(foot)].target; }
 	Vec3 home(int foot) const;
@@ -82,7 +90,10 @@ public:
 
 private:
 	struct Foot {
-		Vec3 pos;            ///< ankle, world
+		Vec3 pos;            ///< ankle, world, as planted (flat; locked while planted)
+		Vec3 eff;            ///< ankle, world, as drawn (rolled on heel / ball)
+		float pitch = 0.0f;  ///< foot roll: + heel up (round the ball), - toes up (round the heel)
+		float lift_pitch = 0.0f;
 		Vec3 lift, target;   ///< swing: from / to
 		Quat yaw;            ///< world facing the foot was put down with
 		Quat lift_yaw;
@@ -104,6 +115,9 @@ private:
 	float _phase = 0.0f, _cadence = 1.7f, _duty = 0.62f, _speed = 0.0f;
 	bool _stepping = false;
 	float _ankle_h = 0.08f;
+	float _heel_d = 0.06f, _ball_d = 0.1f;  ///< heel behind / ball ahead of the ankle, m
+	float _leg_len = 0.9f;
+	void roll(Foot& f, float pitch) const;
 	Vec3 _hip_model[2];      ///< the thighs' joints in model space (lateral offsets)
 	int _leg[2] = { -1, -1 };
 
