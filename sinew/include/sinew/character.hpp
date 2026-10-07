@@ -47,6 +47,12 @@ public:
 	bool part_kinematic(int part) const { return _parts[size_t(part)].kinematic; }
 	/// Move the kinematic parts to their place in `world_pose` by the end of the coming step.
 	void move_kinematic(const std::vector<Transform>& world_pose, float dt);
+	/// A procedural target for one tick, mixed into the part's target by `weight` (0..1) at the
+	/// next pre_step, then dropped: effectors (reach, look, place_foot, lean) and code driving a
+	/// limb call it every tick, so a procedural pose blends with the animation part by part.
+	void set_effector(int part, Quat local, float weight);
+	/// The target the next pre_step will use (the effector's mix, if one is set this tick).
+	Quat effective_target(int part) const;
 	/// The rig's rest pose as targets.
 	void set_targets_rest();
 
@@ -65,6 +71,13 @@ public:
 	/// 0..1 share of gravity the muscles cancel up front (feed-forward), so soft muscles
 	/// still hold a pose. The root carries the rest (it's what stands or lies on something).
 	void set_gravity_compensation(float k) { _gravity_comp = k; }
+	/// Per part: a leg standing on the ground carries the body instead (the balancer turns its
+	/// joints' compensation off - it would hold the leg up as if it hung from the hips).
+	void set_part_gravity_compensation(int part, bool on) { _parts[size_t(part)].gravity_comp = on; }
+	float gravity_compensation() const { return _gravity_comp; }
+	/// Per part: a further stiffness factor on its muscle (hertz and damping) - e.g. a standing
+	/// hip, which holds the whole body above it through a light pelvis. Default 1.
+	void set_part_stiffness(int part, float k) { _parts[size_t(part)].stiffness = std::max(0.0f, k); }
 
 	/// Root assist: hold the root part (pelvis) to `target` with a capped spring, the way a
 	/// balance controller would. strength 0 = off (the body stands or falls on its own).
@@ -73,6 +86,10 @@ public:
 	/// Call every tick with the new target (dt: the coming step, so the anchor moves with it).
 	void set_root_assist(const Transform& target, float strength, float dt, float hertz = 4.0f);
 	float root_assist() const { return _assist; }
+	/// Upright assist: only the angular half - the pelvis held to `rotation` by a spring with a
+	/// torque cap of 600 N m * strength; nothing holds its position (the legs must). The
+	/// balancer's optional help (a documented cheat, as euphoria's balance assistance).
+	void set_upright_assist(Quat rotation, float strength, float dt, float hertz = 4.0f);
 
 	/// Apply muscles and gravity compensation for the coming step.
 	void pre_step(float dt);
@@ -86,6 +103,22 @@ public:
 	/// go limp and fall free. Returns false if it was already off (or is the root).
 	bool sever(int part);
 	bool attached(int part) const;
+
+	float part_tone(int part) const { return _parts[size_t(part)].tone; }
+	/// How hard the muscle into `part` worked over the last step: the torque it applied over
+	/// its full strength (0 relaxed .. 1 flat out; can exceed 1 briefly). -1: no muscle (the
+	/// root, a cut joint) or the part is driven kinematically.
+	float muscle_effort(int part) const;
+	/// The torque it applied (N m) - for debugging.
+	float muscle_torque(int part) const;
+	Vec3 part_velocity(int part) const { return _world.linear_velocity(_parts[size_t(part)].body); }
+	/// Which part a body is (-1: not one of ours).
+	int part_of(BodyHandle body) const;
+	/// Where `part` touches something that isn't this character. Returns the count written.
+	int part_contacts(int part, ContactPoint* out, int capacity) const;
+	/// `part` touches something outside this character (`static_only`: the level).
+	bool part_touching(int part, bool static_only = false) const;
+	PhysicsWorld& world() const { return _world; }
 
 	float mass() const;
 	Vec3 center_of_mass() const;
@@ -101,10 +134,14 @@ private:
 		JointHandle muscle = 0;
 		Quat target;
 		Quat prev_target;
+		Quat effector;
+		float effector_weight = 0.0f;
 		bool tracking = false;     // target set from a pose last tick: lead it
 		float tone = 1.0f;
 		bool attached = true;
 		bool kinematic = false;
+		bool gravity_comp = true;
+		float stiffness = 1.0f;
 	};
 	PhysicsWorld& _world;
 	std::shared_ptr<const Rig> _rig;

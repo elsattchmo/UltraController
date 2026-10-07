@@ -2,13 +2,16 @@
 // (SinewCharacter, tests, tools) talks to; it only converts Godot values to Sinew's.
 #pragma once
 
+#include "sinew/balance.hpp"
 #include "sinew/character.hpp"
+#include "sinew/limbs.hpp"
 #include "sinew/physics_world.hpp"
 #include "sinew/rig.hpp"
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
@@ -98,6 +101,43 @@ public:
 	double character_worst_limit_excess(int character) const;
 	double character_max_speed(int character) const;
 
+	// ---- limbs: awareness and effectors (limb: 0 arm L, 1 arm R, 2 leg L, 3 leg R, 4 spine, 5 neck) ----
+	/// {present, attached, health, end_position, end_velocity, contact, end_contact, reach}
+	Dictionary character_limb_state(int character, int limb) const;
+	/// Effectors act on the next step only (call every tick, after character_set_targets).
+	bool character_reach(int character, int limb, const Vector3& point, double weight);
+	bool character_place_foot(int character, int limb, const Vector3& ankle, double weight);
+	bool character_look_at(int character, const Vector3& point, double weight, double max_angle);
+	void character_lean(int character, double pitch, double roll, double weight);
+	/// A procedural local target (part in its parent's frame) mixed in by weight, next step only.
+	void character_set_effector(int character, int part, const Quaternion& local, double weight);
+	/// Where a part touches something outside its body: [{point, normal, impulse, kind}]
+	Array character_part_contacts(int character, int part) const;
+
+	// ---- muscles (debug) ----
+	/// Per part: muscle effort (torque / strength, -1 = none or kinematic).
+	PackedFloat32Array character_muscle_effort(int character) const;
+
+	// ---- balance: physical legs standing on their own (see sinew/balance.hpp) ----
+	/// On: the balancer runs each step (before the muscles). Settings: any BalanceSettings
+	/// field by name (ankle_kp, step_time, upright_assist, max_steps, stepping...).
+	void character_balance_enable(int character, bool on, const Dictionary& settings);
+	bool character_balance_enabled(int character) const;
+	void character_balance_reset(int character);
+	void character_balance_set_target(int character, const Quaternion& pelvis, double com_height);
+	/// {fallen, reason, stepping, steps, com, com_velocity, capture_point, capture_error,
+	///  support: PackedVector3Array, planted_l, planted_r}
+	Dictionary character_balance_state(int character) const;
+
+	// ---- probes (the level only: character parts are never hit) ----
+	/// {hit, point, normal, body}
+	Dictionary ground_below(const Vector3& point, double max_distance) const;
+	/// {found, distance, drop, point}
+	Dictionary edge_ahead(const Vector3& from, const Vector3& dir, double range, double min_drop) const;
+	Dictionary wall_within(const Vector3& origin, const Vector3& dir, double reach) const;
+	/// Seconds until a body at com moving at velocity meets the level (< 0: not within horizon).
+	double impact_eta(const Vector3& com, const Vector3& velocity, double horizon) const;
+
 protected:
 	static void _bind_methods();
 
@@ -105,8 +145,11 @@ private:
 	std::unique_ptr<sinew::PhysicsWorld> _world;
 	std::vector<std::shared_ptr<const sinew::Rig>> _rigs;
 	std::map<int, std::unique_ptr<sinew::Character>> _characters;
+	std::map<int, std::unique_ptr<sinew::Limbs>> _limbs;
+	std::map<int, std::unique_ptr<sinew::Balancer>> _balancers;
 	int _next_character = 1;
 	sinew::Character* _char(int id) const;
+	const sinew::Limbs* _limbs_of(int id) const;
 };
 
 } // namespace godot

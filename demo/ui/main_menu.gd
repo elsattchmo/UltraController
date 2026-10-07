@@ -73,6 +73,16 @@ func _ready() -> void:
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.add_theme_constant_override("separation", 10)
 	scroll.add_child(right)
+	if main != null and main.has_method("controller_list"):
+		# Sinew's debug view (muscles coloured by effort, bones, balance): also K in game.
+		_header(right, "Debug")
+		var dbg := CheckButton.new()
+		dbg.name = "SinewDebug"
+		dbg.text = "Show Sinew muscles (K)"
+		dbg.tooltip_text = "Draw the Sinew body over the character: muscles coloured by effort, bones, balance"
+		dbg.button_pressed = SinewDebugDraw.view > 0
+		dbg.toggled.connect(func(on: bool) -> void: SinewDebugDraw.view = SinewDebugDraw.View.OVERLAY if on else SinewDebugDraw.View.OFF)
+		right.add_child(dbg)
 	_header(right, "Launch presets (separate windows)")
 	for p in UltraLauncher.presets():
 		var preset := p

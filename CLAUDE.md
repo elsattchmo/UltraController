@@ -994,5 +994,48 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   The body SNAPS onto the animated pose for 0.25 s after powering on (the tree may not have posed the
   skeleton yet: arms crept down from a T-pose) and when the animated hips jump > 0.5 m in a tick (a
   teleport left the upper body up to 1.2 m behind). Kinematic standing (`powered = false`) is suite s2's mode.
-- Tests: core `sinew_tests` (22), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
-  knock-down, death, sever, zombie). Tour `sinew_review` (`--controller=sinew`).
+- **Limbs + procedural control (S4)**: core `Limbs` (sinew/limbs.hpp: arm L/R, leg L/R, spine, neck - state:
+  attached, health = weakest tone, end position / velocity, contacts, reach) and effectors solved into ONE-TICK
+  muscle targets (`Character::set_effector`, mixed with the animated target by weight, dropped after pre_step):
+  `reach` (two-bone IK: hinge angle found by sampling + bisection, upper bone = least turn from its animated
+  orientation so the elbow keeps the clip's side; the wrist aims short of the point by the hand, 3 passes),
+  `place_foot` (keeps the foot's animated world orientation - read it BEFORE setting the bones' effectors),
+  `look`, `lean`. Probes (`sinew::probes`): ground_below, edge_ahead, wall_within, impact_eta - character parts
+  carry collision category 2 and queries mask it out. Contacts: `PhysicsWorld::contacts` (Box3D contact data;
+  NOTE kinematic vs static makes no contacts: powered standing feet don't "touch" until the legs are physical).
+  Godot: `SinewRagdoll.reach / look_toward / place_foot / lean / set_part_target` queue requests applied after
+  the animated targets in sinew_pre_step (call every physics frame), `limb_state(Limb.X)`, `part_contacts(name)`;
+  `world.physics.ground_below / edge_ahead / wall_within / impact_eta`.
+- **Balance (S5)**: core `Balancer` (sinew/balance.hpp), physical legs, no external help but an optional
+  documented `upright_assist` (0.3: a capped implicit spring on the pelvis' ORIENTATION only - position is
+  the legs' job). Lessons:
+  * Explicit virtual-model torques (Jacobian transpose up the legs) oscillated +-1600 N m tick to tick on
+    the light pelvis: every controller is an IMPLICIT muscle target instead (SIMBICON): stance hip target =
+    pelvis_target^-1 * thigh(live) (holds the pelvis), ankle target = (tilt * shin(live))^-1 * foot(live)
+    (tilt = PD on COM error, rad; RELATIVE to the live shin - an upright "neutral" shin made a stride's two
+    legs fight and launched the body), stance hips / ankles stiffness x6 (`Character::set_part_stiffness`),
+    their gravity compensation off (`set_part_gravity_compensation`: the ground carries a standing leg).
+  * Feet are BOXES (`PartDef.box`, heel to toe tip, sole on model y 0): a capsule foot rolls.
+  * Support = the planted soles' corners (contact points flicker); planted = touched within 4 ticks, sole up
+    (cos > 0.6) and ankle low. On one foot the ankle brakes over THAT foot. Steps go to the capture point
+    PREDICTED at touchdown (LIPM: grows as e^(t/Tc) from the stance foot); a sideways fall steps the foot on
+    that side; 0.12 s of double support between steps; closing steps (feet back side by side) only after a
+    recovery and only after the weight has shifted onto the other foot (lifting with the COM between the
+    feet = falling: the mannequin's idle stance is 40 cm wide).
+  * Known: recoveries from 40-120 N s can dance many steps (it leans on its heels and keeps stepping back);
+    30 N s forward slides the feet ~20 cm. Core: stands 10 s, 30 N s no step, 60 / 100 N s stepped, 250 falls.
+  Godot stagger window (`SinewRagdoll.start_stagger`): a body / head / leg hit >= `stagger_min_impulse`
+  10 N s on a standing powered body -> legs dynamic + balancer; steady 0.4 s or `stagger_max_time` -> legs
+  kinematic, gliding back onto the animation over 0.3 s (offline: the capsule teleports to where the body
+  stepped first); fallen or careering > 0.9 m off the capsule -> offline `knock_down(com velocity)`, legs
+  stay physical into the fall. A torso hit slackens only the torso, to `torso_relax_tone` 0.6 (all of the
+  upper body at 0.25 folded it over). `balance_settings` passes any BalanceSettings field by name.
+- **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
+  data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
+  coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),
+  grey = kinematic (animated), dark = cut; bones; COM, capture point, support polygon; label (mode, hardest
+  muscle). Cycles off / overlay (no depth test) / x-ray (skeleton meshes hidden). Tour `sinew_debug_review`.
+  A new class_name needs `godot --headless --import` before a tour can use it (global class cache).
+- Tests: core `sinew_tests` (34), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
+  knock-down, death, sever, zombie) / s4 (reach, look, contacts, probes) / s5 (stagger recovers, a blow it
+  can't take knocks it down, light hits don't stagger). Tours `sinew_review`, `sinew_debug_review`.

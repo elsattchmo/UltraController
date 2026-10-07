@@ -28,6 +28,11 @@ struct PartDef {
 	Transform rest;           ///< the part's frame at rest, model space (= the bone's global rest)
 	Vec3 a, b;                ///< capsule segment in part space
 	float radius = 0.05f;
+	/// Feet: a flat box (sole on the floor) instead of the capsule - a capsule foot rolls about
+	/// its own axis and can't push sideways or stand on one foot. a / b stay the bone's line.
+	bool box = false;
+	Transform box_xform;      ///< box centre and axes in part space
+	Vec3 box_half;
 	float mass = 1.0f;        ///< kg
 	float friction = 0.7f;
 	JointKind joint = JointKind::Root;
@@ -45,6 +50,8 @@ struct PartDef {
 struct Rig {
 	std::vector<PartDef> parts;          ///< parents always come before their children
 	std::vector<std::pair<int, int>> no_collide;   ///< non-adjacent pairs that must not collide
+	Vec3 up{ 0.0f, 1.0f, 0.0f };          ///< model space: the body's up and the way it faces
+	Vec3 forward{ 0.0f, 0.0f, 1.0f };
 
 	int find(const std::string& name) const;
 	float total_mass() const;

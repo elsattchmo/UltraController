@@ -4,10 +4,21 @@
 
 #include "sinew/math.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
 namespace sinew {
+
+namespace {
+// Character parts carry this category; world queries mask it out (they look at the level).
+constexpr uint64_t CAT_PART = 2;
+b3QueryFilter level_filter() {
+	b3QueryFilter f = b3DefaultQueryFilter();
+	f.maskBits = ~CAT_PART;
+	return f;
+}
+} // namespace
 
 struct PhysicsWorld::Impl {
 	b3WorldId world = b3_nullWorldId;
@@ -166,13 +177,21 @@ BodyHandle PhysicsWorld::add_part(const PartBodyDesc& desc) {
 	b3BodyId body = b3CreateBody(_impl->world, &body_def);
 	const float r = desc.radius;
 	const float h = length(desc.b - desc.a);
-	const float volume = PI * r * r * h + 4.0f / 3.0f * PI * r * r * r;
 	b3ShapeDef shape_def = b3DefaultShapeDef();
-	shape_def.density = desc.mass / volume;
 	shape_def.baseMaterial.friction = desc.friction;
 	shape_def.filter.groupIndex = desc.group;
-	b3Capsule capsule = { to_b3(desc.a), to_b3(desc.b), r };
-	b3CreateCapsuleShape(body, &shape_def, &capsule);
+	shape_def.filter.categoryBits = CAT_PART;
+	if (desc.box) {
+		const Vec3 e = desc.box_half;
+		shape_def.density = desc.mass / std::max(8.0f * e.x * e.y * e.z, 1e-6f);
+		b3BoxHull box = b3MakeTransformedBoxHull(e.x, e.y, e.z, to_b3(desc.box_xform));
+		b3CreateHullShape(body, &shape_def, &box.base);
+	} else {
+		const float volume = PI * r * r * h + 4.0f / 3.0f * PI * r * r * r;
+		shape_def.density = desc.mass / volume;
+		b3Capsule capsule = { to_b3(desc.a), to_b3(desc.b), r };
+		b3CreateCapsuleShape(body, &shape_def, &capsule);
+	}
 	BodyHandle handle = b3StoreBodyId(body);
 	_impl->dynamic_bodies.push_back(handle);
 	_impl->bodies++;
@@ -306,6 +325,10 @@ float PhysicsWorld::joint_twist_angle(JointHandle joint) const {
 	return b3SphericalJoint_GetTwistAngle(joint_id(joint));
 }
 
+Vec3 PhysicsWorld::joint_torque(JointHandle joint) const {
+	return from_b3(b3Joint_GetConstraintTorque(joint_id(joint)));
+}
+
 void PhysicsWorld::set_body_kind(BodyHandle body, BodyKind kind) {
 	b3Body_SetType(body_id(body), kind == BodyKind::Static ? b3_staticBody
 					: kind == BodyKind::Kinematic				   ? b3_kinematicBody
@@ -372,6 +395,93 @@ float PhysicsWorld::body_mass(BodyHandle body) const {
 
 float PhysicsWorld::joint_cone_angle(JointHandle joint) const {
 	return b3SphericalJoint_GetConeAngle(joint_id(joint));
+}
+
+int PhysicsWorld::contacts(BodyHandle body, ContactPoint* out, int capacity) const {
+	const b3BodyId id = body_id(body);
+	const int cap = b3Body_GetContactCapacity(id);
+	if (cap <= 0 || capacity <= 0) {
+		return 0;
+	}
+	std::vector<b3ContactData> data(static_cast<size_t>(cap));
+	const int n = b3Body_GetContactData(id, data.data(), cap);
+	int written = 0;
+	for (int i = 0; i < n && written < capacity; ++i) {
+		const b3ContactData& c = data[size_t(i)];
+		const b3BodyId a = b3Shape_GetBody(c.shapeIdA);
+		const b3BodyId b = b3Shape_GetBody(c.shapeIdB);
+		const bool we_are_a = B3_ID_EQUALS(a, id);
+		const b3BodyId other = we_are_a ? b : a;
+		const Vec3 center_a = from_b3(b3Body_GetWorldCenter(a));
+		for (int m = 0; m < c.manifoldCount && written < capacity; ++m) {
+			const b3Manifold& man = c.manifolds[m];
+			// Box3D's normal points from A to B: into us when we are B.
+			const Vec3 normal = from_b3(man.normal) * (we_are_a ? -1.0f : 1.0f);
+			for (int k = 0; k < man.pointCount && written < capacity; ++k) {
+				const b3ManifoldPoint& mp = man.points[k];
+				// Speculative points (not yet touching, no push) don't count.
+				if (mp.separation > 0.005f && mp.totalNormalImpulse <= 0.0f) {
+					continue;
+				}
+				ContactPoint& o = out[written++];
+				o.other = b3StoreBodyId(other);
+				o.other_kind = body_kind(o.other);
+				o.point = center_a + from_b3(mp.anchorA);
+				o.normal = normal;
+				o.impulse = mp.totalNormalImpulse;
+			}
+		}
+	}
+	return written;
+}
+
+RayHit PhysicsWorld::cast_ray(Vec3 origin, Vec3 translation) const {
+	RayHit h;
+	const b3RayResult r = b3World_CastRayClosest(_impl->world, to_b3(origin), to_b3(translation), level_filter());
+	if (r.hit) {
+		h.hit = true;
+		h.point = from_b3(r.point);
+		h.normal = from_b3(r.normal);
+		h.fraction = r.fraction;
+		h.body = b3StoreBodyId(b3Shape_GetBody(r.shapeId));
+	}
+	return h;
+}
+
+namespace {
+struct CastClosest {
+	RayHit hit;
+};
+float cast_closest(b3ShapeId shape, b3Pos point, b3Vec3 normal, float fraction, uint64_t, int, int, void* context) {
+	CastClosest* c = static_cast<CastClosest*>(context);
+	if (!c->hit.hit || fraction < c->hit.fraction) {
+		c->hit.hit = true;
+		c->hit.point = from_b3(point);
+		c->hit.normal = from_b3(normal);
+		c->hit.fraction = fraction;
+		c->hit.body = b3StoreBodyId(b3Shape_GetBody(shape));
+	}
+	return fraction;
+}
+} // namespace
+
+RayHit PhysicsWorld::cast_sphere(Vec3 origin, float radius, Vec3 translation) const {
+	const b3Vec3 zero = { 0.0f, 0.0f, 0.0f };
+	b3ShapeProxy proxy = { &zero, 1, radius };
+	CastClosest c;
+	b3World_CastShape(_impl->world, to_b3(origin), &proxy, to_b3(translation), level_filter(), cast_closest, &c);
+	return c.hit;
+}
+
+BodyKind PhysicsWorld::body_kind(BodyHandle body) const {
+	switch (b3Body_GetType(body_id(body))) {
+		case b3_staticBody:
+			return BodyKind::Static;
+		case b3_kinematicBody:
+			return BodyKind::Kinematic;
+		default:
+			return BodyKind::Dynamic;
+	}
 }
 
 uint64_t PhysicsWorld::state_hash() const {

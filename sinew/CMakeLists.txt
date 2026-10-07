@@ -25,7 +25,9 @@ if(GIT_FOUND)
 endif()
 
 set(SINEW_SOURCES
+	src/balance.cpp
 	src/character.cpp
+	src/limbs.cpp
 	src/physics_world.cpp
 	src/rig.cpp
 	src/version.cpp
@@ -54,6 +56,8 @@ if(SINEW_TESTS)
 		tests/test_capi.cpp
 		tests/test_math.cpp
 		tests/test_character.cpp
+		tests/test_limbs.cpp
+		tests/test_balance.cpp
 	)
 	target_include_directories(sinew_tests PRIVATE extern/doctest)
 	target_link_libraries(sinew_tests PRIVATE sinew_core)
