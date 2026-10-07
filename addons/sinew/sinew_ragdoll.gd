@@ -227,7 +227,9 @@ func _update_gait(dt: float) -> void:
 	if _gait_running:
 		var pose: Array[Transform3D] = []
 		var cmd: Variant = character.get("motion_command")
-		pose.assign(world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt, cmd, _clip_feet()))
+		# (Not before the tree has posed the skeleton: the gait puts its feet down on the first stance it's given.)
+		var home: Variant = _clip_feet() if _powered_t >= 0.25 else null
+		pose.assign(world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt, cmd, home))
 		gait_prev = gait_now if gait_now.size() == pose.size() else pose
 		gait_now = pose
 	gait_w = move_toward(gait_w, 1.0 if want else 0.0, dt / 0.2)

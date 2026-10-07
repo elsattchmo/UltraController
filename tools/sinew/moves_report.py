@@ -116,6 +116,9 @@ def main():
         segs.setdefault(f["label"], []).append(f)
     print("%-20s %9s %8s %7s %10s %7s %9s %8s  %s" % ("segment", "legs gap", "overlap", "splay", "leg speed", "steps", "hips drop", "sink", "first steps (m)"))
     stand_h = None
+    # The sink probe's own offset (the bones aren't the soles): what the clip reads standing on flat ground.
+    base = [x for f in segs.get("idle unarmed (clip)", []) for x in f.get("sink", [])]
+    sink0 = sum(base) / len(base) if base else 0.0
     for lab in order:
         fs = segs[lab]
         if lab.startswith("idle unarmed (clip)"):
@@ -126,7 +129,7 @@ def main():
         touch, prev = [], None
         for f in fs:
             b = f["bones"]
-            sink = max([sink] + list(f.get("sink", [])))
+            sink = max([sink] + [x - sink0 for x in f.get("sink", [])])
             g = legs_gap(b)
             gap = min(gap, g)
             over += g < 0

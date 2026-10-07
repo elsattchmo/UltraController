@@ -560,6 +560,8 @@ Quat Gait::legs_q() const {
 
 void Gait::reset(const Transform& root) {
 	_root = root;
+	_has_home = false;     // (stale: it was somewhere else - the next update's standing feet are put down at once)
+	_fresh = true;
 	_vel = Vec3{};
 	_warp = 0.0f;
 	_warp_back = false;
@@ -597,6 +599,16 @@ void Gait::update(const GaitInput& in) {
 			_home_pos[i] = in.home_feet[i].p;
 			// The foot is drawn as yaw * its rest orientation: the yaw that draws the given foot.
 			_home_yaw[i] = yaw_quat(normalized(in.home_feet[i].q * conj(_rig.parts[size_t(_foot_part[i])].rest.q)));
+		}
+		if (_fresh) {
+			// Just reset (spawned, teleported): the feet start in the standing pose's own spots - not
+			// under the hips, stepping out to them.
+			for (int i = 0; i < 2; ++i) {
+				Foot& f = _feet[i];
+				f.pos = f.eff = f.lift = f.target = home(i);
+				f.yaw = f.lift_yaw = f.land_yaw = _home_yaw[i];
+			}
+			_fresh = false;
 		}
 	}
 	// A teleport: start again where it is now.
@@ -1381,11 +1393,18 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		const float L = (l.upper_len + l.lower_len) * reach_share;
 		const Vec3 hip = P + rotate(Pq, rig.parts[size_t(l.upper)].frame_parent.p);
 		const Vec3 d = hip - _feet[i].eff;
-		const float dh = length(flat(d, U));
+		float dh = length(flat(d, U));
 		const float dz = dot(d, U);
 		// (A foot further out than the leg is long can't be reached by dropping - that sank the hips to
-		// 17 cm off the ground backing off a ledge; it steps instead: the hurry rule lifts it.)
-		const float allowed = std::sqrt(std::max(L * L - std::min(dh, 0.85f * L) * std::min(dh, 0.85f * L), 0.0f));
+		// 17 cm off the ground backing off a ledge; slow, it steps instead: the hurry rule lifts it. At a
+		// run it's the push-off's stretch: the hips go as low as they reasonably can, or the foot slides.)
+		if (dh > 0.98f * L) {
+			if (_speed < 2.0f) {
+				continue;
+			}
+			dh = 0.85f * L;
+		}
+		const float allowed = std::sqrt(std::max(L * L - dh * dh, 0.0f));
 		drop = std::max(drop, dz - allowed);
 	}
 	drop = std::min(drop, _s.max_drop);
@@ -1395,7 +1414,9 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		_drop = std::min(drop, _drop + _s.drop_rise * _dt);
 	} else {
 		// (Stopped: back up promptly - standing tall, not squatting on after a walk.)
-		const float fall = _stepping ? _s.drop_fall : _s.drop_fall_standing;
+		// (On a clip's legs the clip's own bob is the flow: come back up briskly - easing out at 0.06 m/s
+		// left the hips 30 cm low for seconds at the foot of a staircase.)
+		const float fall = !_stepping ? _s.drop_fall_standing : (_cl.ok ? _s.drop_fall_clip : _s.drop_fall);
 		_drop = std::max(drop, _drop - fall * _dt);
 	}
 	// (On a clip's legs nothing is slack: its heel rise at push-off must be reached, or the foot slides.)

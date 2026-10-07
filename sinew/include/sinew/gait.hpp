@@ -71,7 +71,7 @@ struct GaitSettings {
 	/// The largest catching offset for a change of motion that wasn't a disturbance (m): a braking step,
 	/// not a lunge. Disturbances (Gait::disturb: a push) get the whole capture offset.
 	float brake_reach = 0.3f;
-	float max_drop = 0.25f;                     ///< the hips never sink further than this to reach a foot (m)
+	float max_drop = 0.6f;                      ///< the hips never sink further than this to reach a foot (m)
 	float swing_clear = 0.03f;                  ///< a swinging sole clears the ground under it by this (m, mid-swing)               ///< rad a directional clip must be nearer by to take over
 	float leg_clear = 0.01f;                    ///< a swinging leg's capsules keep this far off the other leg's, m
 	/// Setting off slower than this (m/s) with the facing more than `pivot_turn` (rad) off the feet:
@@ -86,6 +86,7 @@ struct GaitSettings {
 	/// stride instead of dipping at every step); only what's beyond that by `drop_slack` is taken at once.
 	float cycle_bob = 0.6f, drop_rise = 0.15f, drop_fall = 0.06f, drop_slack = 0.06f;
 	float drop_fall_standing = 0.3f;            ///< stopped: the hips come back up this fast (m/s)
+	float drop_fall_clip = 0.4f;                ///< walking on a clip's legs: the hips come back up this fast (m/s)
 	/// 8-way: the longest step backing / sideways as a share of the forward one (the cadence rises
 	/// to make up the speed: short quick side-steps, never a lunge).
 	float step_back = 0.72f, step_side = 0.65f;
@@ -275,6 +276,7 @@ private:
 	float _prev_speed = 0.0f, _speed_acc = 0.0f;
 	float _disturbed = 0.0f;     ///< s left of full capture stepping (a push)
 	bool _has_home = false;      ///< standing feet given (GaitInput::home_feet)
+	bool _fresh = true;          ///< reset since the last update
 	Vec3 _home_pos[2];
 	Quat _home_yaw[2];
 	int _foot_part[2] = { -1, -1 };
