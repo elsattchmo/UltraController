@@ -1244,6 +1244,29 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
     body on after a respawn).
   * Third person at speed the facing follows the travel and turns slower (`PIVOT_SPRINT_SHARE`): a sprint can't
     spin round on the spot.
+- **Ground fit, foot pivots, crossovers** (second user test; tour segments ramps 20 / 30 up + down, strafe L -> back,
+  pistol strafe R -> back-left, "chaos walk / sprint" = a seeded stick changing every 0.25-0.7 s; report columns sink
+  (heel / ankle / toe tip probed from above) and pivot):
+  * `Gait::fit_ground` at every landing: heel / ankle / ball / toe tip + sole sides probed; on one plane (a ramp)
+    the foot lies on it (`Foot::ground` tilt, drawn as pitch * tilt * yaw * rest, the roll pivots tilted too) up to
+    `ground_tilt_max`; a step edge under the sole slides the foothold along its facing in 2 cm steps (<=
+    `tread_fit` 0.25 m) onto one tread, else ankle + ball on the top with the heel / toe tip out over the edge,
+    else level on the highest point - never inside a riser.
+  * `ground_y` probes from no lower than the body's height: callers pass flattened points (height 0) and a probe
+    from 0.6 m above that missed any higher ground (feet came down inside the block at a ramp's top).
+  * Stance pivot: a planted foot swivels on its ball (heel when backing) toward the stance facing (standing) or
+    its touchdown facing off the legs' frame (moving), <= `pivot_rate` 4 rad/s, <= `pivot_max` 0.6 rad from where
+    it landed, with a 0.03 rad dead band (the idle clip's sway kept it swivelling). A pivoted foot may sit
+    `pivot_slack` off its standing spot: a 40 deg turn on the spot is a pivot, no step. `feet_home()` (both feet
+    within 6 cm / 7 deg of their spots) decides when the standing legs hand back to the clip. Slides are
+    measured at the ankle, ball and heel (`plant_ball` / `plant_heel`): the pivot point stays put.
+  * A foot that lifted with a crossover side-step clip takes the current clip when the travel turns > 0.8 rad
+    away from it (strafing then backing, it landed crossed: thighs through each other); crossover steps land
+    >= `cross_sep` 22 cm in front of / behind the other foot; feet keep their sides on every other clip.
+- **CI builds only on main** (`.github/workflows/sinew.yml` push branches [main] + workflow_dispatch): every push to
+  a working branch cost a full Windows + Linux build and used up the private repo's Actions minutes ("recent
+  account payments have failed or your spending limit needs to be increased" = out of minutes). Working
+  branches test with a local build; merges get the committed binaries.
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
   data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
   coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),

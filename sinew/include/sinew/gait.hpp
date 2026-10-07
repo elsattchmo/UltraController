@@ -325,6 +325,7 @@ private:
 	Vec3 hip_ground(int foot) const;
 	float _warp = 0.0f;
 	bool _pivoting = false;
+	bool _pivoting_last[2] = { false, false };
 	float _drop = 0.0f, _shown_drop = 0.0f, _dt = 1.0f / 60.0f;
 	Vec3 _cmd, _cop, _trim, _drive_acc;
 	float _pelvis_h = 0.95f;     ///< last pelvis height over the ground (the pendulum's length)

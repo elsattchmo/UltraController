@@ -596,7 +596,11 @@ float Gait::ground_y(Vec3 p, float fallback) const {
 		return fallback;
 	}
 	const Vec3 U = up();
-	const RayHit h = probes::ground_below(*_world, p + U * 0.6f, 1.6f);
+	// (From no lower than the body: callers pass flattened points, and from 0.6 m over height 0 a probe missed
+	// any ground higher than that.)
+	const float y = std::max(dot(p, U), dot(_root.p, U));
+	const float reach = 1.0f + y - dot(p, U);
+	const RayHit h = probes::ground_below(*_world, flat(p, U) + U * (y + 0.6f), 0.6f + reach);
 	return h.hit ? dot(h.point, U) : fallback;
 }
 
@@ -866,11 +870,15 @@ void Gait::step_feet(float dt) {
 		const Vec3 p0 = fwd_of(f.plant_yaw), cur = fwd_of(f.yaw);
 		const float a_cur = signed_yaw(p0, cur);
 		const float a_want = std::clamp(signed_yaw(p0, fwd_of(want)), -_s.pivot_max, _s.pivot_max);
-		const float lim = _s.pivot_rate * dt;
-		const float d = std::clamp(a_want - a_cur, -lim, lim);
-		if (std::fabs(d) < 1e-4f) {
+		// (A dead band: the idle clip's own sway moved the standing spots' facing a little every tick, and
+		// the feet kept swivelling after it - the legs never handed back to the clip.)
+		if (std::fabs(a_want - a_cur) < (_pivoting_last[i] ? 1e-4f : 0.03f)) {
+			_pivoting_last[i] = false;
 			continue;
 		}
+		const float lim = _s.pivot_rate * dt;
+		const float d = std::clamp(a_want - a_cur, -lim, lim);
+		_pivoting_last[i] = true;
 		// About the ball, or the heel when backing.
 		const bool heel = moving && dot(_vel, cur) < -0.1f;
 		const Vec3 pivot = flat(f.pos, U) + cur * (heel ? -_heel_d : _ball_d);

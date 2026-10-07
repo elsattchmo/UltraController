@@ -4,6 +4,8 @@ name: sinew
 
 on:
   push:
+    # Only on main (merges): every push to a working branch cost a full Windows + Linux build.
+    branches: [main]
     paths:
       - "sinew/**"
       - "bindings/**"
