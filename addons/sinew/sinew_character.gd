@@ -155,6 +155,17 @@ var _stumble_t := 0.0
 var _trip_t := 0.0
 
 
+## A teleport (respawn, reset) stops the physical motion too: its own velocity carried the body on
+## walking from where it landed.
+func teleport(pos: Vector3, yaw: float = NAN) -> void:
+	super(pos, yaw)
+	_motion_vel = Vector3.ZERO
+	_motion_on = false
+	_stumble_t = 0.0
+	_trip_t = 0.0
+	motion_command = null
+
+
 ## Take a shove of `dv` (m/s, world). False if it can't be taken on the feet (not walking under
 ## physical motion) - the caller shoves it the plain way then.
 func receive_push(dv: Vector3) -> bool:

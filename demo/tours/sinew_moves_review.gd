@@ -49,6 +49,9 @@ func _build() -> void:
 		["walk back-left", 150, {"move": Vector2(-D, -D)}, "front", true],
 		["@reset", 40, {}, "front", true],
 		["walk back-right", 150, {"move": Vector2(D, -D)}, "front", true],
+		["@reset", 40, {}, "front", true],
+		["back-left then", 90, {"move": Vector2(-D, -D)}, "front", true],
+		["diagonal reversal", 120, {"move": Vector2(D, -D)}, "front", true],
 		["@reset", 60, {}, "side", true],
 		["sprint start", 150, {"move": Vector2(0, 1), "buttons": sprint}, "side", true],
 		["sprint turn 90/s", 120, {"move": Vector2(0, 1), "buttons": sprint, "yaw_rate": 90.0}, "behind", true],
@@ -165,7 +168,7 @@ func _process(delta: float) -> void:
 
 
 func _on_posed() -> void:
-	if not _rec or _label == "" or _label.begins_with("@"):
+	if not _rec or _label == "" or (_label.begins_with("@") and not main.args.has("rec-all")):
 		return
 	var sk := _c.skeleton
 	var bones := {}

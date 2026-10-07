@@ -1000,9 +1000,11 @@ void Gait::step_feet(float dt) {
 			}
 			land = flat(land, U) + U * (ground_y(land, dot(_root.p, U)) + _ankle_h);
 		}
-		// Never across the other foot (where it stands, or where it's landing) - unless it's the clip's
-		// own path (a strafe's feet close and cross).
-		if (!on_path) {
+		// Never across the other foot (where it stands, or where it's landing) - unless it's a side-step
+		// clip's own path (a strafe's feet close and cross). (On every other clip too: braking a sideways
+		// walk to go the other way put the trailing foot 30 cm across behind the leading one.)
+		const bool crossing_clip = on_path && std::fabs(std::fabs(C.angle) - 0.5f * PI) < 0.6f;
+		if (!crossing_clip) {
 			const Foot& o = _feet[1 - i];
 			const float side = i == 0 ? 1.0f : -1.0f;
 			const float gap = side * dot(land - (o.swinging ? o.target : o.pos), Lv);
