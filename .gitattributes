@@ -4,3 +4,4 @@
 *.blend binary
 *.png binary
 *.res binary
+*.bat text eol=crlf
