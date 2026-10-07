@@ -566,6 +566,7 @@ void Gait::reset(const Transform& root) {
 	_warp = 0.0f;
 	_warp_back = false;
 	_drop = 0.0f;
+	_shown_drop = 0.0f;
 	_drive_acc = Vec3{};
 	_trim = Vec3{};
 	_lean = _lean_v = _acc = _prev_vel = Vec3{};
@@ -1420,7 +1421,11 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		_drop = std::max(drop, _drop - fall * _dt);
 	}
 	// (On a clip's legs nothing is slack: its heel rise at push-off must be reached, or the foot slides.)
-	P -= U * (_drop + std::max(0.0f, drop - _drop - (_cl.ok ? 0.0f : _s.drop_slack)));
+	// (Rate-limited as a whole: a start's first stretched foot yanked the hips down 20 cm in a tick.)
+	const float want_drop = _drop + std::max(0.0f, drop - _drop - (_cl.ok ? 0.0f : _s.drop_slack));
+	const float snap = (_s.drop_snap_rate + _s.drop_snap_speed * _speed) * _dt;   // (a sprint's push-off needs it quick)
+	_shown_drop = _cl.ok ? std::clamp(want_drop, _shown_drop - snap, _shown_drop + snap) : want_drop;
+	P -= U * _shown_drop;
 	// Forward kinematics of the base pose.
 	_pose[0] = Transform{ P, Pq };
 	for (size_t i = 1; i < n; ++i) {

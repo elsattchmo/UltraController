@@ -71,7 +71,7 @@ struct GaitSettings {
 	/// The largest catching offset for a change of motion that wasn't a disturbance (m): a braking step,
 	/// not a lunge. Disturbances (Gait::disturb: a push) get the whole capture offset.
 	float brake_reach = 0.3f;
-	float max_drop = 0.6f;                      ///< the hips never sink further than this to reach a foot (m)
+	float max_drop = 0.42f;                     ///< the hips never sink further than this to reach a foot (m)
 	float swing_clear = 0.03f;                  ///< a swinging sole clears the ground under it by this (m, mid-swing)               ///< rad a directional clip must be nearer by to take over
 	float leg_clear = 0.01f;                    ///< a swinging leg's capsules keep this far off the other leg's, m
 	/// Setting off slower than this (m/s) with the facing more than `pivot_turn` (rad) off the feet:
@@ -86,6 +86,7 @@ struct GaitSettings {
 	/// stride instead of dipping at every step); only what's beyond that by `drop_slack` is taken at once.
 	float cycle_bob = 0.6f, drop_rise = 0.15f, drop_fall = 0.06f, drop_slack = 0.06f;
 	float drop_fall_standing = 0.3f;            ///< stopped: the hips come back up this fast (m/s)
+	float drop_snap_rate = 1.0f, drop_snap_speed = 3.0f;   ///< the hips' drop never changes faster than rate + speed x this (m/s)
 	float drop_fall_clip = 0.4f;                ///< walking on a clip's legs: the hips come back up this fast (m/s)
 	/// 8-way: the longest step backing / sideways as a share of the forward one (the cadence rises
 	/// to make up the speed: short quick side-steps, never a lunge).
@@ -301,7 +302,7 @@ private:
 	float _step_max = 0.5f;  ///< longest step this tick (direction and gait), m
 	Vec3 hip_ground(int foot) const;
 	float _warp = 0.0f;
-	float _drop = 0.0f, _dt = 1.0f / 60.0f;
+	float _drop = 0.0f, _shown_drop = 0.0f, _dt = 1.0f / 60.0f;
 	Vec3 _cmd, _cop, _trim, _drive_acc;
 	float _pelvis_h = 0.95f;     ///< last pelvis height over the ground (the pendulum's length)
 	bool _has_cmd = false;

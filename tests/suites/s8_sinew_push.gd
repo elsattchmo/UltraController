@@ -207,7 +207,7 @@ func test_balls_knock_the_part_they_hit() -> void:
 		if not bool(gs.get("stepping", false)):
 			break
 		await ticks(1)
-	await ticks(10)
+	await ticks(40)        # (the hips settle onto the stance at a capped rate)
 	var arm := r._part("RightLowerArm")
 	var chest := r._part("Chest")
 	var pelvis := 0
