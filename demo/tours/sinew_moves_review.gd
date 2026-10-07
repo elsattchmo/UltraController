@@ -67,7 +67,37 @@ func _build() -> void:
 		["@stairs", 30, {}, "side", true],
 		["stairs up", 280, {"move": Vector2(0, 1), "yaw": 0}, "side", true],
 		["stairs down", 240, {"move": Vector2(0, 1), "yaw": 180}, "side", true],
+		# Ramps (playground markers ramp_<a> at the foot, facing up the slope).
+		["@at:ramp_20", 40, {}, "side", true],
+		["ramp 20 up", 200, {"move": Vector2(0, 1), "yaw": 0}, "side", true],
+		["ramp 20 down", 200, {"move": Vector2(0, 1), "yaw": 180}, "side", true],
+		["@at:ramp_30", 40, {}, "side", true],
+		["ramp 30 up", 200, {"move": Vector2(0, 1), "yaw": 0}, "side", true],
+		["ramp 30 down", 200, {"move": Vector2(0, 1), "yaw": 180}, "side", true],
+		# Strafing then backing (the user: "strafing then changing direction backwards"), unarmed and pistol.
+		["@flat", 40, {"slot": 0}, "front", true],
+		["strafe L then", 90, {"move": Vector2(-1, 0)}, "front", true],
+		["back after strafe L", 120, {"move": Vector2(0, -1)}, "front", true],
+		["@flat", 40, {"slot": 1}, "front", true],
+		["pistol strafe R then", 90, {"move": Vector2(1, 0), "slot": 1}, "front", true],
+		["pistol back-left after", 120, {"move": Vector2(-D, -D), "slot": 1}, "front", true],
+		["@flat", 40, {"slot": 0}, "behind", true],
 	]
+	# Direction chaos: the stick changes every 0.25 - 0.7 s among 8 directions (seeded), walking then sprinting.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for pass_i in 2:
+		var chaos := "chaos walk" if pass_i == 0 else "chaos sprint"
+		var t := 0
+		while t < 600:
+			var a := float(rng.randi_range(0, 7)) * PI / 4.0
+			var n := rng.randi_range(15, 42)
+			var extra := {"move": Vector2(sin(a), cos(a))}
+			if pass_i == 1:
+				extra["buttons"] = InputFrame.B_SPRINT
+			segs.append([chaos, n, extra, "behind", true])
+			t += n
+		segs.append(["@flat", 40, {}, "behind", true])
 	var only := String(main.args.get("only", ""))
 	steps = [{"teleport": "speed_start", "t": 0.6, "yaw": 0, "pitch": -4, "view_tp": true, "slot": 0},
 			{"call": _setup, "t": 600.0, "until": _ticks.bind(30)}]
@@ -81,6 +111,9 @@ func _build() -> void:
 			st["yaw"] = 0
 		elif label == "@stairs":
 			steps.append({"call": _to_stairs, "t": 0.1, "yaw": 0})
+		elif label.begins_with("@at:"):
+			st["teleport"] = label.substr(4)
+			st["yaw"] = 0
 		elif label == "@flat":
 			# (Level ground: the speed track's start marker stands on a 5 cm edge.)
 			steps.append({"call": _to_flat, "t": 0.1, "yaw": 0})
@@ -196,12 +229,15 @@ func _sinks(bones: Dictionary) -> Array:
 			continue
 		var toe := Vector3(bones[side + "Toes"][0], bones[side + "Toes"][1], bones[side + "Toes"][2])
 		var ankle := Vector3(bones[side + "Foot"][0], bones[side + "Foot"][1], bones[side + "Foot"][2])
-		var ahead := toe + (toe - ankle) * 0.6           # the toe tip, past the toe joint
-		for p: Vector3 in [ahead, ankle]:
+		var along := Vector3(toe.x - ankle.x, 0.0, toe.z - ankle.z)
+		along = along.normalized() if along.length() > 1e-3 else Vector3.ZERO
+		# Sole points: toe tip (past the toe joint), under the ankle, the heel (behind the ankle).
+		var pts := [[toe + (toe - ankle) * 0.6, 0.03], [ankle, 0.08], [ankle - along * 0.06, 0.08]]
+		for pt: Array in pts:
+			var p: Vector3 = pt[0]
 			var hit: Dictionary = _r.world.physics.call("ground_below", p + Vector3.UP * 0.45, 1.2)
 			if bool(hit.get("hit", false)):
-				var sole := p.y - (0.03 if p == ahead else 0.08)
-				out.append((hit.point as Vector3).y - sole)
+				out.append((hit.point as Vector3).y - (p.y - float(pt[1])))
 	return out
 
 
