@@ -12,6 +12,7 @@ namespace sinew {
 namespace {
 
 constexpr int MIN_STANCE_TICKS = 6;   // a foot just put down stays down this long before an early lift
+constexpr int MIN_SWING_TICKS = 6;    // and a foot just lifted stays up this long
 
 float frac(float x) { return x - std::floor(x); }
 float smooth(float s) { return s * s * (3.0f - 2.0f * s); }
@@ -624,6 +625,9 @@ Vec3 Gait::hip_ground(int foot) const {
 }
 
 float Gait::swing_s(const Foot& f, float p) const {
+	if (p < f.lift_p - 1e-4f) {
+		return 1.0f;     // (the cycle has wrapped: held up for its minimum swing, it's through)
+	}
 	// Through by the last tick before the cycle wraps (the foot is put down there, exactly).
 	return std::clamp((p - f.lift_p) / std::max(1.0f - f.lift_p - _phase_step, 1e-3f), 0.0f, 1.0f);
 }
@@ -797,6 +801,13 @@ void Gait::step_feet(float dt) {
 		if (moving && length(flat(travel, U)) > 0.05f) {
 			_theta = std::atan2(dot(travel, L0), dot(travel, F0));
 		}
+		// How long it has been going steadily sideways (crossover steps only then: changing direction every
+		// half second, a crossover landed the thighs through each other).
+		if (moving && std::fabs(std::fabs(_theta) - 0.5f * PI) < _s.side_settle_angle) {
+			_side_time += dt;
+		} else {
+			_side_time = 0.0f;
+		}
 	}
 	pick_direction(pace);
 	_cl = clip_legs(pace, _theta);
@@ -965,7 +976,9 @@ void Gait::step_feet(float dt) {
 			}
 			const Vec3 off = flat(f.pos - hip_ground(i), U);
 			if (dot(off, _vel) < 0.0f) {
-				const float over = length(off) - reach_out;
+				// (Sideways a leg reaches far less than along the stride: a side step's trailing foot left 0.7 m
+				// out stretched the stance to 1.1 m and the hips sank 35 cm to reach it.)
+				const float over = std::max(length(off) - reach_out, std::fabs(dot(off, Lv)) - _s.side_reach);
 				// Both feet down (the other can take the weight): straight to its lift, at full hurry.
 				const bool both_down = !_feet[1 - i].swinging && f.down_t >= MIN_STANCE_TICKS && over > 0.0f;
 				hurry = std::max(hurry, both_down ? _s.hurry_max
@@ -1025,6 +1038,11 @@ void Gait::step_feet(float dt) {
 		// Up when the foot's stance share is over; down only when its swing is through (the cycle
 		// wraps) - a duty that changes mid-swing (braking from a run) never drops a foot early.
 		bool swing = f.swinging ? p >= f.p : p >= duty_i;
+		// (A swing lasts a few ticks at least: after an early lift the cycle wrapped at once and the foot was put
+		// down 1.6 m ahead the tick after it rose - the leg snapped there.)
+		if (f.swinging && !swing && f.lift_t < MIN_SWING_TICKS) {
+			swing = true;
+		}
 		if (!f.swinging && f.overreach && moving && p > 0.3f * duty_i) {
 			swing = true;
 		}
@@ -1042,14 +1060,23 @@ void Gait::step_feet(float dt) {
 			f.lift_ground = f.ground;
 			f.lift_pitch = f.pitch;
 			f.lift_t = 0;
+			f.held_back = false;
 			f.lift_p = std::min(p, 0.98f);
 			_foot_cl[i] = _cl;
 			f.path_dir = path_dir;
 			f.lift_off = on_path ? flat(f.lift, U) - path_at(_cl, i, f.lift_p) : Vec3{};
 		} else if (!swing && f.swinging) {
 			f.down_t = 0;
-			// Down: the foot stays exactly here until it lifts again.
+			// Down: the foot stays exactly here until it lifts again. (Where the drawn foot actually is, if the
+			// swing's speed cap held it short of the foothold: put down out there, the leg snapped 1.4 m in a tick.)
 			f.swinging = false;
+			if (f.held_back && length(flat(f.eff - f.target, U)) > 0.05f) {
+				Vec3 at = flat(f.eff, U) + U * dot(f.target, U);
+				Quat g;
+				fit_ground(at, f.land_yaw, g, false);
+				f.target = at;
+				f.land_ground = g;
+			}
 			f.pos = f.target;
 			f.yaw = f.plant_yaw = f.land_yaw;
 			f.ground = f.land_ground;
@@ -1161,7 +1188,7 @@ void Gait::step_feet(float dt) {
 		// Never across the other foot (where it stands, or where it's landing) - unless it's a side-step
 		// clip's own path (a strafe's feet close and cross). (On every other clip too: braking a sideways
 		// walk to go the other way put the trailing foot 30 cm across behind the leading one.)
-		const bool crossing_clip = on_path && std::fabs(std::fabs(C.angle) - 0.5f * PI) < 0.6f;
+		const bool crossing_clip = on_path && std::fabs(std::fabs(C.angle) - 0.5f * PI) < 0.6f && _side_time >= _s.side_settle;
 		if (crossing_clip) {
 			// A crossover comes down well in front of (or behind) the other foot: a crossed stance with the
 			// feet 15 cm apart put the thighs through each other.
@@ -1267,11 +1294,12 @@ void Gait::step_feet(float dt) {
 		f.eff = f.pos + (drawn.eff - f.pos) * (on_path ? smoothstep(0.75f, 1.0f, s) : smooth(s));
 		// (Never faster than the body plus a foot's own swing: a hard brake-and-turn at a sprint retargeted
 		// a swing and flicked the foot 0.57 m in a tick.)
-		if (f.lift_t > 1) {
-			const float lim = (length(_vel) + _s.swing_speed_max) * dt;
+		if (f.lift_t >= 1) {
+			const float lim = (length(_vel) + _s.swing_speed_walk + (_s.swing_speed_max - _s.swing_speed_walk) * run) * dt;
 			const Vec3 d = f.eff - was;
 			if (length(d) > lim) {
 				f.eff = was + normalized(d) * lim;
+				f.held_back = true;
 			}
 		}
 	}
@@ -1768,6 +1796,44 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 			}
 			_feet[sw].eff = _feet[sw].eff + away * (_s.leg_clear - g + 0.005f);
 			solve_leg(sw);
+		}
+	}
+	// Last: whatever the feet are doing, the legs never go through each other - the knees turn out, each leg
+	// about its own hip -> ankle line (the feet stay exactly where they are). Rapid direction changes crossed
+	// the thighs (the clips on their own never do: they keep both knees out).
+	if (_leg[0] >= 0 && _leg[1] >= 0) {
+		for (int it = 0; it < 4; ++it) {
+			Vec3 away;
+			const float g = leg_gap(0, 1, away);
+			if (g >= _s.leg_clear) {
+				break;
+			}
+			for (int i = 0; i < 2; ++i) {
+				const LimbInfo& l = _limbs.limb(LimbId(_leg[i]));
+				const LimbInfo& o = _limbs.limb(LimbId(_leg[1 - i]));
+				const Vec3 hip = _pose[size_t(l.upper)].p;
+				const Vec3 ankle = _pose[size_t(l.end)].p;
+				const Vec3 axis = ankle - hip;
+				if (length(axis) < 1e-3f) {
+					continue;
+				}
+				const Vec3 ax = normalized(axis);
+				// The knee's way out: away from the other leg's knee, across this leg's line.
+				const Vec3 knee = _pose[size_t(l.lower)].p, other = _pose[size_t(o.lower)].p;
+				Vec3 out = knee - other;
+				out = out - ax * dot(out, ax);
+				const Vec3 radial = knee - hip - ax * dot(knee - hip, ax);
+				if (length(out) < 1e-4f || length(radial) < 1e-4f) {
+					continue;
+				}
+				const float sign = dot(cross(radial, normalized(out)), ax) >= 0.0f ? 1.0f : -1.0f;
+				const float step = std::min(0.15f, (_s.leg_clear - g) * 4.0f + 0.03f);
+				const Quat r = axis_angle(ax, sign * step);
+				for (const int part : { l.upper, l.lower }) {
+					_pose[size_t(part)].p = hip + rotate(r, _pose[size_t(part)].p - hip);
+					_pose[size_t(part)].q = normalized(r * _pose[size_t(part)].q);
+				}
+			}
 		}
 	}
 }
