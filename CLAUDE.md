@@ -1293,7 +1293,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
     UNCROSS_HOLD_TICKS 8, then comes down on its own side. The swing leg push is capped at `leg_push_max` 0.25 m a
     tick (it pushed 0.6 m round the other leg in one tick: 36 m/s).
   * Tried and dropped: far foot first on a strafe start, a quick first step, "never step back from the lift" for side
-    steps, a fore/aft detour for a side-changing swing, capping the moving pelvis drop.
+    steps, a fore/aft detour for a side-changing swing, capping the moving pelvis drop, a sideways acceleration cap
+    on the drive (1.6 m/s2: the strafe-left sag 15 -> 13 cm, but backing out of it the legs crossed again).
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
   data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
   coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),

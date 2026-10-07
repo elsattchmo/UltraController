@@ -99,7 +99,6 @@ struct GaitSettings {
 	float leg_push_max = 0.25f;                 ///< a swinging leg is pushed clear of the other by at most this a tick (m)
 	float side_reach_strafe = 0.2f;             ///< the same on a side-step clip (its trailing foot)
 	float side_reach = 0.35f;                   ///< a standing foot further out to the side of its hip than this hurries the steps (m)
-	float side_accel = 100.0f;                    ///< the drive speeds the body up sideways (off its facing) at most this (m/s2)
 	float min_stance_gap = 0.06f;               ///< on a clip's path the feet come no closer sideways than this, even where the clip's do (m)
 	float side_settle = 0.3f, side_settle_angle = 0.45f;   ///< a side step follows its clip's path freely after this long (s) within this of sideways (rad)
 	float teleport_dist = 0.6f;                 ///< the root moving further than this in one update = a teleport (m)

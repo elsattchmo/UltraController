@@ -1650,18 +1650,6 @@ Vec3 Gait::drive(Vec3 com, Vec3 velocity, Vec3 command, float dt) {
 	}
 	a_pend = a_track + (a_pend - a_track) * feel;
 	Vec3 a = a_stand * (1.0f - k) + a_pend * k;
-	// Speeding up sideways (off the facing) is held to `side_accel`: side steps can't catch a body that sets
-	// off sideways as fast as forward - the trailing foot was left 0.7 m out and the hips sank to reach it.
-	{
-		Vec3 fwd = flat(rotate(_root.q, _rig.forward), U);
-		if (length(fwd) > 1e-4f) {
-			const Vec3 side = normalized(cross(U, normalized(fwd)));
-			const float as = dot(a, side), vs = dot(v, side);
-			if (as * vs >= 0.0f && std::fabs(as) > _s.side_accel) {
-				a = a - side * (as - (as > 0.0f ? _s.side_accel : -_s.side_accel));
-			}
-		}
-	}
 	if (length(a) > a_max) {
 		a = normalized(a) * a_max;
 	}
