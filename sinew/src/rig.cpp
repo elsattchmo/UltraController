@@ -115,6 +115,8 @@ const char* fallback(const std::string& bone) {
 
 Rig build_humanoid_rig(const SkeletonDesc& sk, const HumanoidOptions& options) {
 	Rig rig;
+	rig.up = normalized(sk.up);
+	rig.forward = normalized(sk.forward);
 	// Height from the skeleton: feet to the top of the head bone (+ a head's height).
 	float top = 0.0f, bottom = 1e9f;
 	for (const Transform& t : sk.rests) {

@@ -124,5 +124,5 @@ jobs:
         run: timeout 1500 $GODOT --headless --path . --import || true
       - name: Sinew + menu suites
         run: |
-          timeout 1200 $GODOT --headless --path . --fixed-fps 60 res://tests/test_runner.tscn -- --suite=s0,ui 2>&1 | tee test.log
+          timeout 1200 $GODOT --headless --path . --fixed-fps 60 res://tests/test_runner.tscn -- --suite=s0,s2,s3,s4,ui 2>&1 | tee test.log
           ! grep -q "SCRIPT ERROR" test.log

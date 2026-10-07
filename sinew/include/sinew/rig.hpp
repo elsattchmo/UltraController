@@ -45,6 +45,8 @@ struct PartDef {
 struct Rig {
 	std::vector<PartDef> parts;          ///< parents always come before their children
 	std::vector<std::pair<int, int>> no_collide;   ///< non-adjacent pairs that must not collide
+	Vec3 up{ 0.0f, 1.0f, 0.0f };          ///< model space: the body's up and the way it faces
+	Vec3 forward{ 0.0f, 0.0f, 1.0f };
 
 	int find(const std::string& name) const;
 	float total_mass() const;

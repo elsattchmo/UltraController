@@ -74,6 +74,24 @@ struct MuscleState {
 	float strength = 0.0f;         ///< max torque, N m (0 = relaxed)
 };
 
+/// One point where a body touches another.
+struct ContactPoint {
+	BodyHandle other = 0;     ///< the body touched
+	BodyKind other_kind = BodyKind::Static;
+	Vec3 point;               ///< world
+	Vec3 normal;              ///< world, pointing from the other body into this one
+	float impulse = 0.0f;     ///< normal impulse over the last step, N s
+};
+
+/// What a world query hit (character parts are never hit: queries see the level only).
+struct RayHit {
+	bool hit = false;
+	Vec3 point;
+	Vec3 normal;
+	float fraction = 1.0f;    ///< along the translation, 0..1
+	BodyHandle body = 0;
+};
+
 class PhysicsWorld {
 public:
 	explicit PhysicsWorld(const WorldSettings& settings = {});
@@ -144,6 +162,15 @@ public:
 	float body_mass(BodyHandle body) const;
 	/// Current swing angle of a ball joint, radians.
 	float joint_cone_angle(JointHandle joint) const;
+	/// Points where `body` touches something (other bodies' shapes in contact this step).
+	/// Returns how many were written (at most `capacity`).
+	int contacts(BodyHandle body, ContactPoint* out, int capacity) const;
+	/// Closest hit of a ray / a swept sphere from `origin` along `translation`, against the
+	/// level (static, kinematic and loose bodies - never character parts).
+	RayHit cast_ray(Vec3 origin, Vec3 translation) const;
+	RayHit cast_sphere(Vec3 origin, float radius, Vec3 translation) const;
+	BodyKind body_kind(BodyHandle body) const;
+
 	/// Hash of every dynamic body's pose and velocity bits: equal hashes = identical runs.
 	uint64_t state_hash() const;
 	int body_count() const;

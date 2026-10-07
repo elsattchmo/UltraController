@@ -47,6 +47,12 @@ public:
 	bool part_kinematic(int part) const { return _parts[size_t(part)].kinematic; }
 	/// Move the kinematic parts to their place in `world_pose` by the end of the coming step.
 	void move_kinematic(const std::vector<Transform>& world_pose, float dt);
+	/// A procedural target for one tick, mixed into the part's target by `weight` (0..1) at the
+	/// next pre_step, then dropped: effectors (reach, look, place_foot, lean) and code driving a
+	/// limb call it every tick, so a procedural pose blends with the animation part by part.
+	void set_effector(int part, Quat local, float weight);
+	/// The target the next pre_step will use (the effector's mix, if one is set this tick).
+	Quat effective_target(int part) const;
 	/// The rig's rest pose as targets.
 	void set_targets_rest();
 
@@ -87,6 +93,16 @@ public:
 	bool sever(int part);
 	bool attached(int part) const;
 
+	float part_tone(int part) const { return _parts[size_t(part)].tone; }
+	Vec3 part_velocity(int part) const { return _world.linear_velocity(_parts[size_t(part)].body); }
+	/// Which part a body is (-1: not one of ours).
+	int part_of(BodyHandle body) const;
+	/// Where `part` touches something that isn't this character. Returns the count written.
+	int part_contacts(int part, ContactPoint* out, int capacity) const;
+	/// `part` touches something outside this character (`static_only`: the level).
+	bool part_touching(int part, bool static_only = false) const;
+	PhysicsWorld& world() const { return _world; }
+
 	float mass() const;
 	Vec3 center_of_mass() const;
 	/// Largest anchor separation over the joints still attached, metres.
@@ -101,6 +117,8 @@ private:
 		JointHandle muscle = 0;
 		Quat target;
 		Quat prev_target;
+		Quat effector;
+		float effector_weight = 0.0f;
 		bool tracking = false;     // target set from a pose last tick: lead it
 		float tone = 1.0f;
 		bool attached = true;

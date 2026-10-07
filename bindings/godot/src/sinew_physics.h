@@ -3,6 +3,7 @@
 #pragma once
 
 #include "sinew/character.hpp"
+#include "sinew/limbs.hpp"
 #include "sinew/physics_world.hpp"
 #include "sinew/rig.hpp"
 
@@ -98,6 +99,28 @@ public:
 	double character_worst_limit_excess(int character) const;
 	double character_max_speed(int character) const;
 
+	// ---- limbs: awareness and effectors (limb: 0 arm L, 1 arm R, 2 leg L, 3 leg R, 4 spine, 5 neck) ----
+	/// {present, attached, health, end_position, end_velocity, contact, end_contact, reach}
+	Dictionary character_limb_state(int character, int limb) const;
+	/// Effectors act on the next step only (call every tick, after character_set_targets).
+	bool character_reach(int character, int limb, const Vector3& point, double weight);
+	bool character_place_foot(int character, int limb, const Vector3& ankle, double weight);
+	bool character_look_at(int character, const Vector3& point, double weight, double max_angle);
+	void character_lean(int character, double pitch, double roll, double weight);
+	/// A procedural local target (part in its parent's frame) mixed in by weight, next step only.
+	void character_set_effector(int character, int part, const Quaternion& local, double weight);
+	/// Where a part touches something outside its body: [{point, normal, impulse, kind}]
+	Array character_part_contacts(int character, int part) const;
+
+	// ---- probes (the level only: character parts are never hit) ----
+	/// {hit, point, normal, body}
+	Dictionary ground_below(const Vector3& point, double max_distance) const;
+	/// {found, distance, drop, point}
+	Dictionary edge_ahead(const Vector3& from, const Vector3& dir, double range, double min_drop) const;
+	Dictionary wall_within(const Vector3& origin, const Vector3& dir, double reach) const;
+	/// Seconds until a body at com moving at velocity meets the level (< 0: not within horizon).
+	double impact_eta(const Vector3& com, const Vector3& velocity, double horizon) const;
+
 protected:
 	static void _bind_methods();
 
@@ -105,8 +128,10 @@ private:
 	std::unique_ptr<sinew::PhysicsWorld> _world;
 	std::vector<std::shared_ptr<const sinew::Rig>> _rigs;
 	std::map<int, std::unique_ptr<sinew::Character>> _characters;
+	std::map<int, std::unique_ptr<sinew::Limbs>> _limbs;
 	int _next_character = 1;
 	sinew::Character* _char(int id) const;
+	const sinew::Limbs* _limbs_of(int id) const;
 };
 
 } // namespace godot

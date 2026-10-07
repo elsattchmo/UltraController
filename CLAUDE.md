@@ -994,5 +994,17 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   The body SNAPS onto the animated pose for 0.25 s after powering on (the tree may not have posed the
   skeleton yet: arms crept down from a T-pose) and when the animated hips jump > 0.5 m in a tick (a
   teleport left the upper body up to 1.2 m behind). Kinematic standing (`powered = false`) is suite s2's mode.
-- Tests: core `sinew_tests` (22), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
-  knock-down, death, sever, zombie). Tour `sinew_review` (`--controller=sinew`).
+- **Limbs + procedural control (S4)**: core `Limbs` (sinew/limbs.hpp: arm L/R, leg L/R, spine, neck - state:
+  attached, health = weakest tone, end position / velocity, contacts, reach) and effectors solved into ONE-TICK
+  muscle targets (`Character::set_effector`, mixed with the animated target by weight, dropped after pre_step):
+  `reach` (two-bone IK: hinge angle found by sampling + bisection, upper bone = least turn from its animated
+  orientation so the elbow keeps the clip's side; the wrist aims short of the point by the hand, 3 passes),
+  `place_foot` (keeps the foot's animated world orientation - read it BEFORE setting the bones' effectors),
+  `look`, `lean`. Probes (`sinew::probes`): ground_below, edge_ahead, wall_within, impact_eta - character parts
+  carry collision category 2 and queries mask it out. Contacts: `PhysicsWorld::contacts` (Box3D contact data;
+  NOTE kinematic vs static makes no contacts: powered standing feet don't "touch" until the legs are physical).
+  Godot: `SinewRagdoll.reach / look_toward / place_foot / lean / set_part_target` queue requests applied after
+  the animated targets in sinew_pre_step (call every physics frame), `limb_state(Limb.X)`, `part_contacts(name)`;
+  `world.physics.ground_below / edge_ahead / wall_within / impact_eta`.
+- Tests: core `sinew_tests` (29), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
+  knock-down, death, sever, zombie) / s4 (reach, look, contacts, probes). Tour `sinew_review` (`--controller=sinew`).

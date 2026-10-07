@@ -41,6 +41,7 @@ void SinewPhysics::setup(const Vector3& gravity, int substeps) {
 	sinew::WorldSettings s;
 	s.gravity = to_sinew(gravity);
 	s.substeps = substeps;
+	_limbs.clear();
 	_characters.clear();   // they live in the old world
 	_world = std::make_unique<sinew::PhysicsWorld>(s);
 }
@@ -243,10 +244,12 @@ int SinewPhysics::add_character(int rig, const Transform3D& root, int group) {
 	}
 	const int id = _next_character++;
 	_characters[id] = std::make_unique<sinew::Character>(*_world, _rigs[size_t(rig)], to_sinew(root), group);
+	_limbs[id] = std::make_unique<sinew::Limbs>(*_rigs[size_t(rig)]);
 	return id;
 }
 
 void SinewPhysics::remove_character(int character) {
+	_limbs.erase(character);
 	_characters.erase(character);
 }
 
@@ -413,6 +416,120 @@ double SinewPhysics::character_max_speed(int character) const {
 	return m;
 }
 
+// ---------------------------------------------------------------- limbs
+
+const sinew::Limbs* SinewPhysics::_limbs_of(int id) const {
+	auto it = _limbs.find(id);
+	return it == _limbs.end() ? nullptr : it->second.get();
+}
+
+namespace {
+bool limb_ok(int limb) { return limb >= 0 && limb < int(sinew::LimbId::Count); }
+
+Dictionary hit_dict(const sinew::RayHit& h) {
+	Dictionary d;
+	d["hit"] = h.hit;
+	d["point"] = to_godot(h.point);
+	d["normal"] = to_godot(h.normal);
+	d["body"] = int64_t(h.body);
+	return d;
+}
+} // namespace
+
+Dictionary SinewPhysics::character_limb_state(int character, int limb) const {
+	Dictionary d;
+	sinew::Character* c = _char(character);
+	const sinew::Limbs* l = _limbs_of(character);
+	if (!c || !l || !limb_ok(limb)) {
+		return d;
+	}
+	const sinew::LimbState s = l->state(*c, sinew::LimbId(limb));
+	d["present"] = s.present;
+	d["attached"] = s.attached;
+	d["health"] = s.health;
+	d["end_position"] = to_godot(s.end_position);
+	d["end_velocity"] = to_godot(s.end_velocity);
+	d["contact"] = s.contact;
+	d["end_contact"] = s.end_contact;
+	d["reach"] = s.reach;
+	return d;
+}
+
+bool SinewPhysics::character_reach(int character, int limb, const Vector3& point, double weight) {
+	sinew::Character* c = _char(character);
+	const sinew::Limbs* l = _limbs_of(character);
+	return c && l && limb_ok(limb) && l->reach(*c, sinew::LimbId(limb), to_sinew(point), float(weight));
+}
+
+bool SinewPhysics::character_place_foot(int character, int limb, const Vector3& ankle, double weight) {
+	sinew::Character* c = _char(character);
+	const sinew::Limbs* l = _limbs_of(character);
+	return c && l && limb_ok(limb) && l->place_foot(*c, sinew::LimbId(limb), to_sinew(ankle), float(weight));
+}
+
+bool SinewPhysics::character_look_at(int character, const Vector3& point, double weight, double max_angle) {
+	sinew::Character* c = _char(character);
+	const sinew::Limbs* l = _limbs_of(character);
+	return c && l && l->look(*c, to_sinew(point), float(weight), float(max_angle));
+}
+
+void SinewPhysics::character_lean(int character, double pitch, double roll, double weight) {
+	sinew::Character* c = _char(character);
+	const sinew::Limbs* l = _limbs_of(character);
+	if (c && l) {
+		l->lean(*c, float(pitch), float(roll), float(weight));
+	}
+}
+
+void SinewPhysics::character_set_effector(int character, int part, const Quaternion& local, double weight) {
+	sinew::Character* c = _char(character);
+	if (c && part >= 0 && part < c->part_count()) {
+		c->set_effector(part, sinew::Quat{ float(local.x), float(local.y), float(local.z), float(local.w) }, float(weight));
+	}
+}
+
+Array SinewPhysics::character_part_contacts(int character, int part) const {
+	Array out;
+	sinew::Character* c = _char(character);
+	if (!c || part < 0 || part >= c->part_count()) {
+		return out;
+	}
+	sinew::ContactPoint pts[16];
+	const int n = c->part_contacts(part, pts, 16);
+	for (int i = 0; i < n; ++i) {
+		Dictionary d;
+		d["point"] = to_godot(pts[i].point);
+		d["normal"] = to_godot(pts[i].normal);
+		d["impulse"] = pts[i].impulse;
+		d["kind"] = int(pts[i].other_kind);
+		d["body"] = int64_t(pts[i].other);
+		out.push_back(d);
+	}
+	return out;
+}
+
+Dictionary SinewPhysics::ground_below(const Vector3& point, double max_distance) const {
+	return hit_dict(sinew::probes::ground_below(*_world, to_sinew(point), float(max_distance)));
+}
+
+Dictionary SinewPhysics::edge_ahead(const Vector3& from, const Vector3& dir, double range, double min_drop) const {
+	const sinew::EdgeProbe e = sinew::probes::edge_ahead(*_world, to_sinew(from), to_sinew(dir), float(range), float(min_drop));
+	Dictionary d;
+	d["found"] = e.found;
+	d["distance"] = e.distance;
+	d["drop"] = e.drop;
+	d["point"] = to_godot(e.point);
+	return d;
+}
+
+Dictionary SinewPhysics::wall_within(const Vector3& origin, const Vector3& dir, double reach) const {
+	return hit_dict(sinew::probes::wall_within(*_world, to_sinew(origin), to_sinew(dir), float(reach)));
+}
+
+double SinewPhysics::impact_eta(const Vector3& com, const Vector3& velocity, double horizon) const {
+	return sinew::probes::impact_eta(*_world, to_sinew(com), to_sinew(velocity), float(horizon));
+}
+
 void SinewPhysics::_bind_methods() {
 	ClassDB::bind_static_method("SinewPhysics", D_METHOD("version"), &SinewPhysics::version);
 	ClassDB::bind_method(D_METHOD("setup", "gravity", "substeps"), &SinewPhysics::setup);
@@ -475,6 +592,18 @@ void SinewPhysics::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("character_worst_joint_gap", "character"), &SinewPhysics::character_worst_joint_gap);
 	ClassDB::bind_method(D_METHOD("character_worst_limit_excess", "character"), &SinewPhysics::character_worst_limit_excess);
 	ClassDB::bind_method(D_METHOD("character_max_speed", "character"), &SinewPhysics::character_max_speed);
+
+	ClassDB::bind_method(D_METHOD("character_limb_state", "character", "limb"), &SinewPhysics::character_limb_state);
+	ClassDB::bind_method(D_METHOD("character_reach", "character", "limb", "point", "weight"), &SinewPhysics::character_reach, DEFVAL(1.0));
+	ClassDB::bind_method(D_METHOD("character_place_foot", "character", "limb", "ankle", "weight"), &SinewPhysics::character_place_foot, DEFVAL(1.0));
+	ClassDB::bind_method(D_METHOD("character_look_at", "character", "point", "weight", "max_angle"), &SinewPhysics::character_look_at, DEFVAL(1.0), DEFVAL(1.2));
+	ClassDB::bind_method(D_METHOD("character_lean", "character", "pitch", "roll", "weight"), &SinewPhysics::character_lean, DEFVAL(1.0));
+	ClassDB::bind_method(D_METHOD("character_set_effector", "character", "part", "local", "weight"), &SinewPhysics::character_set_effector, DEFVAL(1.0));
+	ClassDB::bind_method(D_METHOD("character_part_contacts", "character", "part"), &SinewPhysics::character_part_contacts);
+	ClassDB::bind_method(D_METHOD("ground_below", "point", "max_distance"), &SinewPhysics::ground_below, DEFVAL(3.0));
+	ClassDB::bind_method(D_METHOD("edge_ahead", "from", "dir", "range", "min_drop"), &SinewPhysics::edge_ahead, DEFVAL(1.5), DEFVAL(0.45));
+	ClassDB::bind_method(D_METHOD("wall_within", "origin", "dir", "reach"), &SinewPhysics::wall_within, DEFVAL(0.8));
+	ClassDB::bind_method(D_METHOD("impact_eta", "com", "velocity", "horizon"), &SinewPhysics::impact_eta, DEFVAL(3.0));
 }
 
 } // namespace godot

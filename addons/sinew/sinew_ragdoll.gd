@@ -15,6 +15,9 @@ extends UltraRagdoll
 ## and for the first ~1.2 s a pull keeps the body near the capsule. Getting up, it lets go into
 ## the get-up clip over 0.6 s.
 
+## Limbs, as the Sinew core numbers them (limb awareness and effectors).
+enum Limb { ARM_L, ARM_R, LEG_L, LEG_R, SPINE, NECK }
+
 ## Per part: {name, bone, parent, region, rest}
 var parts: Array = []
 var world: SinewWorld
@@ -50,6 +53,7 @@ var _powered_on := false
 var _powered_t := 0.0                         ## seconds since powered on
 var _last_anim_hips := Vector3.INF
 var _hit_relax := {}                         ## part -> seconds since a hit weakened its limb
+var _requests: Array = []                    ## procedural effectors for the coming tick: [method, args...]
 ## A hit weakens the struck limb's muscles for a moment (a shot arm goes slack, then pulls
 ## back): tone this low at the hit, back to full over `hit_relax_time`.
 @export_range(0, 1, 0.01) var hit_relax_tone := 0.25
@@ -111,6 +115,7 @@ func sinew_pre_step(dt: float) -> void:
 	if not active:
 		var anim := _anim_world()
 		if anim.is_empty():
+			_requests.clear()
 			return
 		if not powered or not character.state.is_grounded():
 			# Kinematic: the parts follow the animated pose exactly (also in the air: the
@@ -118,6 +123,7 @@ func sinew_pre_step(dt: float) -> void:
 			if _powered_on:
 				_power(false)
 			world.physics.call("character_move_kinematic", _id, anim, dt)
+			_requests.clear()
 			return
 		if not _powered_on:
 			_power(true)
@@ -133,9 +139,12 @@ func sinew_pre_step(dt: float) -> void:
 		world.physics.call("character_move_kinematic", _id, anim, dt)
 		world.physics.call("character_set_targets", _id, anim)
 		_relax_hit_limbs(dt)
+		_apply_requests()
 		return
 	if _getting_up:
+		_requests.clear()
 		return
+	_apply_requests()
 	_t_limp += dt
 	if _airborne and character.state.is_grounded():
 		_airborne = false
@@ -164,6 +173,59 @@ func sinew_pre_step(dt: float) -> void:
 		var want := Vector3(st.vel.x, 0.0, st.vel.z) + excess.limit_length(1.5) * 3.0
 		var dv := (want - Vector3(hips_v.x, 0.0, hips_v.z)) * minf(5.0 * dt, 1.0) * pull
 		world.physics.call("character_add_velocity", _id, dv, 1.0, 0.6)
+
+
+func _apply_requests() -> void:
+	for r: Array in _requests:
+		world.physics.callv(r[0], [_id] + r.slice(1))
+	_requests.clear()
+
+
+# ------------------------------------------------------------------ procedural control
+# Effectors for the coming physics tick, mixed with the animation by `weight` part by part:
+# call them every physics frame for as long as the limb should do it (before the SinewWorld
+# steps: a node's _physics_process runs first). They act on the physical parts: standing
+# (powered) that's the spine, head and arms; the legs walk the animation until the balancer
+# (S5). Down, every part.
+
+## Reach an arm's hand to a world point (out of range: it stretches toward it).
+func reach(limb: Limb, point: Vector3, weight := 1.0) -> void:
+	_requests.append(["character_reach", limb, point, weight])
+
+
+## Turn the head toward a world point (at most max_angle off the animated look).
+func look_toward(point: Vector3, weight := 1.0, max_angle := 1.2) -> void:
+	_requests.append(["character_look_at", point, weight, max_angle])
+
+
+## Put a leg's ankle at a world point, the foot keeping its animated orientation.
+func place_foot(limb: Limb, ankle: Vector3, weight := 1.0) -> void:
+	_requests.append(["character_place_foot", limb, ankle, weight])
+
+
+## Lean the spine: pitch forward (+) / back, roll to the body's right (+) / left, radians.
+func lean(pitch: float, roll: float, weight := 1.0) -> void:
+	_requests.append(["character_lean", pitch, roll, weight])
+
+
+## Any part's rotation in its parent part's frame (by part name, e.g. "LeftLowerArm"): a
+## procedural pose of your own, mixed in by weight.
+func set_part_target(part_name: String, local: Quaternion, weight := 1.0) -> void:
+	var i := _part(part_name)
+	if i >= 0:
+		_requests.append(["character_set_effector", i, local, weight])
+
+
+## {present, attached, health, end_position, end_velocity, contact, end_contact, reach}
+func limb_state(limb: Limb) -> Dictionary:
+	return world.physics.call("character_limb_state", _id, limb) if _id != 0 else {}
+
+
+## Where a part touches something outside the body: [{point, normal, impulse, kind, body}]
+## (kind 0 static, 1 kinematic, 2 loose).
+func part_contacts(part_name: String) -> Array:
+	var i := _part(part_name)
+	return world.physics.call("character_part_contacts", _id, i) if _id != 0 and i >= 0 else []
 
 
 func sinew_post_step(dt: float) -> void:

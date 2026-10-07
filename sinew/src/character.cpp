@@ -122,6 +122,49 @@ void Character::move_kinematic(const std::vector<Transform>& world_pose, float d
 	}
 }
 
+void Character::set_effector(int part, Quat local, float weight) {
+	Part& p = _parts[size_t(part)];
+	p.effector = normalized(local);
+	p.effector_weight = std::clamp(weight, 0.0f, 1.0f);
+}
+
+Quat Character::effective_target(int part) const {
+	const Part& p = _parts[size_t(part)];
+	return p.effector_weight > 0.0f ? normalized(slerp(p.target, p.effector, p.effector_weight)) : p.target;
+}
+
+int Character::part_of(BodyHandle body) const {
+	for (size_t i = 0; i < _parts.size(); ++i) {
+		if (_parts[i].body == body) {
+			return int(i);
+		}
+	}
+	return -1;
+}
+
+int Character::part_contacts(int part, ContactPoint* out, int capacity) const {
+	ContactPoint buf[16];
+	const int n = _world.contacts(_parts[size_t(part)].body, buf, 16);
+	int written = 0;
+	for (int i = 0; i < n && written < capacity; ++i) {
+		if (part_of(buf[i].other) < 0) {
+			out[written++] = buf[i];
+		}
+	}
+	return written;
+}
+
+bool Character::part_touching(int part, bool static_only) const {
+	ContactPoint buf[16];
+	const int n = part_contacts(part, buf, 16);
+	for (int i = 0; i < n; ++i) {
+		if (!static_only || buf[i].other_kind != BodyKind::Dynamic) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void Character::set_targets_rest() {
 	const Rig& r = *_rig;
 	for (size_t i = 0; i < _parts.size(); ++i) {
@@ -219,7 +262,7 @@ void Character::pre_step(float dt) {
 			_world.apply_torque(_parts[size_t(def.parent)].body, -torque);
 		}
 		MuscleState m;
-		m.target = p.target;
+		m.target = effective_target(int(i));
 		// Box3D normalises a joint spring by the two bodies' own inertia, but the joint swings
 		// everything below it: scale stiffness and damping by sqrt(subtree inertia / part inertia)
 		// about the pivot, so the muscle is the spring it says on the load it carries (the spine,
@@ -241,7 +284,7 @@ void Character::pre_step(float dt) {
 				w = w * (0.6f / a);
 			}
 			if (a > 1e-5f) {
-				m.target = normalized(p.target * axis_angle(w, length(w)));
+				m.target = normalized(m.target * axis_angle(w, length(w)));
 			}
 		}
 		// The target's motion is used once: a target nobody updates again stands still (a body
@@ -249,6 +292,9 @@ void Character::pre_step(float dt) {
 		p.prev_target = p.target;
 		m.strength = std::max(0.0f, strength - comp);
 		_world.set_muscle(p.muscle, def.frame_parent.p, m);
+	}
+	for (Part& p : _parts) {
+		p.effector_weight = 0.0f;   // an effector lasts one tick
 	}
 }
 
