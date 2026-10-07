@@ -312,24 +312,43 @@ void SinewPhysics::character_set_gravity_compensation(int character, double k) {
 	}
 }
 
+void SinewPhysics::character_set_stiffness(int character, double scale) {
+	if (sinew::Character* c = _char(character)) {
+		c->set_stiffness(float(scale));
+	}
+}
+
+void SinewPhysics::character_set_damping(int character, double linear, double angular) {
+	if (sinew::Character* c = _char(character)) {
+		c->set_damping(float(linear), float(angular));
+	}
+}
+
+void SinewPhysics::character_set_root_assist(int character, const Transform3D& target, double strength, double dt,
+		double hertz) {
+	if (sinew::Character* c = _char(character)) {
+		c->set_root_assist(to_sinew(target), float(strength), float(dt), float(hertz));
+	}
+}
+
 void SinewPhysics::character_set_kinematic(int character, bool kinematic) {
 	if (sinew::Character* c = _char(character)) {
 		for (int i = 0; i < c->part_count(); ++i) {
-			if (c->attached(i)) {
-				_world->set_body_kind(c->body(i), kinematic ? sinew::BodyKind::Kinematic : sinew::BodyKind::Dynamic);
-			}
+			c->set_part_kinematic(i, kinematic);
 		}
+	}
+}
+
+void SinewPhysics::character_set_part_kinematic(int character, int part, bool kinematic) {
+	sinew::Character* c = _char(character);
+	if (c && part >= 0 && part < c->part_count()) {
+		c->set_part_kinematic(part, kinematic);
 	}
 }
 
 void SinewPhysics::character_move_kinematic(int character, const Array& world_pose, double dt) {
 	if (sinew::Character* c = _char(character)) {
-		const std::vector<sinew::Transform> pose = pose_of(world_pose);
-		for (int i = 0; i < c->part_count() && i < int(pose.size()); ++i) {
-			if (c->attached(i)) {
-				_world->move_kinematic(c->body(i), pose[size_t(i)], float(dt));
-			}
-		}
+		c->move_kinematic(pose_of(world_pose), float(dt));
 	}
 }
 
@@ -442,7 +461,11 @@ void SinewPhysics::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("character_set_tone", "character", "tone"), &SinewPhysics::character_set_tone);
 	ClassDB::bind_method(D_METHOD("character_set_part_tone", "character", "part", "tone"), &SinewPhysics::character_set_part_tone);
 	ClassDB::bind_method(D_METHOD("character_set_gravity_compensation", "character", "k"), &SinewPhysics::character_set_gravity_compensation);
+	ClassDB::bind_method(D_METHOD("character_set_stiffness", "character", "scale"), &SinewPhysics::character_set_stiffness);
+	ClassDB::bind_method(D_METHOD("character_set_damping", "character", "linear", "angular"), &SinewPhysics::character_set_damping);
+	ClassDB::bind_method(D_METHOD("character_set_root_assist", "character", "target", "strength", "dt", "hertz"), &SinewPhysics::character_set_root_assist, DEFVAL(4.0));
 	ClassDB::bind_method(D_METHOD("character_set_kinematic", "character", "kinematic"), &SinewPhysics::character_set_kinematic);
+	ClassDB::bind_method(D_METHOD("character_set_part_kinematic", "character", "part", "kinematic"), &SinewPhysics::character_set_part_kinematic);
 	ClassDB::bind_method(D_METHOD("character_move_kinematic", "character", "world_pose", "dt"), &SinewPhysics::character_move_kinematic);
 	ClassDB::bind_method(D_METHOD("character_set_velocity", "character", "velocity"), &SinewPhysics::character_set_velocity);
 	ClassDB::bind_method(D_METHOD("character_add_velocity", "character", "dv", "weight_root", "weight_rest"), &SinewPhysics::character_add_velocity);

@@ -1,5 +1,6 @@
 extends UltraTour
-## Review tour: the player's body as a Sinew body. Stands (animation), takes a hard shove
+## Review tour: the player's body as a Sinew body. Stands (powered: physics tracking the
+## animation), takes shots to the arm and chest (slow motion), a hard shove
 ## (slow motion: muscled fall onto the level), lies, gets up; then a killing shot (limp).
 ##   godot --path . --resolution 1280x720 -- --tour=sinew_review --controller=sinew [--model=zombie] --out=<dir>
 
@@ -17,6 +18,13 @@ func _build() -> void:
 		{"teleport": "speed_start", "t": 0.6, "yaw": 0, "pitch": -4, "view_tp": true, "slot": 0},
 		{"call": _setup, "t": 1.2, "shot": "stand"},
 		{"call": _slow.bind(true), "t": 0.0},
+		{"call": _hit_arm, "t": 0.06, "shot": "hit_0"},
+		{"t": 0.12, "shot": "hit_1"},
+		{"t": 0.12, "shot": "hit_2"},
+		{"t": 0.4, "shot": "hit_3"},
+		{"call": _hit_chest, "t": 0.06, "shot": "hit_chest_0"},
+		{"t": 0.12, "shot": "hit_chest_1"},
+		{"t": 0.4, "shot": "hit_chest_2"},
 		{"call": _shove, "t": 0.15, "shot": "shove_0"},
 	]
 	for k in 6:
@@ -46,6 +54,15 @@ func _setup() -> void:
 
 func _slow(on: bool) -> void:
 	Engine.time_scale = SLOW if on else 1.0
+
+
+## Shots from the camera's side: the struck limb is pushed and goes slack, then pulls back.
+func _hit_arm() -> void:
+	_c.react_to_hit(UltraLimbs.Region.ARM_R, -_from.normalized(), 60.0)
+
+
+func _hit_chest() -> void:
+	_c.react_to_hit(UltraLimbs.Region.TORSO, -_from.normalized(), 60.0)
 
 
 func _shove() -> void:

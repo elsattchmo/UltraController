@@ -5,8 +5,12 @@ extends UltraRagdoll
 ## the deterministic capsule (RAGDOLL / GET_UP / DEAD states) stays in charge of gameplay:
 ## this is the body you see.
 ##
-## Standing, the parts are kinematic and follow the animated pose (so a knock-down starts from
-## exactly what was on screen, moving as it moved). Down, they're dynamic: muscles hold the pose
+## Standing (`powered`, the default), the upper body is physical: spine, head and arms are
+## dynamic bodies whose muscles track the animated pose (gravity compensated, leading it by their
+## own lag), hanging off a pelvis and legs that follow the animation kinematically - the
+## animation walks (physical legs scraped the floor; they come with the balance controller).
+## The skeleton shows the physics. A shot or a blow pushes the part it hit and the body flinches
+## for real, then recovers. With `powered` off every part is kinematic. Down, they're dynamic: muscles hold the pose
 ## of the moment it went over, their tone fading as it settles (a knock-out or death goes limp),
 ## and for the first ~1.2 s a pull keeps the body near the capsule. Getting up, it lets go into
 ## the get-up clip over 0.6 s.
@@ -23,11 +27,33 @@ var _severed := 0                            ## regions already cut off in Sinew
 var _part_of_region := {}                    ## region -> the top part of it
 
 ## Muscle tone while down (Sinew's tone: 1 = the rig's full muscles).
-@export_range(0, 1, 0.01) var down_tone_start := 0.55
-@export_range(0, 1, 0.01) var down_tone := 0.12
+@export_range(0, 1, 0.01) var down_tone_start := 0.35
+@export_range(0, 1, 0.01) var down_tone := 0.1
+## Going down, the legs give way at once (a knocked-down body that kept its leg tone stood
+## there like a statue and toppled over stiffly): per-part share of the tone above.
+@export_range(0, 1, 0.01) var down_legs := 0.15
+@export_range(0, 1, 0.01) var down_spine := 0.5
 @export_range(0, 1, 0.01) var dead_tone := 0.02
 ## Total body mass, kg.
 @export var body_mass := 75.0
+## Standing body physical (muscles track the animation) instead of kinematic.
+@export var powered := true
+## How much of a standing powered body you see (1 = all physics).
+@export_range(0, 1, 0.01) var powered_blend := 1.0
+## Muscle stiffness / strength while standing powered (tracking an animation closely).
+@export_range(0.5, 4, 0.05) var powered_stiffness := 1.6
+## Hit impulse per point of damage, N s (a game's exaggeration: a 9 mm round is ~3 N s).
+@export var hit_impulse_per_damage := 0.5
+@export var hit_impulse_max := 35.0
+
+var _powered_on := false
+var _powered_t := 0.0                         ## seconds since powered on
+var _last_anim_hips := Vector3.INF
+var _hit_relax := {}                         ## part -> seconds since a hit weakened its limb
+## A hit weakens the struck limb's muscles for a moment (a shot arm goes slack, then pulls
+## back): tone this low at the hit, back to full over `hit_relax_time`.
+@export_range(0, 1, 0.01) var hit_relax_tone := 0.25
+@export var hit_relax_time := 0.4
 
 
 func setup(c: UltraCharacter) -> void:
@@ -70,6 +96,7 @@ func _make_character() -> void:
 	var sk := character.skeleton
 	_id = world.physics.call("add_character", _rig, _rigid(sk.global_transform), character.get_instance_id() % 30000 + 1)
 	world.physics.call("character_set_kinematic", _id, true)
+	_powered_on = false
 	_severed = 0
 	pose_now = _pose()
 	pose_prev = pose_now.duplicate()
@@ -82,10 +109,30 @@ func sinew_pre_step(dt: float) -> void:
 		return
 	_follow_cuts()
 	if not active:
-		# Standing: the parts follow the animated pose.
 		var anim := _anim_world()
-		if not anim.is_empty():
+		if anim.is_empty():
+			return
+		if not powered or not character.state.is_grounded():
+			# Kinematic: the parts follow the animated pose exactly (also in the air: the
+			# stand-in root drive is no balance, it would hold a jump's pelvis like a crane).
+			if _powered_on:
+				_power(false)
 			world.physics.call("character_move_kinematic", _id, anim, dt)
+			return
+		if not _powered_on:
+			_power(true)
+		_powered_t += dt
+		# Snap onto the animation (no muscle chase): for the first moments (the tree may not have
+		# posed the skeleton yet - the arms crept down from a T-pose) and after a teleport (the
+		# animated hips jumped: the upper body trailed up to 1.2 m behind for half a second).
+		var hips: Vector3 = (anim[0] as Transform3D).origin
+		if _powered_t < 0.25 or (_last_anim_hips != Vector3.INF and hips.distance_to(_last_anim_hips) > 0.5):
+			world.physics.call("character_set_pose", _id, anim, Vector3.ZERO)
+		_last_anim_hips = hips
+		# Powered: the legs walk the animation, the upper body's muscles track it.
+		world.physics.call("character_move_kinematic", _id, anim, dt)
+		world.physics.call("character_set_targets", _id, anim)
+		_relax_hit_limbs(dt)
 		return
 	if _getting_up:
 		return
@@ -99,6 +146,10 @@ func sinew_pre_step(dt: float) -> void:
 	if st.state == MotorState.Id.DEAD or st.has(MotorState.F_UNCONSCIOUS):
 		tone = lerpf(tone, dead_tone, smoothstep(0.3, 2.0, _t))
 	world.physics.call("character_set_tone", _id, tone)
+	# Settling: damping rises once it's down (as the UltraRagdoll's does), so soft muscles
+	# pulling toward the pose it fell in don't keep the hands creeping across the floor.
+	var settle := smoothstep(0.5, 1.2, _t)
+	world.physics.call("character_set_damping", _id, lerpf(0.1, 2.5, settle), lerpf(0.5, 6.0, settle))
 	# Holding limbs up against gravity is for a body on its feet: once it's down they lie
 	# where they fall (compensation pressing the standing pose into the floor made the hands
 	# and feet buzz at 1-3 m/s and kept the hips 40 cm up).
@@ -115,11 +166,85 @@ func sinew_pre_step(dt: float) -> void:
 		world.physics.call("character_add_velocity", _id, dv, 1.0, 0.6)
 
 
-func sinew_post_step(_dt: float) -> void:
+func sinew_post_step(dt: float) -> void:
 	if _id == 0:
 		return
 	pose_prev = pose_now
 	pose_now = _pose()
+	if not active and modifier:
+		var want := powered_blend if _powered_on else 0.0
+		modifier.blend = move_toward(modifier.blend, want, dt / 0.3)
+
+
+## Standing body: physical (true) or kinematic (false). Switching on starts from the animated
+## pose, at rest; switching off hands the skeleton back to the animation over 0.3 s.
+func _power(on: bool) -> void:
+	_powered_on = on
+	_powered_t = 0.0
+	_last_anim_hips = Vector3.INF
+	if on:
+		var anim := _anim_world()
+		if not anim.is_empty():
+			world.physics.call("character_set_pose", _id, anim, Vector3.ZERO)
+			world.physics.call("character_set_targets", _id, anim)
+		for i in parts.size():
+			world.physics.call("character_set_part_kinematic", _id, i, _walks(i))
+		world.physics.call("character_set_tone", _id, 1.0)
+		world.physics.call("character_set_stiffness", _id, powered_stiffness)
+		world.physics.call("character_set_gravity_compensation", _id, 1.0)
+		for i in parts.size():
+			world.physics.call("character_set_part_tone", _id, i, 1.0 if bool(world.physics.call("character_attached", _id, i)) else 0.0)
+	else:
+		world.physics.call("character_set_root_assist", _id, Transform3D(), 0.0, 1.0 / 60.0)
+		world.physics.call("character_set_kinematic", _id, true)
+
+
+## Struck limbs come back to full tone over hit_relax_time.
+func _relax_hit_limbs(dt: float) -> void:
+	for part in _hit_relax.keys():
+		var t: float = _hit_relax[part] + dt
+		var k := lerpf(hit_relax_tone, 1.0, clampf(t / hit_relax_time, 0.0, 1.0))
+		for i in _subtree(part):
+			world.physics.call("character_set_part_tone", _id, i, k)
+		if t >= hit_relax_time:
+			_hit_relax.erase(part)
+		else:
+			_hit_relax[part] = t
+
+
+func _subtree(top: int) -> Array:
+	var out := []
+	for i in parts.size():
+		if _below(i, top):
+			out.append(i)
+	return out
+
+
+## Parts the animation drives while powered: the pelvis and the legs.
+func _walks(i: int) -> bool:
+	var n: String = parts[i].name
+	return i == 0 or n.contains("Leg") or n.contains("Foot")
+
+
+## A hit: push the part it struck (the body flinches for real; the muscles bring it back).
+## Called on every machine from the replicated `hit` event, like the hit clip.
+func hit(region: int, dir: Vector3, amount: float) -> void:
+	if _id == 0 or not (_powered_on or active) or not _part_of_region.has(region):
+		return
+	var part: int = _part_of_region[region]
+	if _powered_on and _walks(part):
+		part = _part("Spine")          # the legs walk the animation: the shot rocks the body
+		if part < 0:
+			return
+	# The struck part's middle: a capsule's centre in world space.
+	var xf: Transform3D = pose_now[part] if part < pose_now.size() else Transform3D()
+	var impulse := dir.normalized() * minf(amount * hit_impulse_per_damage, hit_impulse_max)
+	var body: int = world.physics.call("character_body", _id, part)
+	world.physics.call("apply_impulse", body, impulse, xf.origin)
+	if _powered_on:
+		_hit_relax[part] = 0.0
+		for i in _subtree(part):
+			world.physics.call("character_set_part_tone", _id, i, hit_relax_tone)
 
 
 func _physics_process(delta: float) -> void:
@@ -147,6 +272,9 @@ func _physics_process(delta: float) -> void:
 
 
 func start() -> void:
+	if _powered_on:
+		world.physics.call("character_set_root_assist", _id, Transform3D(), 0.0, 1.0 / 60.0)
+		_powered_on = false
 	active = true
 	_getting_up = false
 	_fade = 1.0
@@ -155,13 +283,29 @@ func start() -> void:
 	_airborne = not character.state.is_grounded()
 	limit_violation = 0.0
 	var anim := _anim_world()
+	var was_physical := modifier.blend >= 0.99
 	if not anim.is_empty():
-		world.physics.call("character_set_pose", _id, anim, character.state.vel)
+		if not was_physical:
+			world.physics.call("character_set_pose", _id, anim, character.state.vel)
 		world.physics.call("character_set_targets", _id, anim)
 	world.physics.call("character_set_kinematic", _id, false)
-	world.physics.call("character_set_velocity", _id, character.state.vel)   # carries the knock-down push
+	# The knock-down push (a powered body keeps its own motion and gets the push on top).
+	if was_physical:
+		world.physics.call("character_add_velocity", _id, character.state.vel, 1.0, 1.0)
+	else:
+		world.physics.call("character_set_velocity", _id, character.state.vel)
 	world.physics.call("character_set_tone", _id, down_tone_start)
+	world.physics.call("character_set_stiffness", _id, 1.0)
+	world.physics.call("character_set_damping", _id, 0.1, 0.5)
 	world.physics.call("character_set_gravity_compensation", _id, 1.0)
+	for i in parts.size():
+		var n: String = parts[i].name
+		var k := 1.0
+		if n.contains("Leg") or n.contains("Foot"):
+			k = down_legs
+		elif n in ["Spine", "Chest", "UpperChest"]:
+			k = down_spine
+		world.physics.call("character_set_part_tone", _id, i, k)
 	pose_now = _pose()
 	pose_prev = pose_now.duplicate()
 	modifier.blend = 1.0
@@ -178,6 +322,7 @@ func stop() -> void:
 	_getting_up = false
 	_fade = 0.0
 	modifier.blend = 0.0
+	_powered_on = false
 	world.physics.call("character_set_kinematic", _id, true)
 	var anim := _anim_world()
 	if not anim.is_empty():

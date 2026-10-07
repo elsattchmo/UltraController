@@ -105,6 +105,11 @@ public:
 	/// A muscle from parent to child acting about `pivot` (in the parent's frame).
 	JointHandle add_muscle(BodyHandle parent, BodyHandle child, Vec3 pivot_in_parent, Vec3 pivot_in_child);
 	void set_muscle(JointHandle muscle, Vec3 pivot_in_parent, const MuscleState& state);
+	/// A drive: a full 6-dof spring (linear + angular, each with a force / torque cap) pulling
+	/// `child` onto `parent` * frame. Used to hold a body's root to an animated pose.
+	JointHandle add_drive(BodyHandle parent, BodyHandle child);
+	void set_drive(JointHandle drive, const Transform& frame_in_parent, float linear_hertz, float linear_damping,
+			float max_force, float angular_hertz, float angular_damping, float max_torque);
 	/// Bodies a and b never collide with each other.
 	JointHandle add_no_collide(BodyHandle a, BodyHandle b);
 	void destroy_joint(JointHandle joint);
@@ -119,6 +124,8 @@ public:
 	void set_transform(BodyHandle body, const Transform& xform);
 	/// Kinematic bodies: reach `target` by the end of the next step of length dt.
 	void move_kinematic(BodyHandle body, const Transform& target, float dt);
+	/// Velocity damping (1/s) of a body.
+	void set_damping(BodyHandle body, float linear, float angular);
 	/// Torque (N m) applied over the next step.
 	void apply_torque(BodyHandle body, Vec3 torque);
 	void apply_linear_impulse(BodyHandle body, Vec3 impulse, Vec3 world_point);

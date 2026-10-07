@@ -82,8 +82,12 @@ public:
 	void character_set_tone(int character, double tone);
 	void character_set_part_tone(int character, int part, double tone);
 	void character_set_gravity_compensation(int character, double k);
+	void character_set_stiffness(int character, double scale);
+	void character_set_damping(int character, double linear, double angular);
+	void character_set_root_assist(int character, const Transform3D& target, double strength, double dt, double hertz);
 	/// All parts kinematic (following move_character_kinematic) or dynamic.
 	void character_set_kinematic(int character, bool kinematic);
+	void character_set_part_kinematic(int character, int part, bool kinematic);
 	void character_move_kinematic(int character, const Array& world_pose, double dt);
 	void character_set_velocity(int character, const Vector3& velocity);
 	void character_add_velocity(int character, const Vector3& dv, double weight_root, double weight_rest);

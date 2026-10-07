@@ -69,8 +69,8 @@ struct HumanoidOptions {
 	float strength = 1.0f;           ///< scales every muscle's strength
 };
 
-/// The physical body for a humanoid skeleton: 18 parts (pelvis, spine, chest, upper chest,
-/// head, arms, forearms, hands, thighs, shins, feet) with anatomical joint ranges.
+/// The physical body for a humanoid skeleton: 19 parts (pelvis, spine, chest, upper chest,
+/// head, clavicles, arms, forearms, hands, thighs, shins, feet) with anatomical joint ranges.
 /// Missing optional bones (UpperChest, hands, feet) are folded into their parents.
 Rig build_humanoid_rig(const SkeletonDesc& skeleton, const HumanoidOptions& options = {});
 

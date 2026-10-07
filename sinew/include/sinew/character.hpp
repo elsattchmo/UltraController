@@ -8,6 +8,7 @@
 #include "sinew/physics_world.hpp"
 #include "sinew/rig.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -35,7 +36,17 @@ public:
 	void set_target_local(int part, Quat local);
 	Quat target_local(int part) const { return _parts[size_t(part)].target; }
 	/// Targets from a whole world pose (e.g. the animated skeleton mapped onto the parts).
+	/// Called every tick with a moving pose, the muscles lead it by their own lag (2 zeta /
+	/// omega) so they track instead of trailing behind it.
 	void set_targets_from_pose(const std::vector<Transform>& world_pose);
+
+	/// A part driven kinematically (it follows move_kinematic and pushes, but isn't pushed),
+	/// e.g. the legs while the animation walks. Its muscle rests; parts below can still be
+	/// physical, hanging off it.
+	void set_part_kinematic(int part, bool kinematic);
+	bool part_kinematic(int part) const { return _parts[size_t(part)].kinematic; }
+	/// Move the kinematic parts to their place in `world_pose` by the end of the coming step.
+	void move_kinematic(const std::vector<Transform>& world_pose, float dt);
 	/// The rig's rest pose as targets.
 	void set_targets_rest();
 
@@ -43,9 +54,25 @@ public:
 	void set_tone(float tone);
 	float tone() const { return _tone; }
 	void set_tone(int part, float tone);
+	/// Scales every muscle's stiffness and strength (a body tracking an animation closely wants
+	/// more than one lying down). Default 1.
+	void set_stiffness(float scale) { _stiffness = std::max(0.0f, scale); }
+	/// Every part's velocity damping (1/s): a body settling on the floor gets more, so soft
+	/// muscles don't keep it creeping.
+	void set_damping(float linear, float angular);
+	/// Lead moving targets by the muscles' lag (on by default).
+	void set_lead(bool on) { _lead = on; }
 	/// 0..1 share of gravity the muscles cancel up front (feed-forward), so soft muscles
 	/// still hold a pose. The root carries the rest (it's what stands or lies on something).
 	void set_gravity_compensation(float k) { _gravity_comp = k; }
+
+	/// Root assist: hold the root part (pelvis) to `target` with a capped spring, the way a
+	/// balance controller would. strength 0 = off (the body stands or falls on its own).
+	/// Linear: `hertz` / force cap mass * g * strength * 2; angular: 2.5 x hertz,
+	/// torque cap 600 N m * strength. Stage S3's stand-in until the balancer (S5) takes over.
+	/// Call every tick with the new target (dt: the coming step, so the anchor moves with it).
+	void set_root_assist(const Transform& target, float strength, float dt, float hertz = 4.0f);
+	float root_assist() const { return _assist; }
 
 	/// Apply muscles and gravity compensation for the coming step.
 	void pre_step(float dt);
@@ -73,8 +100,11 @@ private:
 		JointHandle joint = 0;     // limit joint to the parent
 		JointHandle muscle = 0;
 		Quat target;
+		Quat prev_target;
+		bool tracking = false;     // target set from a pose last tick: lead it
 		float tone = 1.0f;
 		bool attached = true;
+		bool kinematic = false;
 	};
 	PhysicsWorld& _world;
 	std::shared_ptr<const Rig> _rig;
@@ -82,7 +112,13 @@ private:
 	std::vector<JointHandle> _filters;
 	float _tone = 1.0f;
 	float _gravity_comp = 1.0f;
+	float _assist = 0.0f;
+	float _stiffness = 1.0f;
+	bool _lead = true;
+	BodyHandle _anchor = 0;     // kinematic body the root assist hangs from
+	JointHandle _drive = 0;
 	bool _limp_below(int part) const;
+	float load_scale(int part, const std::vector<Vec3>& com) const;
 };
 
 } // namespace sinew

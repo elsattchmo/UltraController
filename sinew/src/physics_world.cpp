@@ -226,12 +226,49 @@ JointHandle PhysicsWorld::add_muscle(BodyHandle parent, BodyHandle child, Vec3 p
 	return b3StoreJointId(b3CreateMotorJoint(_impl->world, &def));
 }
 
+namespace {
+// Box3D's motor joint skips a spring whose cap or hertz is 0 - but keeps warm-starting with the
+// impulse it last stored, every substep, for good: a "switched off" root drive went on holding
+// the body's weight (it floated up), a relaxed muscle kept its last torque. A tiny cap instead
+// keeps the spring solved and clamps that impulse to nothing.
+constexpr float OFF_CAP = 1e-6f;
+float on_hertz(float hertz, float cap) { return cap > OFF_CAP && hertz > 0.0f ? hertz : 1.0f; }
+float on_cap(float cap) { return cap > OFF_CAP ? cap : OFF_CAP; }
+} // namespace
+
 void PhysicsWorld::set_muscle(JointHandle muscle, Vec3 pivot_in_parent, const MuscleState& state) {
 	b3JointId id = joint_id(muscle);
 	b3Joint_SetLocalFrameA(id, b3Transform{ to_b3(pivot_in_parent), to_b3(state.target) });
-	b3MotorJoint_SetAngularHertz(id, state.hertz);
+	b3MotorJoint_SetAngularHertz(id, on_hertz(state.hertz, state.strength));
 	b3MotorJoint_SetAngularDampingRatio(id, state.damping);
-	b3MotorJoint_SetMaxSpringTorque(id, state.strength);
+	b3MotorJoint_SetMaxSpringTorque(id, on_cap(state.strength));
+}
+
+JointHandle PhysicsWorld::add_drive(BodyHandle parent, BodyHandle child) {
+	b3MotorJointDef def = b3DefaultMotorJointDef();
+	def.base.bodyIdA = body_id(parent);
+	def.base.bodyIdB = body_id(child);
+	def.base.localFrameA = b3Transform_identity;
+	def.base.localFrameB = b3Transform_identity;
+	def.linearHertz = 0.0f;
+	def.maxSpringForce = 0.0f;
+	def.angularHertz = 0.0f;
+	def.maxSpringTorque = 0.0f;
+	def.maxVelocityForce = 0.0f;
+	def.maxVelocityTorque = 0.0f;
+	return b3StoreJointId(b3CreateMotorJoint(_impl->world, &def));
+}
+
+void PhysicsWorld::set_drive(JointHandle drive, const Transform& frame_in_parent, float linear_hertz, float linear_damping,
+		float max_force, float angular_hertz, float angular_damping, float max_torque) {
+	b3JointId id = joint_id(drive);
+	b3Joint_SetLocalFrameA(id, to_b3(frame_in_parent));
+	b3MotorJoint_SetLinearHertz(id, on_hertz(linear_hertz, max_force));
+	b3MotorJoint_SetLinearDampingRatio(id, linear_damping);
+	b3MotorJoint_SetMaxSpringForce(id, on_cap(max_force));
+	b3MotorJoint_SetAngularHertz(id, on_hertz(angular_hertz, max_torque));
+	b3MotorJoint_SetAngularDampingRatio(id, angular_damping);
+	b3MotorJoint_SetMaxSpringTorque(id, on_cap(max_torque));
 }
 
 JointHandle PhysicsWorld::add_no_collide(BodyHandle a, BodyHandle b) {
@@ -281,6 +318,11 @@ void PhysicsWorld::set_transform(BodyHandle body, const Transform& xform) {
 
 void PhysicsWorld::move_kinematic(BodyHandle body, const Transform& target, float dt) {
 	b3Body_SetTargetTransform(body_id(body), to_b3(target), dt, true);
+}
+
+void PhysicsWorld::set_damping(BodyHandle body, float linear, float angular) {
+	b3Body_SetLinearDamping(body_id(body), linear);
+	b3Body_SetAngularDamping(body_id(body), angular);
 }
 
 void PhysicsWorld::apply_torque(BodyHandle body, Vec3 torque) {

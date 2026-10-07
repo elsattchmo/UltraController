@@ -948,7 +948,10 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   them. Local: `git submodule update --init`, then core `cmake -S sinew -B build/sinew && cmake --build
   build/sinew && ctest --test-dir build/sinew`; extension `cmake -S bindings/godot -B build/godot
   -DGODOTCPP_TARGET=template_debug && cmake --build build/godot --config Release`. Box3D links the MSVC
-  runtime statically, so godot-cpp is added first and the core matches it.
+  runtime statically: every target must too (`CMAKE_MSVC_RUNTIME_LIBRARY` set in both CMakeLists -
+  godot-cpp sets it on its own target only; the binding's objects came out /MD and the link failed).
+  CI job logs are on a host this cloud session can't reach: failing build lines are echoed as
+  annotations (`gh api repos/<owner>/<repo>/check-runs/<job id>/annotations`).
 - **Main menu Character section** (`demo/characters/character_models.gd` = `CharacterModels`): Controller
   (UltraController | Sinew) and Model (Mannequin | Zombie) toggle rows between the levels and Play
   (`main.set_controller` / `set_model`, `--controller=` / `--model=`, kept in Engine meta `ultra_controller`
@@ -958,5 +961,38 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Tests: `sinew_tests` (doctest, core), suite `s0` (extension loads + simulates, Single player plays the pick,
   zombie model walks on the full stack), `ui_menus.test_main_menu_character_select_with_pad`. A GDScript parse
   error does NOT fail the runner (the test still prints ok): grep the output for `SCRIPT ERROR` (CI does).
-- Stage S0: `SinewCharacter` is a stand-in (plays exactly like the UltraController, holds a live
-  `SinewPhysics` world); S2 swaps its body for the Sinew one.
+- **The body (S2)**: `SinewCharacter._build_visual` swaps the UltraRagdoll for `SinewRagdoll extends
+  UltraRagdoll` (same interface: active, getup_front / yaw, split_waist, hips_offset), a Sinew character in
+  `SinewWorld` (one per scene tree, `acquire` / `release`, joins the root DEFERRED - a body asks while its
+  character is being set up; steps at physics priority 120, after the motor ticks; mirrors the level's
+  WORLD_STATIC | WORLD_DYNAMIC colliders: static ones static, scripted / animatable / rigid ones as kinematic
+  proxies). `SinewPoseModifier` sits where the PhysicalBoneSimulator3D was (before Dismember): records the
+  animated pose (targets), writes the physics pose by `blend`, interpolated between ticks. The capsule
+  (RAGDOLL / GET_UP / DEAD) stays the gameplay truth. Headless (no visuals) there is no Sinew body.
+- **Rig**: 19 parts (pelvis, spine, chest, upper chest, head on the neck bone, clavicles, arms, forearms,
+  hands, thighs, shins, feet), de Leva masses (clavicles 2.5 % each: lighter ones under stiff springs made
+  the arm sway), ball joints (cone centred off the rest bone for shoulders / hips) + hinges for knees /
+  elbows. Arms don't collide with their own torso / hips / thighs (torso capsules are wider than a slim body).
+- **Muscles** = Box3D motor joints (angular spring + torque cap) re-aimed each tick. Rules learnt:
+  * Box3D normalises a spring by the two bodies' own inertia: scale hertz and damping by
+    sqrt(subtree inertia / part inertia about the pivot) (`Character::load_scale`, cap 6) - else the spine
+    swayed after a shove and a clavicle let the arm sway 12 cm - and only as far as the muscle works
+    (scaled by tone: stiff springs with tiny caps on a lying body chattered).
+  * A spring "off" (cap or hertz 0) keeps warm-starting its last impulse forever (a released root drive
+    floated the body up): Sinew never sets 0, it uses a 1e-6 cap (`OFF_CAP`).
+  * Targets set from a moving pose are led by the spring's lag (2 zeta / omega, <= 0.12 s, 0.6 rad); the
+    target's motion is used once (a downed body kept leading its last walking target: feet buzzed).
+  * Gravity compensation is a torque pair out of the same strength; off once down (it pressed the standing
+    pose into the floor). Box3D's continuous collision stops each part at its own time of impact: joints
+    are projected back after every step (`Character::post_step`).
+- **Powered (S3, default)**: standing, the pelvis and legs follow the animation KINEMATICALLY (physical legs
+  scraped the floor; they come with the balancer) and the upper body is muscled physics tracking it at
+  `powered_stiffness` 1.6 - the skeleton shows the physics (standing within ~5 cm;
+  walking 11 cm). A hit (`SinewCharacter.react_to_hit`, every machine) pushes the struck part
+  (0.5 N s / damage, <= 35) and slackens its limb to 25 % tone, back over 0.4 s. Knocked down: legs to 15 %
+  of the down tone at once (else it stood like a statue), spine 50 %; damping rises as it settles.
+  The body SNAPS onto the animated pose for 0.25 s after powering on (the tree may not have posed the
+  skeleton yet: arms crept down from a T-pose) and when the animated hips jump > 0.5 m in a tick (a
+  teleport left the upper body up to 1.2 m behind). Kinematic standing (`powered = false`) is suite s2's mode.
+- Tests: core `sinew_tests` (22), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
+  knock-down, death, sever, zombie). Tour `sinew_review` (`--controller=sinew`).

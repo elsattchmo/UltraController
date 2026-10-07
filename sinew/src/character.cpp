@@ -64,6 +64,9 @@ Character::Character(PhysicsWorld& world, std::shared_ptr<const Rig> rig, const 
 }
 
 Character::~Character() {
+	if (_anchor) {
+		_world.destroy_body(_anchor);
+	}
 	for (Part& p : _parts) {
 		if (p.body) {
 			_world.destroy_body(p.body);   // takes its joints with it
@@ -85,6 +88,7 @@ void Character::set_pose(const std::vector<Transform>& world_pose, Vec3 velocity
 
 void Character::set_target_local(int part, Quat local) {
 	_parts[size_t(part)].target = normalized(local);
+	_parts[size_t(part)].tracking = false;
 }
 
 void Character::set_targets_from_pose(const std::vector<Transform>& world_pose) {
@@ -92,7 +96,28 @@ void Character::set_targets_from_pose(const std::vector<Transform>& world_pose) 
 	for (size_t i = 0; i < _parts.size() && i < world_pose.size(); ++i) {
 		const int parent = r.parts[i].parent;
 		if (parent >= 0) {
-			_parts[i].target = normalized(conj(world_pose[size_t(parent)].q) * world_pose[i].q);
+			Part& p = _parts[i];
+			const Quat q = normalized(conj(world_pose[size_t(parent)].q) * world_pose[i].q);
+			p.prev_target = p.tracking ? p.target : q;
+			p.target = q;
+			p.tracking = true;
+		}
+	}
+}
+
+void Character::set_part_kinematic(int part, bool kinematic) {
+	Part& p = _parts[size_t(part)];
+	if (p.kinematic == kinematic || !attached(part)) {
+		return;
+	}
+	p.kinematic = kinematic;
+	_world.set_body_kind(p.body, kinematic ? BodyKind::Kinematic : BodyKind::Dynamic);
+}
+
+void Character::move_kinematic(const std::vector<Transform>& world_pose, float dt) {
+	for (size_t i = 0; i < _parts.size() && i < world_pose.size(); ++i) {
+		if (_parts[i].kinematic) {
+			_world.move_kinematic(_parts[i].body, world_pose[i], dt);
 		}
 	}
 }
@@ -107,6 +132,38 @@ void Character::set_targets_rest() {
 	}
 }
 
+void Character::set_root_assist(const Transform& target, float strength, float dt, float hertz) {
+	_assist = std::max(0.0f, strength);
+	if (_anchor == 0) {
+		if (_assist <= 0.0f) {
+			return;
+		}
+		_anchor = _world.add_body(BodyKind::Kinematic, target);
+		_drive = _world.add_drive(_anchor, _parts[0].body);
+	} else {
+		// Moved, not teleported: the anchor carries the target's velocity, so the drive's
+		// damping doesn't drag a walking body back.
+		_world.move_kinematic(_anchor, target, dt);
+	}
+	const float g = length(_world.gravity());
+	const float m = mass();
+	// Box3D normalises the drive by the pelvis' own mass (8 kg) while it carries the whole body:
+	// scale the frequency by sqrt(M / m_pelvis) so it acts as a spring on the body (at a plain
+	// 4 Hz it sagged 14 cm under the body's weight).
+	hertz *= std::sqrt(m / std::max(_rig->parts[0].mass, 0.1f));
+	// The angular spring acts on the pelvis' own small inertia while it carries the whole upper
+	// body's lean: it needs to be much stiffer than the linear one (at the same 4 Hz the pelvis
+	// sagged 6 deg).
+	_world.set_drive(_drive, Transform{}, _assist > 0.0f ? hertz : 0.0f, 1.0f, m * g * 2.0f * _assist,
+			_assist > 0.0f ? 2.5f * hertz : 0.0f, 1.0f, 600.0f * _assist);
+}
+
+void Character::set_damping(float linear, float angular) {
+	for (Part& p : _parts) {
+		_world.set_damping(p.body, linear, angular);
+	}
+}
+
 void Character::set_tone(float tone) {
 	_tone = std::max(0.0f, tone);
 }
@@ -116,7 +173,6 @@ void Character::set_tone(int part, float tone) {
 }
 
 void Character::pre_step(float dt) {
-	(void)dt;
 	const Rig& r = *_rig;
 	const Vec3 g = _world.gravity();
 	// Centres of mass and masses of each part's subtree (children come after parents, so one
@@ -124,10 +180,12 @@ void Character::pre_step(float dt) {
 	const size_t n = _parts.size();
 	std::vector<Vec3> moment(n);    // sum of m * com over the subtree
 	std::vector<float> mass(n, 0.0f);
+	std::vector<Vec3> com(n);
 	for (size_t i = 0; i < n; ++i) {
 		const float m = r.parts[i].mass;
 		mass[i] = m;
-		moment[i] = _world.center_of_mass(_parts[i].body) * m;
+		com[i] = _world.center_of_mass(_parts[i].body);
+		moment[i] = com[i] * m;
 	}
 	for (size_t i = n; i-- > 1;) {
 		const int parent = r.parts[i].parent;
@@ -139,11 +197,11 @@ void Character::pre_step(float dt) {
 	for (size_t i = 0; i < n; ++i) {
 		const PartDef& def = r.parts[i];
 		Part& p = _parts[i];
-		if (def.parent < 0 || !p.attached) {
+		if (def.parent < 0 || !p.attached || p.kinematic) {
 			continue;
 		}
 		const float tone = _tone * p.tone;
-		const float strength = def.muscle.strength * tone;
+		const float strength = def.muscle.strength * tone * _stiffness;
 		// Gravity compensation: cancel the torque gravity puts on this joint's subtree about the
 		// pivot, as an internal torque pair (child +, parent -). It's part of the muscle's work,
 		// so it comes out of the same strength; the spring gets what's left.
@@ -162,12 +220,58 @@ void Character::pre_step(float dt) {
 		}
 		MuscleState m;
 		m.target = p.target;
+		// Box3D normalises a joint spring by the two bodies' own inertia, but the joint swings
+		// everything below it: scale stiffness and damping by sqrt(subtree inertia / part inertia)
+		// about the pivot, so the muscle is the spring it says on the load it carries (the spine,
+		// carrying a 38 kg upper body on a 6 kg part, swung back and forth after a shove and
+		// never settled; a clavicle swinging a whole arm let it sway 12 cm).
+		// ... and only as far as the muscle is working: a low-tone body lying on the floor is
+		// soft (stiff springs with tiny torque caps chattered: hands buzzing at 1-3 m/s).
+		const float load = 1.0f + (load_scale(int(i), com) - 1.0f) * std::clamp(tone, 0.0f, 1.0f);
 		// Stiffness falls off gently with tone (a relaxed limb is soft, not just weak).
-		m.hertz = def.muscle.hertz * std::sqrt(std::min(tone, 1.0f));
-		m.damping = def.muscle.damping;
+		m.hertz = def.muscle.hertz * std::sqrt(std::min(tone, 1.0f)) * load * _stiffness;
+		m.damping = def.muscle.damping * load;
+		if (_lead && p.tracking && dt > 0.0f && m.hertz > 0.0f) {
+			// A damped spring trails a target moving at w by 2 zeta / omega seconds: aim that far
+			// ahead along the target's own motion (capped at 0.6 rad).
+			const float lead = std::min(2.0f * def.muscle.damping / (2.0f * PI * m.hertz), 0.12f);
+			Vec3 w = to_rotation_vector(conj(p.prev_target) * p.target) * (lead / dt);
+			const float a = length(w);
+			if (a > 0.6f) {
+				w = w * (0.6f / a);
+			}
+			if (a > 1e-5f) {
+				m.target = normalized(p.target * axis_angle(w, length(w)));
+			}
+		}
+		// The target's motion is used once: a target nobody updates again stands still (a body
+		// knocked down mid-walk kept leading its last walking target and its feet buzzed).
+		p.prev_target = p.target;
 		m.strength = std::max(0.0f, strength - comp);
 		_world.set_muscle(p.muscle, def.frame_parent.p, m);
 	}
+}
+
+float Character::load_scale(int part, const std::vector<Vec3>& com) const {
+	const Rig& r = *_rig;
+	const PartDef& def = r.parts[size_t(part)];
+	const Vec3 pivot = xform(_world.body_transform(_parts[size_t(def.parent)].body), def.frame_parent.p);
+	// The part's own inertia about the pivot: a capsule's (rod + radius) plus its offset.
+	auto own = [&](int i) {
+		const PartDef& d = r.parts[size_t(i)];
+		const float len = length(d.b - d.a);
+		return d.mass * (len * len / 12.0f + d.radius * d.radius * 0.4f);
+	};
+	const float d0 = length(com[size_t(part)] - pivot);
+	const float part_i = own(part) + def.mass * d0 * d0;
+	float sub_i = 0.0f;
+	for (int k : r.subtree(part)) {
+		if (_parts[size_t(k)].attached) {
+			const float d = length(com[size_t(k)] - pivot);
+			sub_i += own(k) + r.parts[size_t(k)].mass * d * d;
+		}
+	}
+	return std::clamp(std::sqrt(sub_i / std::max(part_i, 1e-5f)), 1.0f, 6.0f);
 }
 
 float Character::post_step() {

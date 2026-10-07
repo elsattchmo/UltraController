@@ -5,6 +5,9 @@ extends UltraTestSuite
 
 const Id := MotorState.Id
 
+## s2 checks the kinematic standing body; s3 (extends this) runs the same cases powered.
+var powered := false
+
 
 func _sinew(at: Vector3, model := "mannequin") -> SinewCharacter:
 	var c := SinewCharacter.new()
@@ -19,6 +22,8 @@ func _sinew(at: Vector3, model := "mannequin") -> SinewCharacter:
 	add_child(c)
 	b.body = c
 	chars.append(c)
+	if c.ragdoll is SinewRagdoll:
+		(c.ragdoll as SinewRagdoll).powered = powered
 	return c
 
 
@@ -35,7 +40,7 @@ func test_the_body_is_sinew_and_follows_the_animation() -> void:
 	if not check(c.ragdoll is SinewRagdoll, "the ragdoll is Sinew's (got %s)" % [c.ragdoll]):
 		return
 	var r := c.ragdoll as SinewRagdoll
-	check(r.parts.size() == 17, "17 body parts from the mannequin's skeleton (%d)" % r.parts.size())
+	check(r.parts.size() == 19, "19 body parts from the mannequin's skeleton (%d)" % r.parts.size())
 	check(c.skeleton.get_node_or_null("Ragdoll") == null, "the old PhysicalBoneSimulator3D is gone")
 	var mods := []
 	for n in c.skeleton.get_children():
@@ -46,7 +51,8 @@ func test_the_body_is_sinew_and_follows_the_animation() -> void:
 	var hips_bone: int = r.parts[0].bone
 	var skel_hips := c.skeleton.global_transform * c.skeleton.get_bone_global_pose(hips_bone)
 	check(r.pose_now[0].origin.distance_to(skel_hips.origin) < 0.08, "the physics hips track the animated hips (%.3f m)" % r.pose_now[0].origin.distance_to(skel_hips.origin))
-	check(not r.active and r.modifier.blend == 0.0, "standing, the animation shows")
+	if not powered:
+		check(not r.active and r.modifier.blend == 0.0, "standing, the animation shows")
 
 
 func test_knocked_down_falls_on_the_level_and_gets_up() -> void:
@@ -79,7 +85,7 @@ func test_knocked_down_falls_on_the_level_and_gets_up() -> void:
 	check(settled_at > 0 and settled_at < 240, "the body settles within 4 s")
 	check(lowest > floor_y - 0.12, "it lies ON the floor (Sinew's mirror of the level), not through it")
 	check(worst_gap < 0.01, "and in one piece")
-	check(not r.active and r.modifier.blend == 0.0, "back on its feet, the animation shows again")
+	check(not r.active and (r.modifier.blend == 0.0 or powered), "back on its feet, the animation shows again")
 
 
 func test_dead_body_goes_limp_and_lies_flat() -> void:
@@ -124,7 +130,7 @@ func test_zombie_model_gets_its_own_sinew_rig() -> void:
 	var c := _sinew(marker("spawn").global_position + Vector3(0, 0, 3), "zombie")
 	await ticks(15)
 	var r := c.ragdoll as SinewRagdoll
-	check(r is SinewRagdoll and r.parts.size() == 17, "the Mixamo zombie maps onto the same 17 parts")
+	check(r is SinewRagdoll and r.parts.size() == 19, "the Mixamo zombie maps onto the same 19 parts")
 	c.knock_down(Vector3(3, 1.0, 0))
 	var lowest := INF
 	for i in 150:

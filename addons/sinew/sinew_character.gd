@@ -4,9 +4,10 @@ extends UltraCharacter
 ## addons/sinew/bin). It inherits movement, weapons, input, net and HUD from UltraCharacter
 ## untouched; Sinew takes over the body: ragdoll, hit reactions, balance, behaviours.
 ##
-## Stage S2: the body you see is Sinew's. Standing it follows the animation; knocked down,
-## dead or falling it's a muscled physics body (SinewRagdoll replaces the UltraRagdoll the base
-## builds), lying in Sinew's mirror of the level and handing back to the get-up clips.
+## The body you see is Sinew's (SinewRagdoll replaces the UltraRagdoll the base builds).
+## Standing it's powered: muscles track the animation and hits push it for real (S3); knocked
+## down, dead or falling it's a muscled physics body lying in Sinew's mirror of the level,
+## handing back to the get-up clips.
 
 ## The Sinew physics world this character's body lives in (null if the extension didn't load).
 var physics: RefCounted
@@ -35,6 +36,13 @@ func _build_visual() -> void:
 	add_child(r)
 	r.setup(self)
 	physics = r.world.physics
+
+
+## A hit lands on the Sinew body too (every machine: this runs from the `hit` event).
+func react_to_hit(region: int, dir: Vector3, amount: float, kind := &"bullet") -> void:
+	super.react_to_hit(region, dir, amount, kind)
+	if ragdoll is SinewRagdoll:
+		(ragdoll as SinewRagdoll).hit(region, dir, amount)
 
 
 ## "sinew 0.1.0 (box3d <commit>)", or "" without the extension.

@@ -3,6 +3,7 @@
 #include "sinew/math.hpp"
 
 #include <algorithm>
+#include <initializer_list>
 
 namespace sinew {
 
@@ -78,12 +79,14 @@ const Spec SPECS[] = {
 	{ "Hips", "", "", 0, 0.1117f, 0.075f, Shape::Lateral, 0.045f, JointKind::Root, 0, 0, 0, {}, 0, 0, {}, 0, 0, TORSO },
 	{ "Spine", "Hips", "Chest", 0, 0.0820f, 0.070f, Shape::Lateral, 0.035f, JointKind::Ball, 30, 25, 0, {}, 0, 0, {}, 300, 7, TORSO },
 	{ "Chest", "Spine", "UpperChest", 0, 0.0813f, 0.070f, Shape::Lateral, 0.050f, JointKind::Ball, 25, 20, 0, {}, 0, 0, {}, 300, 7, TORSO },
-	{ "UpperChest", "Chest", "Neck", 0, 0.1596f, 0.070f, Shape::Lateral, 0.070f, JointKind::Ball, 20, 15, 0, {}, 0, 0, {}, 250, 7, TORSO },
+	{ "UpperChest", "Chest", "Neck", 0, 0.1096f, 0.070f, Shape::Lateral, 0.070f, JointKind::Ball, 20, 15, 0, {}, 0, 0, {}, 250, 7, TORSO },
 	{ "Neck", "UpperChest", "", 0.17f, 0.0694f, 0.058f, Shape::Along, 0, JointKind::Ball, 45, 60, 10, FWD, 0, 0, {}, 40, 8, HEAD },
-	{ "LeftUpperArm", "UpperChest", "LeftLowerArm", 0, 0.0271f, 0.030f, Shape::Along, 0, JointKind::Ball, 85, 70, 40, { 0, -0.8f, 0.6f }, 0, 0, {}, 80, 8, ARM_L },
+	{ "LeftShoulder", "UpperChest", "LeftUpperArm", 0, 0.0250f, 0.030f, Shape::Along, 0, JointKind::Ball, 25, 15, 0, {}, 0, 0, {}, 220, 8, TORSO },
+	{ "LeftUpperArm", "LeftShoulder", "LeftLowerArm", 0, 0.0271f, 0.030f, Shape::Along, 0, JointKind::Ball, 85, 110, 40, { 0, -0.8f, 0.6f }, 0, 0, {}, 80, 8, ARM_L },
 	{ "LeftLowerArm", "LeftUpperArm", "LeftHand", 0, 0.0162f, 0.024f, Shape::Along, 0, JointKind::Hinge, 0, 0, 0, {}, -5, 145, FWD, 60, 9, FOREARM_L },
 	{ "LeftHand", "LeftLowerArm", "", 0.075f, 0.0061f, 0.024f, Shape::Along, 0, JointKind::Ball, 70, 80, 0, {}, 0, 0, {}, 15, 10, HAND_L },
-	{ "RightUpperArm", "UpperChest", "RightLowerArm", 0, 0.0271f, 0.030f, Shape::Along, 0, JointKind::Ball, 85, 70, 40, { 0, -0.8f, 0.6f }, 0, 0, {}, 80, 8, ARM_R },
+	{ "RightShoulder", "UpperChest", "RightUpperArm", 0, 0.0250f, 0.030f, Shape::Along, 0, JointKind::Ball, 25, 15, 0, {}, 0, 0, {}, 220, 8, TORSO },
+	{ "RightUpperArm", "RightShoulder", "RightLowerArm", 0, 0.0271f, 0.030f, Shape::Along, 0, JointKind::Ball, 85, 110, 40, { 0, -0.8f, 0.6f }, 0, 0, {}, 80, 8, ARM_R },
 	{ "RightLowerArm", "RightUpperArm", "RightHand", 0, 0.0162f, 0.024f, Shape::Along, 0, JointKind::Hinge, 0, 0, 0, {}, -5, 145, FWD, 60, 9, FOREARM_R },
 	{ "RightHand", "RightLowerArm", "", 0.075f, 0.0061f, 0.024f, Shape::Along, 0, JointKind::Ball, 70, 80, 0, {}, 0, 0, {}, 15, 10, HAND_R },
 	{ "LeftUpperLeg", "Hips", "LeftLowerLeg", 0, 0.1416f, 0.048f, Shape::Along, 0, JointKind::Ball, 70, 35, 35, FWD, 0, 0, {}, 250, 7, THIGH_L },
@@ -96,6 +99,9 @@ const Spec SPECS[] = {
 
 /// The fold target when an optional bone is missing.
 const char* fallback(const std::string& bone) {
+	if (bone == "LeftShoulder" || bone == "RightShoulder") {
+		return "UpperChest";
+	}
 	if (bone == "UpperChest") {
 		return "Chest";
 	}
@@ -225,7 +231,9 @@ Rig build_humanoid_rig(const SkeletonDesc& sk, const HumanoidOptions& options) {
 			rig.parts[size_t(rig.find(into))].mass += fraction * options.mass;
 		}
 	};
-	fold("UpperChest", "Chest", 0.1596f);
+	fold("UpperChest", "Chest", 0.1096f);
+	fold("LeftShoulder", "UpperChest", 0.0250f);
+	fold("RightShoulder", "UpperChest", 0.0250f);
 	fold("LeftHand", "LeftLowerArm", 0.0061f);
 	fold("RightHand", "RightLowerArm", 0.0061f);
 	fold("LeftFoot", "LeftLowerLeg", 0.0137f);
@@ -245,10 +253,23 @@ Rig build_humanoid_rig(const SkeletonDesc& sk, const HumanoidOptions& options) {
 	pair("LeftUpperLeg", "RightUpperLeg");
 	pair("Neck", "LeftUpperArm");
 	pair("Neck", "RightUpperArm");
+	pair("Neck", "LeftShoulder");
+	pair("Neck", "RightShoulder");
+	pair("LeftShoulder", "RightShoulder");
 	pair("Spine", "LeftUpperLeg");
 	pair("Spine", "RightUpperLeg");
 	pair("Chest", "LeftUpperArm");
 	pair("Chest", "RightUpperArm");
+	// Arms hang and swing right against the torso and past the hips and thighs: with the torso as
+	// capsules (wider than a slim body) they caught on it and couldn't reach the animated pose.
+	for (const char* side : { "Left", "Right" }) {
+		for (const char* limb : { "UpperArm", "LowerArm", "Hand" }) {
+			const std::string arm = std::string(side) + limb;
+			for (const char* body : { "Hips", "Spine", "Chest", "UpperChest", "LeftUpperLeg", "RightUpperLeg", "LeftShoulder", "RightShoulder" }) {
+				pair(arm.c_str(), body);
+			}
+		}
+	}
 	return rig;
 }
 
