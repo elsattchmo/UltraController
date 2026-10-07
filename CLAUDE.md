@@ -1110,7 +1110,7 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   ground (IDLE / MOVE / TURN_IN_PLACE, no platform) the capsule moves at `Gait::drive` - the centre of mass an
   inverted pendulum (omega = sqrt(g / pelvis height)) over the centre of pressure, which can only be inside the
   planted soles (heel up: the balls; toes up: the heels; in flight: nothing), aiming for the command in
-  `drive_tau` 0.2 s, push <= `friction` 0.45 g (0.8 outran the legs: planted feet ended out of reach). After
+  `drive_tau` 0.2 s, push <= `friction` 0.6 g (0.8 outran the legs: planted feet ended out of reach). After
   the motor's step, `_drive_motion` moves the capsule by (drive - motor) THROUGH `motor.move` (step-up / snap /
   pushes; a bare slide left the floor on stairs) and sets body.velocity, so the motor carries on from it.
   Footholds brake / catch: hip at touchdown + command x half the stance + (velocity - command - trim) x
@@ -1152,6 +1152,35 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   0.8 s (past `shove_knockdown` 3.5: knocked over); loose props get the same dv x mass (<= 80 kg).
   A 0-damage `impact` DamageInfo with `shove`, applied PUSH_CONTACT 0.18 s after the release by the
   authority; arms = SinewAnimDriver `play_push` (UAL Push, upper-body one-shot). Suite s8.
+- **Gait matched to the clips** (tour `sinew_gait_compare` + `tools/sinew/gait_compare.py`: orthographic side
+  view locked to the character, `--gaitcmp=clip|gait --pace=walk|jog|sprint --no-kit`, frames counted in physics
+  ticks under `--fixed-fps 60`; the script finds strides by the left ankle's forward maxima in both runs, prints
+  per-phase knee / hip / ankle / toe / foot pitch / pelvis / arm and writes `<pace>_strip.png` (clip over gait) and
+  `<pace>_overlay.png` (clip red, gait cyan)). Lessons:
+  * The reference cycles are the Mixamo walk / run / sprint (`sinew_animset.tres` overrides walk_f =
+    N_StdWalk2 1.45 m/s, jog_f = U_Run_F 3.63, sprint_f = S_Fast 5.53 - near the motor's 1.35 / 3.6 / 6.2); the
+    UAL Walk / Jog / Sprint are stylised (the jog: 1.7 steps/s, 2.8 m steps, 75 % flight). U_Run_F holds its
+    left hand up by the face: `gait_run_upper` [walk, sprint, sprint] gives the run cycle the average upper body
+    of those (same heel-strike phase), legs + pelvis its own. `Mixamo_Jog` is the UAL jog round-tripped (unused).
+  * Cycles are sampled from the left heel strike (ankle furthest ahead of the hips: `contact_phase`; the
+    animset's plant_phase is the TOE going down, a quarter stride later on a walk), then the core rotates each
+    cycle to the first sample the left foot is down after its longest time in the air (phase 0 = touchdown).
+  * `ClipLegs` (per clip): stride = authored speed x length (authored = the grounded toes' speed in skeleton
+    space; measured against the hips it reads 10-20 % low at a run - the hips surge - so the measurement only
+    overrides a clip that is > 30 % off), duty, landing point, per-phase ankle lift, forward path (`fwd`, share
+    of the stride) and foot pitch. Pitch is atan2(up, along the motion) - signed: a sprint's push-off tips the
+    foot past vertical (150 deg), an unsigned measure read 56. The stance roll may go as fast as the clip's.
+  * The swing follows the clip's ankle path RELATIVE TO THE HIPS (`path_at`: hip ground + fwd(p) x 2 x step),
+    joined to where it lifted and bent onto the foothold (`lift_off`, `end_off`); the drawn ankle is the path
+    (rolled for the heel strike only over the last quarter). A smoothstep from lift to foothold arrived early and
+    waited with the leg locked straight (knee 11 vs the clip's 40).
+  * On a clip's legs the pelvis drops all the way a planted leg needs (no `drop_slack`): a sprint push-off's
+    heel rise left the ankle 6 cm short and the toe slid 31 mm a frame.
+  * Starting off: `push_accel` 2.5 m/s2 - a planted leg pushes off beyond the pendulum's tip (to 90 % of a walk
+    in 0.47 s, was 1.05).
+  Result (worst per-phase |gait - clip|): walk knee 22 deg, ankle 4 cm, pitch 4 deg, pelvis 0.5 cm; run knee 39,
+  ankle 6 cm, pelvis 1 cm; sprint knee 50 (the early-swing fold - one tick of presentation interpolation at
+  4.2 steps/s), ankle 12 cm, pelvis 3 cm; stride and cadence equal at all three.
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
   data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
   coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),

@@ -85,7 +85,9 @@ func test_clip_references_can_be_repointed() -> void:
 			walk_node = bs.get_blend_point_node(i)
 	check(walk_node != null and String(walk_node.animation) == "Jog", "and the tree plays it")
 	var shared := load(SinewCharacter.DEFAULT_ANIM_SET) as SinewAnimationSet
-	check(shared != null and shared.overrides.is_empty(), "the default reference set ships empty (= the clips as imported)")
+	# The shipped set re-points the gait's cycles at the Mixamo walk / run / sprint (the UAL ones are stylised).
+	check(shared != null and String(shared.overrides.get("walk_f", "")) == "mixamo/N_StdWalk2"
+			and String(shared.overrides.get("sprint_f", "")) == "mixamo/S_Fast", "the default set walks / sprints on the Mixamo clips")
 
 
 func test_a_gun_still_shows_in_the_hand() -> void:

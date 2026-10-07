@@ -701,6 +701,18 @@ void SinewPhysics::character_gait_set_cycles(int character, const Array& cycles)
 		for (int k = 0; k < h.size(); ++k) {
 			c.pelvis_height.push_back(h[k]);
 		}
+		c.length = float(double(d.get("length", 0.0)));
+		const char* keys[2][2] = { { "ankle_l", "toe_l" }, { "ankle_r", "toe_r" } };
+		for (int f = 0; f < 2; ++f) {
+			const PackedVector3Array an = d.get(keys[f][0], PackedVector3Array());
+			const PackedVector3Array to = d.get(keys[f][1], PackedVector3Array());
+			for (int k = 0; k < an.size(); ++k) {
+				c.ankle[f].push_back(to_sinew(an[k]));
+			}
+			for (int k = 0; k < to.size(); ++k) {
+				c.toe[f].push_back(to_sinew(to[k]));
+			}
+		}
 		out.push_back(c);
 	}
 	it->second->set_cycles(out);
@@ -782,6 +794,11 @@ Dictionary SinewPhysics::character_gait_state(int character) const {
 	d["duty"] = g.duty();
 	d["warp"] = g.warp();
 	d["cop"] = to_godot(g.cop());
+	Array clips;
+	for (const auto& c : g.clip_info()) {
+		clips.push_back(Array::make(c[0], c[1], c[2], c[3], c[4]));
+	}
+	d["clips"] = clips;
 	d["capture_margin"] = g.capture_margin();
 	Array sup;
 	for (const sinew::Vec3& p : g.support()) {
