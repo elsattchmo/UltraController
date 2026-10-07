@@ -179,3 +179,35 @@ TEST_CASE("identical runs are bit-identical; a different push is not") {
 	CHECK(run(5.0f) == run(5.0f));
 	CHECK(run(5.0f) != run(5.001f));
 }
+
+TEST_CASE("world mirror: bodies land on hull, mesh and kinematic shapes") {
+	PhysicsWorld w;
+	// A static mesh floor (two triangles, Godot's clockwise front faces seen from above).
+	const Vec3 verts[] = { { -5, 0, -5 }, { 5, 0, -5 }, { 5, 0, 5 }, { -5, 0, 5 } };
+	const int cw[] = { 0, 1, 2, 0, 2, 3 };
+	BodyHandle floor = w.add_body(BodyKind::Static, Transform{});
+	REQUIRE(w.add_mesh_shape(floor, verts, 4, cw, 2, true));
+	// A static convex wedge at x = 3 and a kinematic box at x = -3.
+	BodyHandle rock = w.add_body(BodyKind::Static, at(3, 0, 0));
+	const Vec3 wedge[] = { { -0.5f, 0, -0.5f }, { 0.5f, 0, -0.5f }, { -0.5f, 0, 0.5f }, { 0.5f, 0, 0.5f }, { -0.5f, 0.4f, -0.5f },
+		{ -0.5f, 0.4f, 0.5f } };
+	REQUIRE(w.add_hull_shape(rock, wedge, 6));
+	BodyHandle lift = w.add_body(BodyKind::Kinematic, at(-3, 0.25f, 0));
+	w.add_box_shape(lift, Transform{}, Vec3{ 0.5f, 0.25f, 0.5f });
+	auto drop = [&](float x) {
+		CapsuleDesc c;
+		c.xform = at(x, 1.5f, 0);
+		c.a = Vec3{ -0.1f, 0, 0 };
+		c.b = Vec3{ 0.1f, 0, 0 };
+		c.radius = 0.05f;
+		return w.add_capsule_body(c);
+	};
+	BodyHandle on_floor = drop(0.0f), on_lift = drop(-3.0f), on_rock = drop(2.7f);
+	for (int i = 0; i < 120; ++i) {
+		w.move_kinematic(lift, at(-3, 0.25f + 0.5f * float(i) / 120.0f, 0), DT);
+		w.step(DT);
+	}
+	CHECK(std::fabs(w.body_transform(on_floor).p.y - 0.05f) < 0.01f);
+	CHECK(w.body_transform(on_lift).p.y > 0.95f);       // riding the lift up to its top at 1.0 m
+	CHECK(w.body_transform(on_rock).p.y > 0.06f);       // on the wedge's slope, not the floor
+}

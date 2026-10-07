@@ -24,9 +24,14 @@ if(GIT_FOUND)
 		OUTPUT_VARIABLE SINEW_BOX3D_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 endif()
 
-add_library(sinew_core STATIC
+set(SINEW_SOURCES
+	src/character.cpp
 	src/physics_world.cpp
+	src/rig.cpp
 	src/version.cpp
+)
+add_library(sinew_core STATIC
+	${SINEW_SOURCES}
 	capi/sinew_capi.cpp
 )
 target_include_directories(sinew_core PUBLIC include capi)
@@ -34,7 +39,7 @@ target_link_libraries(sinew_core PRIVATE box3d)
 target_compile_definitions(sinew_core PRIVATE SINEW_BOX3D_COMMIT="${SINEW_BOX3D_COMMIT}")
 
 if(SINEW_CAPI_SHARED)
-	add_library(sinew_capi SHARED capi/sinew_capi.cpp src/physics_world.cpp src/version.cpp)
+	add_library(sinew_capi SHARED capi/sinew_capi.cpp ${SINEW_SOURCES})
 	target_include_directories(sinew_capi PUBLIC include capi)
 	target_link_libraries(sinew_capi PRIVATE box3d)
 	target_compile_definitions(sinew_capi PRIVATE SINEW_CAPI_SHARED SINEW_BOX3D_COMMIT="${SINEW_BOX3D_COMMIT}")
@@ -47,6 +52,8 @@ if(SINEW_TESTS)
 		tests/test_main.cpp
 		tests/test_physics.cpp
 		tests/test_capi.cpp
+		tests/test_math.cpp
+		tests/test_character.cpp
 	)
 	target_include_directories(sinew_tests PRIVATE extern/doctest)
 	target_link_libraries(sinew_tests PRIVATE sinew_core)

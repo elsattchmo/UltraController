@@ -2,6 +2,8 @@
 
 #include "convert.hpp"
 
+#include "sinew/math.hpp"
+
 #include <cstring>
 #include <vector>
 
@@ -13,6 +15,7 @@ struct PhysicsWorld::Impl {
 	float joint_hertz = 60.0f;
 	float joint_damping = 2.0f;
 	std::vector<BodyHandle> dynamic_bodies;
+	std::vector<b3MeshData*> meshes;   // mesh shapes reference these: freed with the world
 	int bodies = 0;
 };
 
@@ -25,12 +28,100 @@ PhysicsWorld::PhysicsWorld(const WorldSettings& settings) :
 	_impl->substeps = settings.substeps < 1 ? 1 : settings.substeps;
 	_impl->joint_hertz = settings.joint_hertz;
 	_impl->joint_damping = settings.joint_damping;
+	b3World_EnableContinuous(_impl->world, settings.continuous);
+	if (settings.contact_hertz > 0.0f) {
+		b3World_SetContactTuning(_impl->world, settings.contact_hertz, settings.contact_damping,
+				settings.contact_push_speed);
+	}
 }
 
 PhysicsWorld::~PhysicsWorld() {
 	if (b3World_IsValid(_impl->world)) {
 		b3DestroyWorld(_impl->world);
 	}
+	for (b3MeshData* m : _impl->meshes) {
+		b3DestroyMesh(m);
+	}
+}
+
+BodyHandle PhysicsWorld::add_body(BodyKind kind, const Transform& xform) {
+	b3BodyDef def = b3DefaultBodyDef();
+	def.type = kind == BodyKind::Static ? b3_staticBody : kind == BodyKind::Kinematic ? b3_kinematicBody : b3_dynamicBody;
+	def.position = to_b3(xform.p);
+	def.rotation = to_b3(xform.q);
+	_impl->bodies++;
+	return b3StoreBodyId(b3CreateBody(_impl->world, &def));
+}
+
+namespace {
+b3ShapeDef shape_def(float friction) {
+	b3ShapeDef def = b3DefaultShapeDef();
+	def.baseMaterial.friction = friction;
+	return def;
+}
+} // namespace
+
+void PhysicsWorld::add_box_shape(BodyHandle body, const Transform& local, Vec3 half_extents, float friction) {
+	b3BoxHull box = b3MakeTransformedBoxHull(half_extents.x, half_extents.y, half_extents.z, to_b3(local));
+	b3ShapeDef def = shape_def(friction);
+	b3CreateHullShape(body_id(body), &def, &box.base);
+}
+
+void PhysicsWorld::add_sphere_shape(BodyHandle body, Vec3 center, float radius, float friction) {
+	b3Sphere sphere = { to_b3(center), radius };
+	b3ShapeDef def = shape_def(friction);
+	b3CreateSphereShape(body_id(body), &def, &sphere);
+}
+
+void PhysicsWorld::add_capsule_shape(BodyHandle body, Vec3 a, Vec3 b, float radius, float friction) {
+	b3Capsule capsule = { to_b3(a), to_b3(b), radius };
+	b3ShapeDef def = shape_def(friction);
+	b3CreateCapsuleShape(body_id(body), &def, &capsule);
+}
+
+bool PhysicsWorld::add_hull_shape(BodyHandle body, const Vec3* points, int count, float friction) {
+	std::vector<b3Vec3> pts(static_cast<size_t>(count));
+	for (int i = 0; i < count; ++i) {
+		pts[size_t(i)] = to_b3(points[i]);
+	}
+	b3HullData* hull = b3CreateHull(pts.data(), count, 64);
+	if (hull == nullptr) {
+		return false;
+	}
+	b3ShapeDef def = shape_def(friction);
+	b3CreateHullShape(body_id(body), &def, hull);
+	b3DestroyHull(hull);   // the shape keeps its own copy
+	return true;
+}
+
+bool PhysicsWorld::add_mesh_shape(BodyHandle body, const Vec3* vertices, int vertex_count, const int* indices,
+		int triangle_count, bool clockwise, float friction) {
+	std::vector<b3Vec3> verts(static_cast<size_t>(vertex_count));
+	for (int i = 0; i < vertex_count; ++i) {
+		verts[size_t(i)] = to_b3(vertices[i]);
+	}
+	std::vector<int32_t> idx(indices, indices + size_t(triangle_count) * 3);
+	b3MeshDef mesh_def = {};
+	mesh_def.vertices = verts.data();
+	mesh_def.indices = idx.data();
+	mesh_def.vertexCount = vertex_count;
+	mesh_def.triangleCount = triangle_count;
+	mesh_def.weldVertices = true;
+	mesh_def.weldTolerance = 0.001f;
+	mesh_def.identifyEdges = true;
+	mesh_def.clockWiseWinding = clockwise;
+	b3MeshData* mesh = b3CreateMesh(&mesh_def, nullptr, 0);
+	if (mesh == nullptr) {
+		return false;
+	}
+	_impl->meshes.push_back(mesh);
+	b3ShapeDef def = shape_def(friction);
+	b3CreateMeshShape(body_id(body), &def, mesh, b3Vec3{ 1.0f, 1.0f, 1.0f });
+	return true;
+}
+
+void PhysicsWorld::remove_body(BodyHandle body) {
+	destroy_body(body);
 }
 
 BodyHandle PhysicsWorld::add_static_box(const Transform& xform, Vec3 half_extents, float friction) {
@@ -65,6 +156,29 @@ BodyHandle PhysicsWorld::add_capsule_body(const CapsuleDesc& desc) {
 	return h;
 }
 
+BodyHandle PhysicsWorld::add_part(const PartBodyDesc& desc) {
+	b3BodyDef body_def = b3DefaultBodyDef();
+	body_def.type = b3_dynamicBody;
+	body_def.position = to_b3(desc.xform.p);
+	body_def.rotation = to_b3(desc.xform.q);
+	body_def.linearVelocity = to_b3(desc.velocity);
+	body_def.name = desc.name;
+	b3BodyId body = b3CreateBody(_impl->world, &body_def);
+	const float r = desc.radius;
+	const float h = length(desc.b - desc.a);
+	const float volume = PI * r * r * h + 4.0f / 3.0f * PI * r * r * r;
+	b3ShapeDef shape_def = b3DefaultShapeDef();
+	shape_def.density = desc.mass / volume;
+	shape_def.baseMaterial.friction = desc.friction;
+	shape_def.filter.groupIndex = desc.group;
+	b3Capsule capsule = { to_b3(desc.a), to_b3(desc.b), r };
+	b3CreateCapsuleShape(body, &shape_def, &capsule);
+	BodyHandle handle = b3StoreBodyId(body);
+	_impl->dynamic_bodies.push_back(handle);
+	_impl->bodies++;
+	return handle;
+}
+
 JointHandle PhysicsWorld::add_ball_joint(const BallJointDesc& desc) {
 	b3SphericalJointDef def = b3DefaultSphericalJointDef();
 	def.base.bodyIdA = body_id(desc.parent);
@@ -81,8 +195,104 @@ JointHandle PhysicsWorld::add_ball_joint(const BallJointDesc& desc) {
 	return b3StoreJointId(b3CreateSphericalJoint(_impl->world, &def));
 }
 
+JointHandle PhysicsWorld::add_hinge_joint(const HingeJointDesc& desc) {
+	b3RevoluteJointDef def = b3DefaultRevoluteJointDef();
+	def.base.bodyIdA = body_id(desc.parent);
+	def.base.bodyIdB = body_id(desc.child);
+	def.base.localFrameA = to_b3(desc.frame_parent);
+	def.base.localFrameB = to_b3(desc.frame_child);
+	def.base.constraintHertz = _impl->joint_hertz;
+	def.base.constraintDampingRatio = _impl->joint_damping;
+	def.enableLimit = desc.min < desc.max;
+	def.lowerAngle = desc.min;
+	def.upperAngle = desc.max;
+	return b3StoreJointId(b3CreateRevoluteJoint(_impl->world, &def));
+}
+
+JointHandle PhysicsWorld::add_muscle(BodyHandle parent, BodyHandle child, Vec3 pivot_in_parent, Vec3 pivot_in_child) {
+	b3MotorJointDef def = b3DefaultMotorJointDef();
+	def.base.bodyIdA = body_id(parent);
+	def.base.bodyIdB = body_id(child);
+	def.base.localFrameA = b3Transform{ to_b3(pivot_in_parent), b3Quat_identity };
+	def.base.localFrameB = b3Transform{ to_b3(pivot_in_child), b3Quat_identity };
+	def.base.collideConnected = false;
+	def.linearHertz = 0.0f;
+	def.maxSpringForce = 0.0f;
+	def.maxVelocityForce = 0.0f;
+	def.maxVelocityTorque = 0.0f;
+	def.angularHertz = 0.0f;
+	def.angularDampingRatio = 1.0f;
+	def.maxSpringTorque = 0.0f;
+	return b3StoreJointId(b3CreateMotorJoint(_impl->world, &def));
+}
+
+void PhysicsWorld::set_muscle(JointHandle muscle, Vec3 pivot_in_parent, const MuscleState& state) {
+	b3JointId id = joint_id(muscle);
+	b3Joint_SetLocalFrameA(id, b3Transform{ to_b3(pivot_in_parent), to_b3(state.target) });
+	b3MotorJoint_SetAngularHertz(id, state.hertz);
+	b3MotorJoint_SetAngularDampingRatio(id, state.damping);
+	b3MotorJoint_SetMaxSpringTorque(id, state.strength);
+}
+
+JointHandle PhysicsWorld::add_no_collide(BodyHandle a, BodyHandle b) {
+	b3FilterJointDef def = b3DefaultFilterJointDef();
+	def.base.bodyIdA = body_id(a);
+	def.base.bodyIdB = body_id(b);
+	return b3StoreJointId(b3CreateFilterJoint(_impl->world, &def));
+}
+
 void PhysicsWorld::destroy_joint(JointHandle joint) {
 	b3DestroyJoint(joint_id(joint), true);
+}
+
+void PhysicsWorld::destroy_body(BodyHandle body) {
+	auto& v = _impl->dynamic_bodies;
+	for (size_t i = 0; i < v.size(); ++i) {
+		if (v[i] == body) {
+			v.erase(v.begin() + long(i));
+			break;
+		}
+	}
+	b3DestroyBody(body_id(body));
+	_impl->bodies--;
+}
+
+float PhysicsWorld::joint_separation(JointHandle joint) const {
+	return b3Joint_GetLinearSeparation(joint_id(joint));
+}
+
+float PhysicsWorld::hinge_angle(JointHandle joint) const {
+	return b3RevoluteJoint_GetAngle(joint_id(joint));
+}
+
+float PhysicsWorld::joint_twist_angle(JointHandle joint) const {
+	return b3SphericalJoint_GetTwistAngle(joint_id(joint));
+}
+
+void PhysicsWorld::set_body_kind(BodyHandle body, BodyKind kind) {
+	b3Body_SetType(body_id(body), kind == BodyKind::Static ? b3_staticBody
+					: kind == BodyKind::Kinematic				   ? b3_kinematicBody
+																   : b3_dynamicBody);
+}
+
+void PhysicsWorld::set_transform(BodyHandle body, const Transform& xform) {
+	b3Body_SetTransform(body_id(body), to_b3(xform.p), to_b3(xform.q));
+}
+
+void PhysicsWorld::move_kinematic(BodyHandle body, const Transform& target, float dt) {
+	b3Body_SetTargetTransform(body_id(body), to_b3(target), dt, true);
+}
+
+void PhysicsWorld::apply_torque(BodyHandle body, Vec3 torque) {
+	b3Body_ApplyTorque(body_id(body), to_b3(torque), true);
+}
+
+void PhysicsWorld::apply_linear_impulse(BodyHandle body, Vec3 impulse, Vec3 world_point) {
+	b3Body_ApplyLinearImpulse(body_id(body), to_b3(impulse), to_b3(world_point), true);
+}
+
+Vec3 PhysicsWorld::gravity() const {
+	return from_b3(b3World_GetGravity(_impl->world));
 }
 
 void PhysicsWorld::step(float dt) {
