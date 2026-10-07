@@ -65,6 +65,8 @@ struct GaitSettings {
 	float step_turn = 1.3f, turn_cadence = 1.5f, cadence_turn_max = 3.4f, pelvis_follow = 0.5f;
 	float foot_clear = 0.16f;                   ///< a swinging ankle keeps this far from the standing one, m
 	float pick_hysteresis = 0.1f;
+	float side_bias = 0.18f;                    ///< rad a side clip counts as further off (diagonals: forward / back clips)
+	float path_turn_rate = 5.0f;                ///< rad/s a swinging foot's way of travel turns toward the body's
 	float pace_lead = 0.25f;                    ///< s of acceleration the legs' pace leads the body's speed by
 	/// The largest catching offset for a change of motion that wasn't a disturbance (m): a braking step,
 	/// not a lunge. Disturbances (Gait::disturb: a push) get the whole capture offset.
@@ -231,6 +233,7 @@ private:
 		float p = 0.0f;      ///< foot phase last tick
 		Vec3 lift_off;       ///< swing on the clip's path: where it lifted, off that path (flat, world)
 		Quat land_yaw;       ///< the facing it will be put down with (the clip's foot angle on its path)
+		Vec3 path_dir;       ///< swinging: its own way of travel (turns toward the body's at a foot's pace)
 	};
 	const Rig& _rig;
 	const Limbs& _limbs;

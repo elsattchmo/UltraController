@@ -390,7 +390,13 @@ void Gait::pick_direction(float speed) {
 			an.push_back({ _clip[i].angle, int(i) });
 		}
 	}
-	auto off = [&](float a) { return std::fabs(std::atan2(std::sin(_theta - a), std::cos(_theta - a))); };
+	// (A side clip only near pure sideways: its legs cross over, and on a backward diagonal the crossing
+	// legs went through each other - the forward / back clips, warped, take the diagonals.)
+	auto off = [&](float a) {
+		const float d = std::fabs(std::atan2(std::sin(_theta - a), std::cos(_theta - a)));
+		const bool side = std::fabs(std::fabs(a) - 0.5f * PI) < 0.3f;
+		return d + (side ? _s.side_bias : 0.0f);
+	};
 	float cur = 1e9f;
 	for (const Anchor& x : an) {
 		if (x.idx == _pick) {
@@ -825,7 +831,11 @@ void Gait::step_feet(float dt) {
 	// (Off the hips' own line, as the clip has it: across the travel, a side step's feet close and cross.)
 	const Vec3 path_side = length(path_dir) > 0.5f ? normalized(cross(U, path_dir)) : Vec3{};
 	auto clip_off = [&](const ClipLegs& C, int i, float ph) {
-		return path_dir * (sample_at(C.fwd[i], ph) * 2.0f * _step_max) + path_side * sample_at(C.across[i], ph);
+		// (A swinging foot's own way of travel: it turns toward a new one at a foot's pace - a reversal
+		// mid-step flipped the path and the foot jumped across at 45 m/s.)
+		const Vec3 pd = _feet[i].swinging && length(_feet[i].path_dir) > 0.5f ? _feet[i].path_dir : path_dir;
+		const Vec3 ps = length(pd) > 0.5f ? normalized(cross(U, pd)) : path_side;
+		return pd * (sample_at(C.fwd[i], ph) * 2.0f * _step_max) + ps * sample_at(C.across[i], ph);
 	};
 	auto path_at = [&](const ClipLegs& C, int i, float ph) { return flat(_root.p, U) + clip_off(C, i, ph); };
 	const float swing_h = _s.swing_height + (_s.swing_height_run - _s.swing_height) * smoothstep(_s.walk_speed, _s.run_speed, _speed);
@@ -852,6 +862,7 @@ void Gait::step_feet(float dt) {
 			f.lift_t = 0;
 			f.lift_p = std::min(p, 0.98f);
 			_foot_cl[i] = _cl;
+			f.path_dir = path_dir;
 			f.lift_off = on_path ? flat(f.lift, U) - path_at(_cl, i, f.lift_p) : Vec3{};
 		} else if (!swing && f.swinging) {
 			f.down_t = 0;
@@ -884,6 +895,14 @@ void Gait::step_feet(float dt) {
 		}
 		// The clip this foot lifted with (it keeps it till it lands).
 		const ClipLegs& C = _foot_cl[i].ok ? _foot_cl[i] : _cl;
+		// Its way of travel turns toward the body's at <= path_turn_rate (rad/s).
+		if (length(f.path_dir) > 0.5f && length(path_dir) > 0.5f) {
+			const float a = std::atan2(dot(cross(f.path_dir, path_dir), U), dot(f.path_dir, path_dir));
+			const float lim = _s.path_turn_rate * dt;
+			f.path_dir = normalized(rotate(axis_angle(U, std::clamp(a, -lim, lim)), f.path_dir));
+		} else {
+			f.path_dir = path_dir;
+		}
 		// Where to land: where the hip will be at touchdown, a little ahead of it (so the hip is
 		// over the foot at mid-stance); standing still, its own spot.
 		Vec3 land;
