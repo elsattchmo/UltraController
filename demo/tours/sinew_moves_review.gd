@@ -11,7 +11,6 @@ const EVERY := 3
 const CROP := Vector2i(640, 720)
 const BONES := ["Hips", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "LeftToes", "RightUpperLeg", "RightLowerLeg",
 		"RightFoot", "RightToes", "LeftUpperArm", "RightUpperArm", "Head"]
-const D := 0.70710678
 
 var _c: UltraCharacter
 var _r: SinewRagdoll
@@ -29,75 +28,7 @@ var _tick0 := 0
 
 func _build() -> void:
 	out_dir = out_dir.replace("/m1", "/sinew_moves_review")
-	var sprint := InputFrame.B_SPRINT
-	var segs := [
-		# label, ticks, step extras, camera, gait on
-		["@flat", 40, {"slot": 0}, "front", true],
-		["idle unarmed", 150, {"slot": 0}, "front", true],
-		["idle unarmed (clip)", 90, {"slot": 0}, "front", false],
-		["idle pistol", 180, {"slot": 1}, "front", true],
-		["idle pistol (clip)", 90, {"slot": 1}, "front", false],
-		["idle rifle", 180, {"slot": 2}, "front", true],
-		["idle rifle (clip)", 90, {"slot": 2}, "front", false],
-		["@reset", 60, {"slot": 0}, "behind", true],
-		["walk fwd", 180, {"move": Vector2(0, 1)}, "behind", true],
-		["@reset", 40, {}, "behind", true],
-		["walk fwd-left", 150, {"move": Vector2(-D, D)}, "behind", true],
-		["@reset", 40, {}, "behind", true],
-		["walk fwd-right", 150, {"move": Vector2(D, D)}, "behind", true],
-		["@reset", 40, {}, "front", true],
-		["walk back-left", 150, {"move": Vector2(-D, -D)}, "front", true],
-		["@reset", 40, {}, "front", true],
-		["walk back-right", 150, {"move": Vector2(D, -D)}, "front", true],
-		["@reset", 40, {}, "front", true],
-		["back-left then", 90, {"move": Vector2(-D, -D)}, "front", true],
-		["diagonal reversal", 120, {"move": Vector2(D, -D)}, "front", true],
-		["@reset", 60, {}, "side", true],
-		["sprint start", 150, {"move": Vector2(0, 1), "buttons": sprint}, "side", true],
-		["sprint turn 90/s", 120, {"move": Vector2(0, 1), "buttons": sprint, "yaw_rate": 90.0}, "behind", true],
-		["sprint flick 180", 120, {"move": Vector2(0, 1), "buttons": sprint, "yaw_add": 180}, "behind", true],
-		["stop from sprint", 90, {}, "side", true],
-		["@reset", 40, {}, "side", true],
-		["walk then", 90, {"move": Vector2(0, 1)}, "side", true],
-		["walk reversal", 120, {"move": Vector2(0, -1)}, "side", true],
-		["@reset", 40, {}, "side", true],
-		["sprint then", 120, {"move": Vector2(0, 1), "buttons": sprint}, "side", true],
-		["sprint reversal", 120, {"move": Vector2(0, -1)}, "side", true],
-		["stop", 60, {}, "side", true],
-		["@stairs", 30, {}, "side", true],
-		["stairs up", 280, {"move": Vector2(0, 1), "yaw": 0}, "side", true],
-		["stairs down", 240, {"move": Vector2(0, 1), "yaw": 180}, "side", true],
-		# Ramps (playground markers ramp_<a> at the foot, facing up the slope).
-		["@at:ramp_20", 40, {}, "side", true],
-		["ramp 20 up", 200, {"move": Vector2(0, 1), "yaw": 0}, "side", true],
-		["ramp 20 down", 200, {"move": Vector2(0, 1), "yaw": 180}, "side", true],
-		["@at:ramp_30", 40, {}, "side", true],
-		["ramp 30 up", 200, {"move": Vector2(0, 1), "yaw": 0}, "side", true],
-		["ramp 30 down", 200, {"move": Vector2(0, 1), "yaw": 180}, "side", true],
-		# Strafing then backing (the user: "strafing then changing direction backwards"), unarmed and pistol.
-		["@flat", 40, {"slot": 0}, "front", true],
-		["strafe L then", 90, {"move": Vector2(-1, 0)}, "front", true],
-		["back after strafe L", 120, {"move": Vector2(0, -1)}, "front", true],
-		["@flat", 40, {"slot": 1}, "front", true],
-		["pistol strafe R then", 90, {"move": Vector2(1, 0), "slot": 1}, "front", true],
-		["pistol back-left after", 120, {"move": Vector2(-D, -D), "slot": 1}, "front", true],
-		["@flat", 40, {"slot": 0}, "behind", true],
-	]
-	# Direction chaos: the stick changes every 0.25 - 0.7 s among 8 directions (seeded), walking then sprinting.
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 7
-	for pass_i in 2:
-		var chaos := "chaos walk" if pass_i == 0 else "chaos sprint"
-		var t := 0
-		while t < 600:
-			var a := float(rng.randi_range(0, 7)) * PI / 4.0
-			var n := rng.randi_range(15, 42)
-			var extra := {"move": Vector2(sin(a), cos(a))}
-			if pass_i == 1:
-				extra["buttons"] = InputFrame.B_SPRINT
-			segs.append([chaos, n, extra, "behind", true])
-			t += n
-		segs.append(["@flat", 40, {}, "behind", true])
+	var segs := SinewMoveSegments.all()
 	var only := String(main.args.get("only", ""))
 	steps = [{"teleport": "speed_start", "t": 0.6, "yaw": 0, "pitch": -4, "view_tp": true, "slot": 0},
 			{"call": _setup, "t": 600.0, "until": _ticks.bind(30)}]
@@ -106,22 +37,11 @@ func _build() -> void:
 		if only != "" and not label.contains(only) and not label.begins_with("@"):
 			continue
 		var st: Dictionary = (s[2] as Dictionary).duplicate()
-		if label == "@reset":
-			st["teleport"] = "speed_start"
-			st["yaw"] = 0
-		elif label == "@stairs":
-			steps.append({"call": _to_stairs, "t": 0.1, "yaw": 0})
-		elif label.begins_with("@at:"):
-			st["teleport"] = label.substr(4)
-			st["yaw"] = 0
-		elif label == "@flat":
-			# (Level ground: the speed track's start marker stands on a 5 cm edge.)
-			steps.append({"call": _to_flat, "t": 0.1, "yaw": 0})
-		if st.has("yaw_add"):
-			st.erase("yaw_add")
-			st["call"] = _seg.bind(label, s[3], s[4], 180.0)
-		else:
-			st["call"] = _seg.bind(label, s[3], s[4], 0.0)
+		if label.begins_with("@"):
+			steps.append({"call": _place.bind(label), "t": 0.1})
+		var yaw_add := float(st.get("yaw_add", 0.0))
+		st.erase("yaw_add")
+		st["call"] = _seg.bind(label, s[3], s[4], yaw_add)
 		st["t"] = 600.0
 		st["until"] = _ticks.bind(int(s[1]))
 		steps.append(st)
@@ -140,14 +60,11 @@ func _seg(label: String, cam: String, gait_on: bool, yaw_add: float) -> void:
 	print("moves_review: ", label, " at tick ", _tick0)
 
 
-func _to_flat() -> void:
-	if _c:
-		_c.teleport(main.map.call("marker", "spawn").global_position + Vector3(-16, 0, -3), 0.0)
-
-
-func _to_stairs() -> void:
-	if _c:
-		_c.teleport(Vector3(30.0, 0.05, -17.0), 0.0)
+func _place(label: String) -> void:
+	var at := SinewMoveSegments.place(label, main.map)
+	if _c and not at.is_empty():
+		_c.teleport(at[0], at[1])
+		_bot.live_yaw = at[1]
 
 
 func _ticks(n: int) -> bool:

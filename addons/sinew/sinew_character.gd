@@ -159,6 +159,8 @@ var _trip_t := 0.0
 ## walking from where it landed.
 func teleport(pos: Vector3, yaw: float = NAN) -> void:
 	super(pos, yaw)
+	if ragdoll is SinewRagdoll:
+		(ragdoll as SinewRagdoll).moved()
 	_motion_vel = Vector3.ZERO
 	_motion_on = false
 	_stumble_t = 0.0

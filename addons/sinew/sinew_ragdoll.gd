@@ -228,7 +228,8 @@ func _update_gait(dt: float) -> void:
 		var pose: Array[Transform3D] = []
 		var cmd: Variant = character.get("motion_command")
 		# (Not before the tree has posed the skeleton: the gait puts its feet down on the first stance it's given.)
-		var home: Variant = _clip_feet() if _powered_t >= 0.25 else null
+		var home: Variant = _clip_feet() if _powered_t >= 0.25 and _home_hold <= 0 else null
+		_home_hold -= 1
 		pose.assign(world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt, cmd, home))
 		gait_prev = gait_now if gait_now.size() == pose.size() else pose
 		gait_now = pose
@@ -281,6 +282,14 @@ func _clip_feet() -> Variant:
 
 
 var _feet_parts: Array[int] = []
+## Ticks the clip's standing feet aren't trusted (after a teleport the skeleton is still where it was: the
+## gait put its feet down on the old spots and stepped across to the new ones).
+var _home_hold := 0
+
+
+## The character was moved (teleport / respawn): the gait starts again on the next pose's stance.
+func moved() -> void:
+	_home_hold = 3
 
 
 ## Is the ground level under the clip's feet (where they stand on flat ground)? On a stair or a slope

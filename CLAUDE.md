@@ -941,6 +941,9 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - `--suite=a,b` runs several suites in ONE process (as `all` does): order effects only show that way.
 
 ## Sinew (Euphoria-style active-physics bodies; plan: `sinew/PLAN.md`)
+- **Changing a gait reference clip (walk / run / sprint / back / strafe): read `sinew/ANIMATION_GUIDE.md` first** -
+  what a reference clip must be, the swap checklist, the clip audit (`addons/sinew/clip_audit.json`), every clip
+  lesson so far. Add new ones there.
 - **Never edits the UltraController.** Sinew is its own module: `sinew/` (engine-agnostic C++17 core on
   Box3D, no engine types in its headers; `capi/sinew.h` flat C API for other engines), `bindings/godot/`
   (godot-cpp 4.5 GDExtension -> `addons/sinew/bin/libsinew.<platform>.<target>.<arch>`), `addons/sinew/`
@@ -1274,6 +1277,31 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   a working branch cost a full Windows + Linux build and used up the private repo's Actions minutes ("recent
   account payments have failed or your spending limit needs to be increased" = out of minutes). Working
   branches test with a local build; merges get the committed binaries.
+- **Moves suite + clip audit** (`tests/suites/s10_sinew_moves.gd`, ~20 s headless, in CI): the moves tour's segments
+  (`demo/tours/sinew_moves_segments.gd`, shared with `sinew_moves_review`; "@ramp:<a>:up|down" starts at the slope's
+  foot / top edge - the old ramp segments walked flat ground) measured by `SinewMoveMetrics`
+  (addons/sinew/sinew_move_metrics.gd: legs as capsules -> gap / overlap ticks, hips drop, sole sink per point calibrated
+  on the idle clip, leg speed, air) and held to LIMITS per kind; `KNOWN` holds open problems at today's numbers.
+  `S10_DUMP=<label>` prints a segment frame by frame (feet in the body frame, planted flags, gait ankle, sinks).
+  `test_clip_audit`: `Gait::clip_report` (binding `character_gait_clip_report`) per reference cycle -> `SinewClipAudit`
+  rules + diff against `addons/sinew/clip_audit.json`; `CLIP_AUDIT_WRITE=1` rewrites it after a deliberate change.
+- **Direction changes / ramps (this round's lessons)**:
+  * `Foot::wrapped`: a foot held up past the cycle's wrap (MIN_SWING_TICKS 4, the uncross hold) lands at the next
+    chance. Without it `p >= f.p` held for a WHOLE extra cycle - the foot "in the air" at its target, no support for
+    the drive: a walk from standing went 0.87 m in 1.5 s (s0 / s6 caught it; s10 had been tuned on top of the bug).
+  * `ground_y` first probes from as high as walkable ground can be (root + d x tan(ground_tilt_max) + 0.35): from
+    0.6 m over the body a ray up a 30 deg ramp started INSIDE the slab and read the floor under it (9 cm sink).
+  * A swinging foot's drawn toe tip / heel are kept out of the ground (a toe pitched down behind dragged through a
+    downhill ramp).
+  * Walking, a planted foot the hips would sink > `walk_drop_max` 0.1 m for lifts (overreach) - only with the other
+    foot down (else a hop); a cap on the drop alone left the leg short of its foot (a sprint foot slid 40 mm/frame).
+  * On a side clip the trailing foot hurries from `side_reach_strafe` 0.2 m out (chaos walk: no overlap, hips 39 ->
+    20 cm). A crossover swing (`Foot::side_lift`) that would land crossed once the side step isn't settled waits up to
+    UNCROSS_HOLD_TICKS 8, then comes down on its own side. The swing leg push is capped at `leg_push_max` 0.25 m a
+    tick (it pushed 0.6 m round the other leg in one tick: 36 m/s).
+  * Tried and dropped: far foot first on a strafe start, a quick first step, "never step back from the lift" for side
+    steps, a fore/aft detour for a side-changing swing, capping the moving pelvis drop, a sideways acceleration cap
+    on the drive (1.6 m/s2: the strafe-left sag 15 -> 13 cm, but backing out of it the legs crossed again).
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
   data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
   coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),
