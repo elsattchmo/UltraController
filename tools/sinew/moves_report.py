@@ -114,7 +114,7 @@ def main():
         if f["label"] not in segs:
             order.append(f["label"])
         segs.setdefault(f["label"], []).append(f)
-    print("%-20s %9s %8s %7s %10s %7s %9s %8s  %s" % ("segment", "legs gap", "overlap", "splay", "leg speed", "steps", "hips drop", "sink", "first steps (m)"))
+    print("%-24s %9s %8s %7s %10s %7s %9s %8s %7s  %s" % ("segment", "legs gap", "overlap", "splay", "leg speed", "steps", "hips drop", "sink", "pivot", "first steps (m)"))
     stand_h = None
     # The sink probe's own offset (the bones aren't the soles): what the clip reads standing on flat ground.
     base = [x for f in segs.get("idle unarmed (clip)", []) for x in f.get("sink", [])]
@@ -127,6 +127,7 @@ def main():
         fs = segs[lab]
         gap, over, splay, speed, drop, sink = 9.0, 0, 0.0, 0.0, 0.0, 0.0
         touch, prev = [], None
+        pivot, yaw0 = 0.0, {}
         for f in fs:
             b = f["bones"]
             sink = max([sink] + [x - sink0 for x in f.get("sink", [])])
@@ -146,12 +147,21 @@ def main():
                 for side, key in (("Left", "planted_l"), ("Right", "planted_r")):
                     if f[key] and not prev[key]:
                         touch.append(b[side + "Foot"])
+            # A planted foot's yaw change during its stance (a foot pivoting in place).
+            for side, key in (("Left", "planted_l"), ("Right", "planted_r")):
+                y = foot_yaw(b[side + "Foot"], b[side + "Toes"])
+                if f[key] and prev is not None and prev[key] and side in yaw0:
+                    pivot = max(pivot, abs(math.degrees(wrap(y - yaw0[side]))))
+                elif f[key]:
+                    yaw0[side] = y
+                else:
+                    yaw0.pop(side, None)
             if stand_h:
                 drop = max(drop, stand_h - (h[1] - min(b["LeftToes"][1], b["RightToes"][1])))
             prev = f
         steps = [math.hypot(touch[k][0] - touch[k - 1][0], touch[k][2] - touch[k - 1][2]) for k in range(1, min(len(touch), 6))]
-        print("%-20s %7.1fcm %8d %6.2fm %8.2f/s %7d %7.1fcm %6.1fcm  %s" % (lab, gap * 100, over, splay, speed, len(touch), drop * 100, sink * 100,
-              " ".join("%.2f" % x for x in steps)))
+        print("%-24s %7.1fcm %8d %6.2fm %8.2f/s %7d %7.1fcm %6.1fcm %5.0fdeg  %s" % (lab, gap * 100, over, splay, speed, len(touch), drop * 100, sink * 100,
+              pivot, " ".join("%.2f" % x for x in steps)))
     # Standing vs the clip.
     print("\nstanding vs the clip:   width   yaw L / R      hips h   knee   chest / hips off the aim")
     for lab in order:

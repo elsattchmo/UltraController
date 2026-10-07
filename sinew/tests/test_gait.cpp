@@ -26,7 +26,7 @@ struct Walker {
 	float worst_reach = 0.0f;       // drawn ankle vs the foothold
 	bool flight = false;
 	bool was_planted[2] = { true, true };
-	Vec3 last[2];
+	Vec3 last[2], last_ball[2], last_heel[2];
 
 	explicit Walker(bool floor = true) {
 		if (floor) {
@@ -37,6 +37,8 @@ struct Walker {
 		gait->reset(root);
 		for (int i = 0; i < 2; ++i) {
 			last[i] = gait->ankle(i);
+			last_ball[i] = gait->plant_ball(i);
+			last_heel[i] = gait->plant_heel(i);
 		}
 	}
 	/// Move the root at `v` for `seconds` (turning at `yaw_rate`), following the ground height.
@@ -54,7 +56,10 @@ struct Walker {
 			for (int i = 0; i < 2; ++i) {
 				const bool planted = gait->foot_planted(i);
 				if (planted && was_planted[i]) {
-					worst_slide = std::fmax(worst_slide, length(gait->plant(i) - last[i]));
+					// (A stance pivot turns the foot about its ball or heel: that point mustn't move.)
+					const float m = std::fmin(length(gait->plant(i) - last[i]),
+							std::fmin(length(gait->plant_ball(i) - last_ball[i]), length(gait->plant_heel(i) - last_heel[i])));
+					worst_slide = std::fmax(worst_slide, m);
 				}
 				if (planted && !was_planted[i]) {
 					landings[i]++;
@@ -62,6 +67,8 @@ struct Walker {
 				both_air = both_air && !planted;
 				was_planted[i] = planted;
 				last[i] = gait->plant(i);
+				last_ball[i] = gait->plant_ball(i);
+				last_heel[i] = gait->plant_heel(i);
 				const int foot = limbs->limb(i == 0 ? LimbId::LegL : LimbId::LegR).end;
 				worst_reach = std::fmax(worst_reach, length(gait->pose()[size_t(foot)].p - gait->ankle(i)));
 			}
@@ -151,6 +158,75 @@ TEST_CASE("gait: turning on the spot steps round") {
 	CHECK(w.off_home(1) < 0.1f);
 }
 
+TEST_CASE("gait: ramps - planted soles lie on the slope as they do on the flat") {
+	// (The rig's foot is one rigid box: up on the ball its toe end dips ~3.5 cm even on the flat - in the game
+	// the toes bend. A slope must be no worse than that.)
+	float flat_in = 0.0f, flat_lying = 0.0f;
+	for (const float deg : { 0.0f, 15.0f, 25.0f }) {
+		Walker w;
+		// A slab rising toward +Z from z = 1 (its top through y 0 there).
+		const float a = deg * 3.14159265f / 180.0f;
+		const Quat q = axis_angle(Vec3{ 1, 0, 0 }, -a);
+		const Vec3 dir{ 0, std::sin(a), std::cos(a) }, n = rotate(q, Vec3{ 0, 1, 0 });
+		w.world.add_static_box(Transform{ Vec3{ 0, 0, 1 } + dir * 4.0f - n * 0.05f, q }, Vec3{ 2, 0.05f, 4 });
+		const int foot[2] = { w.limbs->limb(LimbId::LegL).end, w.limbs->limb(LimbId::LegR).end };
+		float worst_in = 0.0f;
+		int lying = 0, checked = 0;
+		for (int t = 0; t < 300; ++t) {
+			w.run(Vec3{ 0, 0, 1.0f }, DT);
+			for (int i = 0; i < 2; ++i) {
+				const Vec3 an = w.gait->plant(i);
+				if (!w.gait->foot_planted(i) || an.z < 1.6f || an.z > 7.0f) {
+					continue;
+				}
+				const PartDef& d = w.rig->parts[size_t(foot[i])];
+				const Transform& T = w.gait->pose()[size_t(foot[i])];
+				float lo = 1e9f, hi = -1e9f;
+				for (const float sx : { -1.0f, 1.0f }) {
+					for (const float sz : { -1.0f, 1.0f }) {
+						const Vec3 c = xform(T, xform(d.box_xform, Vec3{ sx * d.box_half.x, -d.box_half.y, sz * d.box_half.z }));
+						const RayHit g = probes::ground_below(w.world, c + Vec3{ 0, 0.3f, 0 }, 1.0f);
+						if (g.hit) {
+							const float above = c.y - g.point.y;
+							worst_in = std::fmax(worst_in, -above);
+							lo = std::fmin(lo, above);
+							hi = std::fmax(hi, above);
+						}
+					}
+				}
+				++checked;
+				lying += hi < 0.03f ? 1 : 0;
+			}
+		}
+		MESSAGE("ramp ", deg, " deg: worst sole corner inside ", worst_in * 100.0f, " cm, flat on it ", lying, " of ", checked, " planted frames");
+		CHECK(checked > 50);
+		if (deg == 0.0f) {
+			flat_in = worst_in;
+			flat_lying = float(lying) / float(checked);
+			continue;
+		}
+		CHECK(worst_in < flat_in + 0.01f);                            // no deeper into the slope than the flat
+		CHECK(float(lying) / float(checked) > 0.8f * flat_lying);     // the whole sole down on it as often
+	}
+}
+
+TEST_CASE("gait: a small turn on the spot is a pivot, not a step") {
+	Walker w;
+	w.run(Vec3{}, 0.5f);
+	w.run(Vec3{}, 0.5f, 40.0f * 3.14159265f / 180.0f / 0.5f);   // the body turns 40 deg
+	w.run(Vec3{}, 1.0f);
+	float turned = 0.0f;
+	for (int i = 0; i < 2; ++i) {
+		const Vec3 f = w.gait->plant_ball(i) - w.gait->plant(i);
+		turned += 0.5f * std::atan2(f.x, f.z);
+	}
+	MESSAGE("turned 40 deg standing: ", w.landings[0] + w.landings[1], " steps, feet turned ", turned * 57.2958f, " deg, slide ",
+			w.worst_slide * 1000.0f, " mm");
+	CHECK(w.landings[0] + w.landings[1] == 0);
+	CHECK(std::fabs(turned) > 0.5f);
+	CHECK(w.worst_slide < 1e-4f);
+}
+
 TEST_CASE("gait: stairs - every foothold on a step") {
 	Walker w;
 	// Ten 0.17 m steps, 0.3 m deep, starting 1 m ahead (+Z).
@@ -231,7 +307,9 @@ TEST_CASE("gait: 8-way - strafing, backing and diagonals never cross the feet or
 				" cm, widest stance ", r.max_spread * 100.0f, " cm, warp ", w.gait->warp());
 		CHECK(r.min_gap > 0.08f);                           // never crossed (in the legs' frame)
 		CHECK(r.min_pelvis >= fwd.min_pelvis - 0.02f);     // no slump
-		CHECK(r.max_spread <= fwd.max_spread + 0.08f);     // no lunge (a side-step is a longer stride: GaitSettings::step_side)
+		// No lunge (a side-step is a longer stride: GaitSettings::step_side; a foot pivoting on its ball as the
+		// legs warp toward a diagonal swings its ankle out a little more).
+		CHECK(r.max_spread <= fwd.max_spread + 0.09f);
 		CHECK(w.worst_slide < 1e-4f);
 		CHECK(w.worst_reach < 0.02f);
 	}
@@ -332,11 +410,15 @@ struct Driven {
 			for (int i = 0; i < 2; ++i) {
 				const bool pl = w.gait->foot_planted(i);
 				if (pl && was[i]) {
-					w.worst_slide = std::fmax(w.worst_slide, length(w.gait->plant(i) - w.last[i]));
+					// (A stance pivot turns the foot about its ball or heel: that point mustn't move.)
+					w.worst_slide = std::fmax(w.worst_slide, std::fmin(length(w.gait->plant(i) - w.last[i]),
+							std::fmin(length(w.gait->plant_ball(i) - w.last_ball[i]), length(w.gait->plant_heel(i) - w.last_heel[i]))));
 				}
 				landings += pl && !was[i] ? 1 : 0;
 				was[i] = pl;
 				w.last[i] = w.gait->plant(i);
+				w.last_ball[i] = w.gait->plant_ball(i);
+				w.last_heel[i] = w.gait->plant_heel(i);
 			}
 			if (speeds) {
 				speeds->push_back(length(vel));

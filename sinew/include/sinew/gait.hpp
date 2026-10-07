@@ -89,6 +89,12 @@ struct GaitSettings {
 	float across_warp = 1.0f;                   ///< a clip's sideways foot offsets turn at most this far toward the travel (rad)
 	float run_drop_max = 0.06f;                 ///< at a run the hips sink at most this to reach a planted foot; further, it lifts (m)
 	float swing_speed_max = 16.0f;              ///< a swinging foot is drawn no faster than the body + this (m/s)
+	float ground_tilt_max = 0.6f;               ///< a planted foot lies on a slope up to this (rad); steeper, it stands level
+	float tread_fit = 0.25f;                    ///< a foothold straddling a step edge moves up to this onto one tread (m)
+	float pivot_rate = 4.0f;                    ///< a planted foot swivels toward the way it should face this fast (rad/s)
+	float pivot_max = 0.6f;                     ///< .. and at most this far from the facing it was put down with (rad)
+	float pivot_slack = 0.12f;                  ///< a pivoted foot may sit this much further off its standing spot (m)
+	float cross_sep = 0.22f;                    ///< a crossover step lands at least this far in front of / behind the other foot (m)
 	float teleport_dist = 0.6f;                 ///< the root moving further than this in one update = a teleport (m)
 	float drop_snap_rate = 1.0f, drop_snap_speed = 3.0f;   ///< the hips' drop never changes faster than rate + speed x this (m/s)
 	float drop_fall_clip = 0.4f;                ///< walking on a clip's legs: the hips come back up this fast (m/s)
@@ -173,6 +179,9 @@ public:
 	Vec3 ankle(int foot) const { return _feet[size_t(foot)].eff; }
 	/// Where a planted foot was put down (its flat ankle position): it never moves while planted.
 	Vec3 plant(int foot) const { return _feet[size_t(foot)].pos; }
+	/// The planted foot's ball / heel (a stance pivot turns the foot about one of them: that one stays put).
+	Vec3 plant_ball(int foot) const;
+	Vec3 plant_heel(int foot) const;
 	/// Where a foot is heading (its foothold) / where it would stand still.
 	Vec3 foothold(int foot) const { return _feet[size_t(foot)].target; }
 	Vec3 home(int foot) const;
@@ -187,6 +196,9 @@ public:
 	/// The hips' yaw off the facing this tick (rad, + left): standing, they sit between feet and facing.
 	float pelvis_turn() const { return _pelvis_turn; }
 	float pelvis_drop() const { return _shown_drop; }   ///< how far the hips are lowered to reach the feet (m)
+	bool feet_pivoting() const { return _pivoting; }   ///< a planted foot is swivelling in place
+	/// Both feet down on their standing spots, facing as the stance does (the clip's own standing legs match).
+	bool feet_home() const;
 	/// Per reference cycle: {authored speed, measured ground speed, stride m, duty, travel angle off the facing, rad} (debug).
 	std::vector<std::array<float, 5>> clip_info() const {
 		std::vector<std::array<float, 5>> out;
@@ -242,6 +254,10 @@ private:
 		Quat land_yaw;       ///< the facing it will be put down with (the clip's foot angle on its path)
 		Vec3 path_dir;       ///< swinging: its own way of travel (turns toward the body's at a foot's pace)
 		bool overreach = false; ///< planted beyond the leg's reach at a run: it lifts next tick
+		Quat ground;         ///< the ground's tilt under the planted foot (a ramp), applied over its yaw
+		Quat lift_ground, land_ground;
+		Quat plant_yaw;      ///< the facing it was put down with (a stance pivot turns from there)
+		float yaw_rel = 0.0f; ///< its facing off the legs' frame at touchdown (moving, it keeps that)
 	};
 	const Rig& _rig;
 	const Limbs& _limbs;
@@ -308,6 +324,7 @@ private:
 	float _step_max = 0.5f;  ///< longest step this tick (direction and gait), m
 	Vec3 hip_ground(int foot) const;
 	float _warp = 0.0f;
+	bool _pivoting = false;
 	float _drop = 0.0f, _shown_drop = 0.0f, _dt = 1.0f / 60.0f;
 	Vec3 _cmd, _cop, _trim, _drive_acc;
 	float _pelvis_h = 0.95f;     ///< last pelvis height over the ground (the pendulum's length)
@@ -321,6 +338,10 @@ private:
 	float swing_s(const Foot& f, float p) const;    ///< 0..1 through the swing
 	float _phase_step = 0.02f;                      ///< phase advanced last tick     ///< the legs' frame: the facing turned by the warp   ///< the hip's lateral spot on the ground plane under the root
 	void roll(Foot& f, float pitch) const;
+	/// The ground under a foot put down at `land` (ankle, flat) facing `yaw`: the tilt `g` of a ramp, the
+	/// ankle's height over the highest sole point; a step edge under the sole moves the foothold along its
+	/// facing onto one tread (`tread_fit`), else it stands level on the higher one.
+	void fit_ground(Vec3& land, const Quat& yaw, Quat& g, bool slide) const;
 	Vec3 _hip_model[2];      ///< the thighs' joints in model space (lateral offsets)
 	int _leg[2] = { -1, -1 };
 

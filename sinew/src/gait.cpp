@@ -495,6 +495,102 @@ Vec3 Gait::up() const {
 	return Vec3{ 0, 1, 0 };
 }
 
+bool Gait::feet_home() const {
+	const Vec3 U = up();
+	for (int i = 0; i < 2; ++i) {
+		const Foot& f = _feet[size_t(i)];
+		// (Near enough that easing over to the clip's legs is no visible slide; a pivoted foot isn't.)
+		if (f.swinging || length(flat(f.pos - home(i), U)) > 0.06f ||
+				angle_between(f.yaw, _has_home ? _home_yaw[i] : legs_q()) > 0.12f) {
+			return false;
+		}
+	}
+	return true;
+}
+
+Vec3 Gait::plant_ball(int foot) const {
+	const Foot& f = _feet[size_t(foot)];
+	const Vec3 U = up();
+	const Vec3 fwd = flat(rotate(f.yaw, _rig.forward), U);
+	return f.pos + (length(fwd) > 1e-4f ? normalized(fwd) : Vec3{}) * _ball_d;
+}
+
+Vec3 Gait::plant_heel(int foot) const {
+	const Foot& f = _feet[size_t(foot)];
+	const Vec3 U = up();
+	const Vec3 fwd = flat(rotate(f.yaw, _rig.forward), U);
+	return f.pos - (length(fwd) > 1e-4f ? normalized(fwd) : Vec3{}) * _heel_d;
+}
+
+void Gait::fit_ground(Vec3& land, const Quat& yaw, Quat& g, bool slide) const {
+	const Vec3 U = up();
+	Vec3 fwd = flat(rotate(yaw, _rig.forward), U);
+	fwd = length(fwd) > 1e-4f ? normalized(fwd) : Vec3{ 0, 0, 1 };
+	const Vec3 left = normalized(cross(U, fwd));
+	const float fb = dot(_root.p, U);
+	const float back = _heel_d + 0.02f, tip = _ball_d + _s.toe_ahead, half = _s.sole_half_width;
+	struct Probe {
+		float heel, ankle, ball, tip, l, r;
+		float lo() const { return std::min({ heel, ankle, ball, tip }); }
+		float hi() const { return std::max({ heel, ankle, ball, tip }); }
+	};
+	auto probe = [&](Vec3 o) {
+		return Probe{ ground_y(o - fwd * back, fb), ground_y(o, fb), ground_y(o + fwd * _ball_d, fb), ground_y(o + fwd * tip, fb),
+			ground_y(o + left * half, fb), ground_y(o - left * half, fb) };
+	};
+	g = Quat{};
+	Probe P = probe(land);
+	// One plane (flat, a ramp): the ankle and ball lie on the line from heel to toe tip.
+	auto on_line = [&](const Probe& q) {
+		const float k = (q.tip - q.heel) / (back + tip);
+		return std::fabs(q.heel + k * back - q.ankle) < 0.02f && std::fabs(q.heel + k * (back + _ball_d) - q.ball) < 0.02f;
+	};
+	if (on_line(P)) {
+		const float pitch = std::atan2(P.tip - P.heel, back + tip);
+		const float rollv = std::atan2(P.l - P.r, 2.0f * half);
+		if (std::fabs(pitch) <= _s.ground_tilt_max && std::fabs(rollv) <= _s.ground_tilt_max) {
+			if (std::fabs(pitch) > 0.02f || std::fabs(rollv) > 0.02f) {
+				const Vec3 ft = normalized(fwd * (back + tip) + U * (P.tip - P.heel));
+				const Vec3 lt = normalized(left * (2.0f * half) + U * (P.l - P.r));
+				const Vec3 n = normalized(cross(ft, lt));
+				g = from_to(U, dot(n, U) < 0.0f ? -n : n);
+				const float at = P.heel + (P.tip - P.heel) * back / (back + tip);
+				land = flat(land, U) + U * (at + _ankle_h / std::max(dot(n, U) < 0.0f ? -dot(n, U) : dot(n, U), 0.5f));
+				return;
+			}
+			land = flat(land, U) + U * (P.ankle + _ankle_h);
+			return;
+		}
+	} else if (slide) {
+		// A step edge under the sole: onto one tread - forward first going up, back first going down.
+		const float dir = P.tip > P.heel ? 1.0f : -1.0f;
+		// (In 2 cm steps, nearest first: a tread may be barely longer than the foot.)
+		for (int k = 1; k <= int(_s.tread_fit / 0.02f + 0.5f) * 2; ++k) {
+			const float d = 0.02f * float((k + 1) / 2) * (k % 2 == 1 ? 1.0f : -1.0f);
+			const Vec3 o = land + fwd * (d * dir);
+			const Probe q = probe(o);
+			if (q.hi() - q.lo() < 0.02f) {
+				land = flat(o, U) + U * (q.hi() + _ankle_h);
+				return;
+			}
+		}
+		// A tread shorter than the foot: the ankle and ball on the top of it, the heel (going up) or the toe
+		// tip (going down) out over the edge.
+		for (int k = 0; k <= int(_s.tread_fit / 0.02f + 0.5f) * 2; ++k) {
+			const float d = 0.02f * float((k + 1) / 2) * (k % 2 == 1 ? 1.0f : -1.0f);
+			const Vec3 o = land + fwd * (d * dir);
+			const Probe q = probe(o);
+			if (std::fabs(q.ankle - q.ball) < 0.02f && q.hi() - q.ankle < 0.02f) {
+				land = flat(o, U) + U * (q.ankle + _ankle_h);
+				return;
+			}
+		}
+	}
+	// Too steep, or straddling an edge it can't move off: level on the highest point (the toes or heel hang
+	// over the edge, never inside the step).
+	land = flat(land, U) + U * (P.hi() + _ankle_h);
+}
+
 float Gait::ground_y(Vec3 p, float fallback) const {
 	if (_world == nullptr) {
 		return fallback;
@@ -581,7 +677,9 @@ void Gait::reset(const Transform& root) {
 		Foot& f = _feet[i];
 		f.pos = f.eff = f.lift = f.target = home(i);
 		f.pitch = f.lift_pitch = 0.0f;
-		f.yaw = f.lift_yaw = f.land_yaw = root.q;
+		f.yaw = f.lift_yaw = f.land_yaw = f.plant_yaw = root.q;
+		f.ground = f.lift_ground = f.land_ground = Quat{};
+		f.yaw_rel = 0.0f;
 		f.swinging = false;
 		f.p = frac(-0.5f * float(i));
 	}
@@ -618,7 +716,8 @@ void Gait::update(const GaitInput& in) {
 			for (int i = 0; i < 2; ++i) {
 				Foot& f = _feet[i];
 				f.pos = f.eff = f.lift = f.target = home(i);
-				f.yaw = f.lift_yaw = f.land_yaw = _home_yaw[i];
+				f.yaw = f.lift_yaw = f.land_yaw = f.plant_yaw = _home_yaw[i];
+				f.ground = f.lift_ground = f.land_ground = Quat{};
 			}
 			_fresh = false;
 		}
@@ -748,6 +847,40 @@ void Gait::step_feet(float dt) {
 	_cadence = moving ? std::clamp(std::max(_s.cadence_base + _s.cadence_per_ms * pace, pace / std::max(step_max, 0.1f)),
 								_s.cadence_idle * 0.8f, _s.cadence_max)
 					  : _s.cadence_idle;
+	// Planted feet swivel in place (on the ball, or the heel backing) toward the way they should face -
+	// standing: the stance's own facing; moving: the facing they were put down with off the legs' frame
+	// (a turn at a sprint, a change of direction) - by at most `pivot_max` from where they landed. A small
+	// turn on the spot is a pivot, not a step; glued feet twisted the knees round.
+	_pivoting = false;
+	for (int i = 0; i < 2; ++i) {
+		Foot& f = _feet[i];
+		if (f.swinging) {
+			continue;
+		}
+		const Quat want = moving ? normalized(axis_angle(U, f.yaw_rel) * legs_q()) : (_has_home ? _home_yaw[i] : legs_q());
+		auto fwd_of = [&](const Quat& q) {
+			const Vec3 v = flat(rotate(q, _rig.forward), U);
+			return length(v) > 1e-4f ? normalized(v) : Vec3{ 0, 0, 1 };
+		};
+		auto signed_yaw = [&](const Vec3& a, const Vec3& b) { return std::atan2(dot(cross(a, b), U), dot(a, b)); };
+		const Vec3 p0 = fwd_of(f.plant_yaw), cur = fwd_of(f.yaw);
+		const float a_cur = signed_yaw(p0, cur);
+		const float a_want = std::clamp(signed_yaw(p0, fwd_of(want)), -_s.pivot_max, _s.pivot_max);
+		const float lim = _s.pivot_rate * dt;
+		const float d = std::clamp(a_want - a_cur, -lim, lim);
+		if (std::fabs(d) < 1e-4f) {
+			continue;
+		}
+		// About the ball, or the heel when backing.
+		const bool heel = moving && dot(_vel, cur) < -0.1f;
+		const Vec3 pivot = flat(f.pos, U) + cur * (heel ? -_heel_d : _ball_d);
+		const Quat r = axis_angle(U, d);
+		f.pos = pivot + rotate(r, flat(f.pos, U) - pivot) + U * dot(f.pos, U);
+		f.target = f.pos;
+		f.yaw = f.land_yaw = normalized(r * f.yaw);
+		roll(f, f.pitch);
+		_pivoting = true;
+	}
 	// Turning on the spot: the further the feet are from the facing, the quicker the steps.
 	_turn = -0.5f * (yaw_off(_feet[0].yaw) - home_off(0) + yaw_off(_feet[1].yaw) - home_off(1));
 	if (!moving) {
@@ -769,7 +902,9 @@ void Gait::step_feet(float dt) {
 	bool settle = false;
 	for (int i = 0; i < 2; ++i) {
 		const Foot& f = _feet[i];
-		if (f.swinging || length(flat(f.pos - home(i), U)) > _s.home_tolerance ||
+		// (A foot that has pivoted in place sits off its spot by the swivel: that's the turn, not a stance to fix.)
+		const float tol = _s.home_tolerance + _s.pivot_slack * std::min(1.0f, angle_between(f.yaw, f.plant_yaw) / std::max(_s.pivot_max, 1e-3f));
+		if (f.swinging || length(flat(f.pos - home(i), U)) > tol ||
 				angle_between(f.yaw, _has_home ? _home_yaw[i] : legs_q()) > _s.turn_tolerance) {
 			settle = true;
 		}
@@ -896,6 +1031,7 @@ void Gait::step_feet(float dt) {
 			f.swinging = true;
 			f.lift = f.eff;
 			f.lift_yaw = f.yaw;
+			f.lift_ground = f.ground;
 			f.lift_pitch = f.pitch;
 			f.lift_t = 0;
 			f.lift_p = std::min(p, 0.98f);
@@ -907,7 +1043,9 @@ void Gait::step_feet(float dt) {
 			// Down: the foot stays exactly here until it lifts again.
 			f.swinging = false;
 			f.pos = f.target;
-			f.yaw = f.land_yaw;
+			f.yaw = f.plant_yaw = f.land_yaw;
+			f.ground = f.land_ground;
+			f.yaw_rel = yaw_off(f.yaw);
 		}
 		f.p = p;
 		if (!f.swinging) {
@@ -931,7 +1069,15 @@ void Gait::step_feet(float dt) {
 			roll(f, pitch);
 			continue;
 		}
-		// The clip this foot lifted with (it keeps it till it lands).
+		// The clip this foot lifted with (it keeps it till it lands) - unless that was a crossover side step and
+		// the travel has turned away from it: then it takes the current clip and lands on its own side (strafing,
+		// then backing, the crossing foot came down across the other: the thighs went through each other).
+		if (_foot_cl[i].ok && std::fabs(std::fabs(_foot_cl[i].angle) - 0.5f * PI) < 0.6f) {
+			const float off = std::fabs(std::remainder((_cl.ok ? _cl.angle : 0.0f) - _foot_cl[i].angle, 2.0f * PI));
+			if (!_cl.ok || off > 0.8f) {
+				_foot_cl[i] = _cl;
+			}
+		}
 		const ClipLegs& C = _foot_cl[i].ok ? _foot_cl[i] : _cl;
 		// Its way of travel turns toward the body's at <= path_turn_rate (rad/s).
 		if (length(f.path_dir) > 0.5f && length(path_dir) > 0.5f) {
@@ -1008,7 +1154,19 @@ void Gait::step_feet(float dt) {
 		// clip's own path (a strafe's feet close and cross). (On every other clip too: braking a sideways
 		// walk to go the other way put the trailing foot 30 cm across behind the leading one.)
 		const bool crossing_clip = on_path && std::fabs(std::fabs(C.angle) - 0.5f * PI) < 0.6f;
-		if (!crossing_clip) {
+		if (crossing_clip) {
+			// A crossover comes down well in front of (or behind) the other foot: a crossed stance with the
+			// feet 15 cm apart put the thighs through each other.
+			const Foot& o = _feet[1 - i];
+			const Vec3 op = o.swinging ? o.target : o.pos;
+			const float side = i == 0 ? 1.0f : -1.0f;
+			if (side * dot(land - op, Lv) < _s.stance_gap) {
+				const float along = dot(land - op, F);
+				if (std::fabs(along) < _s.cross_sep) {
+					land = land + F * ((along >= 0.0f ? 1.0f : -1.0f) * (_s.cross_sep - std::fabs(along)));
+				}
+			}
+		} else {
 			const Foot& o = _feet[1 - i];
 			const float side = i == 0 ? 1.0f : -1.0f;
 			const float gap = side * dot(land - (o.swinging ? o.target : o.pos), Lv);
@@ -1016,7 +1174,7 @@ void Gait::step_feet(float dt) {
 				land = land + Lv * (side * (_s.stance_gap - gap));
 			}
 		}
-		land = flat(land, U) + U * (ground_y(land, dot(_root.p, U)) + _ankle_h);
+		fit_ground(land, f.lift_t == 0 ? f.yaw : f.land_yaw, f.land_ground, true);
 		// The foothold follows a change of motion at a foot's pace (a reversal mid-swing must not
 		// teleport the foot); a fresh swing aims straight at it.
 		if (f.lift_t == 0) {
@@ -1094,6 +1252,7 @@ void Gait::step_feet(float dt) {
 		// roll will have it on touchdown (else it pops up by the roll as the foot lands).
 		Foot drawn = f;
 		drawn.yaw = f.land_yaw;
+		drawn.ground = f.land_ground;
 		roll(drawn, f.pitch);
 		// (On the clip's path the ankle already is the clip's ankle: rolled only coming in to land.)
 		const Vec3 was = f.eff;
@@ -1112,9 +1271,12 @@ void Gait::step_feet(float dt) {
 
 void Gait::roll(Foot& f, float pitch) const {
 	f.pitch = pitch;
-	const Vec3 U = up();
-	Vec3 fwd = flat(rotate(f.yaw, _rig.forward), U);
-	fwd = length(fwd) > 1e-4f ? normalized(fwd) : Vec3{ 0, 0, 1 };
+	const Vec3 U0 = up();
+	Vec3 fwd0 = flat(rotate(f.yaw, _rig.forward), U0);
+	fwd0 = length(fwd0) > 1e-4f ? normalized(fwd0) : Vec3{ 0, 0, 1 };
+	// (On a ramp the sole's frame is tilted with the ground.)
+	const Vec3 U = rotate(f.ground, U0);
+	const Vec3 fwd = rotate(f.ground, fwd0);
 	const Vec3 left = normalized(cross(U, fwd));
 	if (pitch >= 0.0f) {
 		// Round the ball of the foot (on the ground ahead of the ankle): the heel and ankle rise.
@@ -1539,15 +1701,17 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		// The foot: flat with the yaw it was put down with; turning toward the facing in the air.
 		const Foot& f = _feet[i];
 		Quat yaw = f.yaw;
+		Quat tilt = f.ground;
 		if (f.swinging) {
 			const float s = swing_s(f, f.p);
 			yaw = normalized(slerp(f.lift_yaw, f.land_yaw, smooth(s)));
+			tilt = normalized(slerp(f.lift_ground, f.land_ground, smooth(s)));
 		}
 		Vec3 ffwd = flat(rotate(yaw, rig.forward), U);
 		ffwd = length(ffwd) > 1e-4f ? normalized(ffwd) : fwd;
-		const Quat pitch = axis_angle(normalized(cross(U, ffwd)), f.pitch);
+		const Quat pitch = axis_angle(rotate(tilt, normalized(cross(U, ffwd))), f.pitch);
 		const PartDef& ft = rig.parts[size_t(l.end)];
-		_pose[size_t(l.end)] = Transform{ xform(_pose[size_t(l.lower)], ft.frame_parent.p), normalized(pitch * yaw * ft.rest.q) };
+		_pose[size_t(l.end)] = Transform{ xform(_pose[size_t(l.lower)], ft.frame_parent.p), normalized(pitch * tilt * yaw * ft.rest.q) };
 	};
 	auto capsule = [&](int part, Vec3& a, Vec3& b) {
 		const PartDef& d = rig.parts[size_t(part)];

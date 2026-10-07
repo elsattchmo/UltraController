@@ -246,7 +246,12 @@ func _update_gait(dt: float) -> void:
 	# under the hips with bent knees); stepping or moving, the gait's - eased both ways (a step lifts
 	# off the clip's spot, where the gait's feet already are).
 	var stepping := _gait_running and (speed > 0.05 or bool(world.physics.call("character_gait_stepping", _id)))
-	var legs := 1.0 if stepping or not _clip_feet_on_ground() else 0.0
+	# (Feet that pivoted in place, rather than stepped, stand off the clip's spots: the gait keeps them.)
+	var off_home := false
+	if _gait_running and not stepping:
+		var gs: Dictionary = world.physics.call("character_gait_state", _id)
+		off_home = bool(gs.get("pivoting", false)) or not bool(gs.get("feet_home", true))
+	var legs := 1.0 if stepping or off_home or not _clip_feet_on_ground() else 0.0
 	for i in parts.size():
 		if _walks(i):
 			gait_part_w[i] = move_toward(gait_part_w[i], legs, dt / (0.12 if stepping else 0.3))
