@@ -43,6 +43,9 @@ struct PartBodyDesc {
 	Transform xform;
 	Vec3 a, b;                ///< capsule segment in body space
 	float radius = 0.05f;
+	bool box = false;         ///< a box (box_xform / box_half, body space) instead of the capsule
+	Transform box_xform;
+	Vec3 box_half;
 	float mass = 1.0f;        ///< kg
 	float friction = 0.7f;
 	int group = 0;            ///< bodies sharing a negative group never collide
@@ -136,6 +139,8 @@ public:
 	float joint_separation(JointHandle joint) const;
 	float hinge_angle(JointHandle joint) const;
 	float joint_twist_angle(JointHandle joint) const;
+	/// The torque a joint applied over the last step (N m, world).
+	Vec3 joint_torque(JointHandle joint) const;
 
 	void set_body_kind(BodyHandle body, BodyKind kind);
 	/// Teleport (no velocity change).

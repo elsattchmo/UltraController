@@ -20,6 +20,9 @@ Character::Character(PhysicsWorld& world, std::shared_ptr<const Rig> rig, const 
 		d.a = def.a;
 		d.b = def.b;
 		d.radius = def.radius;
+		d.box = def.box;
+		d.box_xform = def.box_xform;
+		d.box_half = def.box_half;
 		d.mass = def.mass;
 		d.friction = def.friction;
 		d.group = group;
@@ -133,6 +136,20 @@ Quat Character::effective_target(int part) const {
 	return p.effector_weight > 0.0f ? normalized(slerp(p.target, p.effector, p.effector_weight)) : p.target;
 }
 
+float Character::muscle_torque(int part) const {
+	const Part& p = _parts[size_t(part)];
+	return p.muscle && !p.kinematic ? length(_world.joint_torque(p.muscle)) : 0.0f;
+}
+
+float Character::muscle_effort(int part) const {
+	const Part& p = _parts[size_t(part)];
+	if (!p.muscle || p.kinematic || !p.attached) {
+		return -1.0f;
+	}
+	const float strength = _rig->parts[size_t(part)].muscle.strength * _stiffness;
+	return strength > 0.0f ? muscle_torque(part) / strength : 0.0f;
+}
+
 int Character::part_of(BodyHandle body) const {
 	for (size_t i = 0; i < _parts.size(); ++i) {
 		if (_parts[i].body == body) {
@@ -201,6 +218,22 @@ void Character::set_root_assist(const Transform& target, float strength, float d
 			_assist > 0.0f ? 2.5f * hertz : 0.0f, 1.0f, 600.0f * _assist);
 }
 
+void Character::set_upright_assist(Quat rotation, float strength, float dt, float hertz) {
+	_assist = std::max(0.0f, strength);
+	const Transform target{ part_transform(0).p, normalized(rotation) };
+	if (_anchor == 0) {
+		if (_assist <= 0.0f) {
+			return;
+		}
+		_anchor = _world.add_body(BodyKind::Kinematic, target);
+		_drive = _world.add_drive(_anchor, _parts[0].body);
+	} else {
+		_world.move_kinematic(_anchor, target, dt);
+	}
+	hertz *= std::sqrt(mass() / std::max(_rig->parts[0].mass, 0.1f));
+	_world.set_drive(_drive, Transform{}, 0.0f, 1.0f, 0.0f, _assist > 0.0f ? 2.5f * hertz : 0.0f, 1.0f, 600.0f * _assist);
+}
+
 void Character::set_damping(float linear, float angular) {
 	for (Part& p : _parts) {
 		_world.set_damping(p.body, linear, angular);
@@ -249,7 +282,7 @@ void Character::pre_step(float dt) {
 		// pivot, as an internal torque pair (child +, parent -). It's part of the muscle's work,
 		// so it comes out of the same strength; the spring gets what's left.
 		float comp = 0.0f;
-		if (_gravity_comp > 0.0f && strength > 0.0f && mass[i] > 0.0f) {
+		if (_gravity_comp > 0.0f && p.gravity_comp && strength > 0.0f && mass[i] > 0.0f) {
 			const Vec3 pivot = xform(part_transform(def.parent), def.frame_parent.p);
 			const Vec3 com = moment[i] * (1.0f / mass[i]);
 			Vec3 torque = -cross(com - pivot, g * mass[i]) * _gravity_comp;
@@ -272,8 +305,8 @@ void Character::pre_step(float dt) {
 		// soft (stiff springs with tiny torque caps chattered: hands buzzing at 1-3 m/s).
 		const float load = 1.0f + (load_scale(int(i), com) - 1.0f) * std::clamp(tone, 0.0f, 1.0f);
 		// Stiffness falls off gently with tone (a relaxed limb is soft, not just weak).
-		m.hertz = def.muscle.hertz * std::sqrt(std::min(tone, 1.0f)) * load * _stiffness;
-		m.damping = def.muscle.damping * load;
+		m.hertz = def.muscle.hertz * std::sqrt(std::min(tone, 1.0f)) * load * _stiffness * p.stiffness;
+		m.damping = def.muscle.damping * load * std::max(p.stiffness, 1.0f);
 		if (_lead && p.tracking && dt > 0.0f && m.hertz > 0.0f) {
 			// A damped spring trails a target moving at w by 2 zeta / omega seconds: aim that far
 			// ahead along the target's own motion (capped at 0.6 rad).

@@ -41,6 +41,7 @@ void SinewPhysics::setup(const Vector3& gravity, int substeps) {
 	sinew::WorldSettings s;
 	s.gravity = to_sinew(gravity);
 	s.substeps = substeps;
+	_balancers.clear();
 	_limbs.clear();
 	_characters.clear();   // they live in the old world
 	_world = std::make_unique<sinew::PhysicsWorld>(s);
@@ -75,6 +76,9 @@ int64_t SinewPhysics::add_ball_joint(int64_t parent, int64_t child, const Transf
 }
 
 void SinewPhysics::step(double dt) {
+	for (auto& [id, b] : _balancers) {
+		b->pre_step(float(dt));
+	}
 	for (auto& [id, c] : _characters) {
 		c->pre_step(float(dt));
 	}
@@ -228,6 +232,10 @@ Dictionary SinewPhysics::rig_part(int rig, int part) const {
 	d["mass"] = p.mass;
 	d["region"] = p.region;
 	d["joint"] = int(p.joint);
+	d["box"] = p.box;
+	d["box_xform"] = to_godot(p.box_xform);
+	d["box_half"] = to_godot(p.box_half);
+	d["strength"] = p.muscle.strength;
 	return d;
 }
 
@@ -249,6 +257,7 @@ int SinewPhysics::add_character(int rig, const Transform3D& root, int group) {
 }
 
 void SinewPhysics::remove_character(int character) {
+	_balancers.erase(character);
 	_limbs.erase(character);
 	_characters.erase(character);
 }
@@ -508,6 +517,115 @@ Array SinewPhysics::character_part_contacts(int character, int part) const {
 	return out;
 }
 
+PackedFloat32Array SinewPhysics::character_muscle_effort(int character) const {
+	PackedFloat32Array out;
+	if (sinew::Character* c = _char(character)) {
+		out.resize(c->part_count());
+		for (int i = 0; i < c->part_count(); ++i) {
+			out.set(i, c->muscle_effort(i));
+		}
+	}
+	return out;
+}
+
+void SinewPhysics::character_balance_enable(int character, bool on, const Dictionary& settings) {
+	sinew::Character* c = _char(character);
+	const sinew::Limbs* l = _limbs_of(character);
+	if (!c || !l) {
+		return;
+	}
+	if (!on) {
+		if (_balancers.count(character)) {
+			// Hand the legs back: no stiffened stance muscles, compensation on, no assist.
+			for (int i = 0; i < c->part_count(); ++i) {
+				c->set_part_stiffness(i, 1.0f);
+				c->set_part_gravity_compensation(i, true);
+			}
+			if (c->root_assist() > 0.0f) {
+				c->set_upright_assist(c->part_transform(0).q, 0.0f, 1.0f / 60.0f);
+			}
+			_balancers.erase(character);
+		}
+		return;
+	}
+	auto& b = _balancers[character];
+	if (!b) {
+		b = std::make_unique<sinew::Balancer>(*c, *l);
+	}
+	sinew::BalanceSettings& s = b->settings();
+	auto num = [&](const char* key, float& field) {
+		if (settings.has(key)) {
+			field = float(double(settings[key]));
+		}
+	};
+	num("ankle_kp", s.ankle_kp);
+	num("ankle_kd", s.ankle_kd);
+	num("max_lean", s.max_lean);
+	num("stance_stiffness", s.stance_stiffness);
+	num("step_margin", s.step_margin);
+	num("step_time", s.step_time);
+	num("step_height", s.step_height);
+	num("step_past", s.step_past);
+	num("step_beyond", s.step_beyond);
+	num("max_step", s.max_step);
+	num("min_width", s.min_width);
+	num("stance_width", s.stance_width);
+	num("planted_tilt", s.planted_tilt);
+	num("planted_lift", s.planted_lift);
+	num("fall_tilt", s.fall_tilt);
+	num("fall_sink", s.fall_sink);
+	num("upright_assist", s.upright_assist);
+	if (settings.has("max_steps")) {
+		s.max_steps = int(settings["max_steps"]);
+	}
+	if (settings.has("stepping")) {
+		s.stepping = bool(settings["stepping"]);
+	}
+}
+
+bool SinewPhysics::character_balance_enabled(int character) const {
+	return _balancers.count(character) > 0;
+}
+
+void SinewPhysics::character_balance_reset(int character) {
+	auto it = _balancers.find(character);
+	if (it != _balancers.end()) {
+		it->second->reset();
+	}
+}
+
+void SinewPhysics::character_balance_set_target(int character, const Quaternion& pelvis, double com_height) {
+	auto it = _balancers.find(character);
+	if (it != _balancers.end()) {
+		it->second->set_target(sinew::Quat{ float(pelvis.x), float(pelvis.y), float(pelvis.z), float(pelvis.w) }, float(com_height));
+	}
+}
+
+Dictionary SinewPhysics::character_balance_state(int character) const {
+	Dictionary d;
+	auto it = _balancers.find(character);
+	if (it == _balancers.end()) {
+		return d;
+	}
+	const sinew::Balancer& b = *it->second;
+	d["fallen"] = b.fallen();
+	d["reason"] = String(b.fall_reason());
+	d["stepping"] = b.stepping();
+	d["steps"] = b.steps();
+	d["com"] = to_godot(b.com());
+	d["com_velocity"] = to_godot(b.com_velocity());
+	d["capture_point"] = to_godot(b.capture_point());
+	d["capture_error"] = b.capture_error();
+	PackedVector3Array hull;
+	for (const sinew::Vec3& p : b.support()) {
+		hull.push_back(to_godot(p));
+	}
+	d["support"] = hull;
+	d["planted_l"] = b.planted(sinew::LimbId::LegL);
+	d["planted_r"] = b.planted(sinew::LimbId::LegR);
+	return d;
+}
+
 Dictionary SinewPhysics::ground_below(const Vector3& point, double max_distance) const {
 	return hit_dict(sinew::probes::ground_below(*_world, to_sinew(point), float(max_distance)));
 }
@@ -600,6 +718,12 @@ void SinewPhysics::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("character_lean", "character", "pitch", "roll", "weight"), &SinewPhysics::character_lean, DEFVAL(1.0));
 	ClassDB::bind_method(D_METHOD("character_set_effector", "character", "part", "local", "weight"), &SinewPhysics::character_set_effector, DEFVAL(1.0));
 	ClassDB::bind_method(D_METHOD("character_part_contacts", "character", "part"), &SinewPhysics::character_part_contacts);
+	ClassDB::bind_method(D_METHOD("character_muscle_effort", "character"), &SinewPhysics::character_muscle_effort);
+	ClassDB::bind_method(D_METHOD("character_balance_enable", "character", "on", "settings"), &SinewPhysics::character_balance_enable, DEFVAL(Dictionary()));
+	ClassDB::bind_method(D_METHOD("character_balance_enabled", "character"), &SinewPhysics::character_balance_enabled);
+	ClassDB::bind_method(D_METHOD("character_balance_reset", "character"), &SinewPhysics::character_balance_reset);
+	ClassDB::bind_method(D_METHOD("character_balance_set_target", "character", "pelvis", "com_height"), &SinewPhysics::character_balance_set_target);
+	ClassDB::bind_method(D_METHOD("character_balance_state", "character"), &SinewPhysics::character_balance_state);
 	ClassDB::bind_method(D_METHOD("ground_below", "point", "max_distance"), &SinewPhysics::ground_below, DEFVAL(3.0));
 	ClassDB::bind_method(D_METHOD("edge_ahead", "from", "dir", "range", "min_drop"), &SinewPhysics::edge_ahead, DEFVAL(1.5), DEFVAL(0.45));
 	ClassDB::bind_method(D_METHOD("wall_within", "origin", "dir", "reach"), &SinewPhysics::wall_within, DEFVAL(0.8));

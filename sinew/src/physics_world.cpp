@@ -4,6 +4,7 @@
 
 #include "sinew/math.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -176,14 +177,21 @@ BodyHandle PhysicsWorld::add_part(const PartBodyDesc& desc) {
 	b3BodyId body = b3CreateBody(_impl->world, &body_def);
 	const float r = desc.radius;
 	const float h = length(desc.b - desc.a);
-	const float volume = PI * r * r * h + 4.0f / 3.0f * PI * r * r * r;
 	b3ShapeDef shape_def = b3DefaultShapeDef();
-	shape_def.density = desc.mass / volume;
 	shape_def.baseMaterial.friction = desc.friction;
 	shape_def.filter.groupIndex = desc.group;
 	shape_def.filter.categoryBits = CAT_PART;
-	b3Capsule capsule = { to_b3(desc.a), to_b3(desc.b), r };
-	b3CreateCapsuleShape(body, &shape_def, &capsule);
+	if (desc.box) {
+		const Vec3 e = desc.box_half;
+		shape_def.density = desc.mass / std::max(8.0f * e.x * e.y * e.z, 1e-6f);
+		b3BoxHull box = b3MakeTransformedBoxHull(e.x, e.y, e.z, to_b3(desc.box_xform));
+		b3CreateHullShape(body, &shape_def, &box.base);
+	} else {
+		const float volume = PI * r * r * h + 4.0f / 3.0f * PI * r * r * r;
+		shape_def.density = desc.mass / volume;
+		b3Capsule capsule = { to_b3(desc.a), to_b3(desc.b), r };
+		b3CreateCapsuleShape(body, &shape_def, &capsule);
+	}
 	BodyHandle handle = b3StoreBodyId(body);
 	_impl->dynamic_bodies.push_back(handle);
 	_impl->bodies++;
@@ -315,6 +323,10 @@ float PhysicsWorld::hinge_angle(JointHandle joint) const {
 
 float PhysicsWorld::joint_twist_angle(JointHandle joint) const {
 	return b3SphericalJoint_GetTwistAngle(joint_id(joint));
+}
+
+Vec3 PhysicsWorld::joint_torque(JointHandle joint) const {
+	return from_b3(b3Joint_GetConstraintTorque(joint_id(joint)));
 }
 
 void PhysicsWorld::set_body_kind(BodyHandle body, BodyKind kind) {

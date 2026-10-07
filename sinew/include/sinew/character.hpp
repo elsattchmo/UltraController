@@ -71,6 +71,13 @@ public:
 	/// 0..1 share of gravity the muscles cancel up front (feed-forward), so soft muscles
 	/// still hold a pose. The root carries the rest (it's what stands or lies on something).
 	void set_gravity_compensation(float k) { _gravity_comp = k; }
+	/// Per part: a leg standing on the ground carries the body instead (the balancer turns its
+	/// joints' compensation off - it would hold the leg up as if it hung from the hips).
+	void set_part_gravity_compensation(int part, bool on) { _parts[size_t(part)].gravity_comp = on; }
+	float gravity_compensation() const { return _gravity_comp; }
+	/// Per part: a further stiffness factor on its muscle (hertz and damping) - e.g. a standing
+	/// hip, which holds the whole body above it through a light pelvis. Default 1.
+	void set_part_stiffness(int part, float k) { _parts[size_t(part)].stiffness = std::max(0.0f, k); }
 
 	/// Root assist: hold the root part (pelvis) to `target` with a capped spring, the way a
 	/// balance controller would. strength 0 = off (the body stands or falls on its own).
@@ -79,6 +86,10 @@ public:
 	/// Call every tick with the new target (dt: the coming step, so the anchor moves with it).
 	void set_root_assist(const Transform& target, float strength, float dt, float hertz = 4.0f);
 	float root_assist() const { return _assist; }
+	/// Upright assist: only the angular half - the pelvis held to `rotation` by a spring with a
+	/// torque cap of 600 N m * strength; nothing holds its position (the legs must). The
+	/// balancer's optional help (a documented cheat, as euphoria's balance assistance).
+	void set_upright_assist(Quat rotation, float strength, float dt, float hertz = 4.0f);
 
 	/// Apply muscles and gravity compensation for the coming step.
 	void pre_step(float dt);
@@ -94,6 +105,12 @@ public:
 	bool attached(int part) const;
 
 	float part_tone(int part) const { return _parts[size_t(part)].tone; }
+	/// How hard the muscle into `part` worked over the last step: the torque it applied over
+	/// its full strength (0 relaxed .. 1 flat out; can exceed 1 briefly). -1: no muscle (the
+	/// root, a cut joint) or the part is driven kinematically.
+	float muscle_effort(int part) const;
+	/// The torque it applied (N m) - for debugging.
+	float muscle_torque(int part) const;
 	Vec3 part_velocity(int part) const { return _world.linear_velocity(_parts[size_t(part)].body); }
 	/// Which part a body is (-1: not one of ours).
 	int part_of(BodyHandle body) const;
@@ -123,6 +140,8 @@ private:
 		float tone = 1.0f;
 		bool attached = true;
 		bool kinematic = false;
+		bool gravity_comp = true;
+		float stiffness = 1.0f;
 	};
 	PhysicsWorld& _world;
 	std::shared_ptr<const Rig> _rig;

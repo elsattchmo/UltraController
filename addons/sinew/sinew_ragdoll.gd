@@ -54,9 +54,26 @@ var _powered_t := 0.0                         ## seconds since powered on
 var _last_anim_hips := Vector3.INF
 var _hit_relax := {}                         ## part -> seconds since a hit weakened its limb
 var _requests: Array = []                    ## procedural effectors for the coming tick: [method, args...]
+
+## Stagger (S5): a hard enough hit on a standing body makes its legs physical and the balancer
+## keeps it up - shifting its weight, stepping - until it's steady again (then the legs hand
+## back to the animation over 0.3 s) or it can't: in single player that's a real knock-down.
+@export var stagger := true
+@export var stagger_min_impulse := 10.0      ## N s on the struck part to start one
+@export var stagger_max_time := 3.0
+@export var stagger_falls := true            ## a lost balance knocks the character down (offline only)
+## The balancer's settings for staggers (any BalanceSettings field by name).
+@export var balance_settings := {}
+var _stagger_t := -1.0                       ## seconds into the stagger (< 0: none)
+var _steady_t := 0.0
+var _handback_t := -1.0
+var _handback_from: Array[Transform3D] = []
 ## A hit weakens the struck limb's muscles for a moment (a shot arm goes slack, then pulls
 ## back): tone this low at the hit, back to full over `hit_relax_time`.
 @export_range(0, 1, 0.01) var hit_relax_tone := 0.25
+## A hit to the torso slackens only the torso, and less (all of the upper body going limp
+## folded it over and pulled it off its feet).
+@export_range(0, 1, 0.01) var torso_relax_tone := 0.6
 @export var hit_relax_time := 0.4
 
 
@@ -79,6 +96,11 @@ func setup(c: UltraCharacter) -> void:
 	modifier.name = "Sinew"
 	modifier.ragdoll = self
 	sk.add_child(modifier)
+	# The muscles / bones / balance view (off until `sinew_debug`, K, or --sinew-debug).
+	var dd := SinewDebugDraw.new()
+	dd.name = "SinewDebug"
+	dd.ragdoll = self
+	add_child(dd)
 	# Severed parts collapse after the body has posed the skeleton.
 	var dm := sk.get_node_or_null("Dismember")
 	if dm:
@@ -120,6 +142,8 @@ func sinew_pre_step(dt: float) -> void:
 		if not powered or not character.state.is_grounded():
 			# Kinematic: the parts follow the animated pose exactly (also in the air: the
 			# stand-in root drive is no balance, it would hold a jump's pelvis like a crane).
+			if _stagger_t >= 0.0:
+				_end_stagger(false)
 			if _powered_on:
 				_power(false)
 			world.physics.call("character_move_kinematic", _id, anim, dt)
@@ -133,13 +157,18 @@ func sinew_pre_step(dt: float) -> void:
 		# animated hips jumped: the upper body trailed up to 1.2 m behind for half a second).
 		var hips: Vector3 = (anim[0] as Transform3D).origin
 		if _powered_t < 0.25 or (_last_anim_hips != Vector3.INF and hips.distance_to(_last_anim_hips) > 0.5):
+			if _stagger_t >= 0.0:
+				_end_stagger(false)
+			_handback_t = -1.0
 			world.physics.call("character_set_pose", _id, anim, Vector3.ZERO)
 		_last_anim_hips = hips
 		# Powered: the legs walk the animation, the upper body's muscles track it.
-		world.physics.call("character_move_kinematic", _id, anim, dt)
+		world.physics.call("character_move_kinematic", _id, _handback(anim, dt), dt)
 		world.physics.call("character_set_targets", _id, anim)
 		_relax_hit_limbs(dt)
 		_apply_requests()
+		if _stagger_t >= 0.0:
+			_update_stagger(dt, anim)
 		return
 	if _getting_up:
 		_requests.clear()
@@ -265,13 +294,29 @@ func _power(on: bool) -> void:
 func _relax_hit_limbs(dt: float) -> void:
 	for part in _hit_relax.keys():
 		var t: float = _hit_relax[part] + dt
-		var k := lerpf(hit_relax_tone, 1.0, clampf(t / hit_relax_time, 0.0, 1.0))
-		for i in _subtree(part):
+		for i in _relaxed(part):
+			var k := lerpf(_relax_floor(part), 1.0, clampf(t / hit_relax_time, 0.0, 1.0))
 			world.physics.call("character_set_part_tone", _id, i, k)
 		if t >= hit_relax_time:
 			_hit_relax.erase(part)
 		else:
 			_hit_relax[part] = t
+
+
+## The parts a hit on `part` slackens: a limb below the hit; a torso hit only the torso.
+func _relaxed(part: int) -> Array:
+	var torso := UltraLimbs.Region.TORSO
+	if int(parts[part].region) != torso:
+		return _subtree(part)
+	var out := []
+	for i in _subtree(part):
+		if int(parts[i].region) == torso and not _walks(i):
+			out.append(i)
+	return out
+
+
+func _relax_floor(part: int) -> float:
+	return torso_relax_tone if int(parts[part].region) == UltraLimbs.Region.TORSO else hit_relax_tone
 
 
 func _subtree(top: int) -> Array:
@@ -294,7 +339,7 @@ func hit(region: int, dir: Vector3, amount: float) -> void:
 	if _id == 0 or not (_powered_on or active) or not _part_of_region.has(region):
 		return
 	var part: int = _part_of_region[region]
-	if _powered_on and _walks(part):
+	if _powered_on and _walks(part) and _stagger_t < 0.0:
 		part = _part("Spine")          # the legs walk the animation: the shot rocks the body
 		if part < 0:
 			return
@@ -305,8 +350,105 @@ func hit(region: int, dir: Vector3, amount: float) -> void:
 	world.physics.call("apply_impulse", body, impulse, xf.origin)
 	if _powered_on:
 		_hit_relax[part] = 0.0
-		for i in _subtree(part):
-			world.physics.call("character_set_part_tone", _id, i, hit_relax_tone)
+		for i in _relaxed(part):
+			world.physics.call("character_set_part_tone", _id, i, _relax_floor(part))
+		# (An arm taking a hit swings; it takes a blow to the body, head or legs to unbalance it.)
+		var arms := [UltraLimbs.Region.ARM_L, UltraLimbs.Region.ARM_R, UltraLimbs.Region.FOREARM_L, UltraLimbs.Region.FOREARM_R, UltraLimbs.Region.HAND_L, UltraLimbs.Region.HAND_R]
+		if stagger and _stagger_t < 0.0 and not region in arms and impulse.length() >= stagger_min_impulse and character.state.is_grounded():
+			start_stagger()
+
+
+## Legs physical, the balancer on: the body has to stay up by itself for a moment.
+func start_stagger() -> void:
+	if _id == 0 or not _powered_on or _stagger_t >= 0.0:
+		return
+	_stagger_t = 0.0
+	_steady_t = 0.0
+	_handback_t = -1.0
+	for i in parts.size():
+		if _walks(i) and bool(world.physics.call("character_attached", _id, i)):
+			world.physics.call("character_set_part_kinematic", _id, i, false)
+	world.physics.call("character_balance_enable", _id, true, balance_settings)
+	world.physics.call("character_balance_reset", _id)
+
+
+func staggering() -> bool:
+	return _stagger_t >= 0.0
+
+
+## The balancer's view: {fallen, reason, stepping, steps, com, capture_point, support...}
+## ({} when it isn't running).
+func balance_state() -> Dictionary:
+	return world.physics.call("character_balance_state", _id) if _id != 0 else {}
+
+
+func _update_stagger(dt: float, anim: Array) -> void:
+	_stagger_t += dt
+	var st: Dictionary = balance_state()
+	if st.is_empty():
+		_stagger_t = -1.0
+		return
+	var com_v: Vector3 = st.com_velocity
+	var hips: Vector3 = (anim[0] as Transform3D).origin
+	var off := Vector2(pose_now[0].origin.x - hips.x, pose_now[0].origin.z - hips.z).length() if not pose_now.is_empty() else 0.0
+	# Gone: the balancer gave up, or the body is careering away from the capsule.
+	if bool(st.fallen) or (off > 0.9 and Vector2(com_v.x, com_v.z).length() > 0.8):
+		var v := com_v
+		var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
+		if stagger_falls and offline and character.is_authority():
+			# Single player: the body lost its balance, so the character goes down (the capsule
+			# follows the body's own motion; the legs stay physical into the fall). In a session
+			# the capsule is the truth.
+			_end_stagger(false, false)
+			character.knock_down(Vector3(v.x, maxf(v.y, 0.0), v.z))
+		else:
+			_end_stagger(true)
+		return
+	var steady := not bool(st.stepping) and float(st.capture_error) < -0.03 and Vector2(com_v.x, com_v.z).length() < 0.2
+	_steady_t = _steady_t + dt if steady else 0.0
+	if (_stagger_t > 0.4 and _steady_t > 0.4) or _stagger_t > stagger_max_time or off > 0.9:
+		_end_stagger(true)
+
+
+## Back to the animation: the legs go kinematic again and glide from where they stand onto the
+## animated pose over 0.3 s. Single player, the character first moves to where the body
+## stepped to (else the feet would slide back under the capsule).
+func _end_stagger(handback: bool, legs_kinematic := true) -> void:
+	if _stagger_t < 0.0:
+		return
+	_stagger_t = -1.0
+	world.physics.call("character_balance_enable", _id, false, {})
+	for i in parts.size():
+		if _walks(i) and legs_kinematic:
+			world.physics.call("character_set_part_kinematic", _id, i, true)
+	if not handback or pose_now.is_empty():
+		return
+	var anim := _anim_world()
+	var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
+	if offline and character.is_authority() and not anim.is_empty() and character.state.is_grounded():
+		var d := pose_now[0].origin - (anim[0] as Transform3D).origin
+		d.y = 0.0
+		if d.length() > 0.12 and d.length() < 0.9:
+			character.teleport(character.state.pos + d)
+			_last_anim_hips = Vector3.INF     # (expected jump: no snap)
+	_handback_t = 0.0
+	_handback_from = pose_now.duplicate()
+
+
+## The kinematic legs' targets: the animation, or on the way back to it after a stagger.
+func _handback(anim: Array, dt: float) -> Array:
+	if _handback_t < 0.0 or _handback_from.size() != anim.size():
+		return anim
+	_handback_t += dt
+	var k := smoothstep(0.0, 0.3, _handback_t)
+	if _handback_t >= 0.3:
+		_handback_t = -1.0
+		return anim
+	var out := anim.duplicate()
+	for i in anim.size():
+		if _walks(i):
+			out[i] = _handback_from[i].interpolate_with(anim[i], k)
+	return out
 
 
 func _physics_process(delta: float) -> void:
@@ -334,6 +476,9 @@ func _physics_process(delta: float) -> void:
 
 
 func start() -> void:
+	if _stagger_t >= 0.0:
+		_end_stagger(false)
+	_handback_t = -1.0
 	if _powered_on:
 		world.physics.call("character_set_root_assist", _id, Transform3D(), 0.0, 1.0 / 60.0)
 		_powered_on = false

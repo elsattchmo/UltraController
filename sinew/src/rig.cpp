@@ -185,6 +185,21 @@ Rig build_humanoid_rig(const SkeletonDesc& sk, const HumanoidOptions& options) {
 				// A foot rests flat: keep the toe end's capsule above the sole.
 				const float ankle_h = dot(p.rest.p, sk.up) - bottom;
 				p.radius = std::min(p.radius, std::max(0.6f * ankle_h, 0.02f));
+				// The physical foot is a box from heel to toe tip, sole on the floor (model y 0
+				// when the skeleton stands on its origin, else just under the lowest bone).
+				const float sole = std::min(0.0f, bottom - 0.02f);
+				const Vec3 ankle = p.rest.p;
+				const Vec3 tip = xform(p.rest, end_local);
+				const float heel_f = dot(ankle, sk.forward) - 0.035f * H;
+				const float toe_f = std::max(dot(tip, sk.forward), heel_f + 0.08f * H);
+				const float top = dot(ankle, sk.up) - sole;
+				const Vec3 half{ 0.028f * H, 0.5f * std::max(0.75f * top, 0.02f), 0.5f * (toe_f - heel_f) };
+				const float lat = 0.5f * (dot(ankle, left) + dot(tip, left));
+				const Vec3 centre = left * lat + sk.up * (sole + half.y) + sk.forward * (0.5f * (heel_f + toe_f));
+				const Transform box_model{ centre, basis_y(sk.up, sk.forward) };
+				p.box = true;
+				p.box_xform = inv * box_model;
+				p.box_half = half;
 			}
 		}
 		if (p.parent >= 0) {
