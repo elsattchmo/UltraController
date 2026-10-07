@@ -1,0 +1,308 @@
+// Procedural gait: footsteps from the motion, planted feet that never slide, stopping, running
+// (a flight phase), turning on the spot, stairs, legs fitted to the footholds.
+#include "doctest.h"
+
+#include "sinew/gait.hpp"
+#include "sinew/math.hpp"
+
+#include <cmath>
+#include <memory>
+
+using namespace sinew;
+
+namespace {
+
+constexpr float DT = 1.0f / 60.0f;
+
+struct Walker {
+	std::shared_ptr<Rig> rig = std::make_shared<Rig>(build_humanoid_rig(make_test_skeleton()));
+	PhysicsWorld world;
+	std::unique_ptr<Limbs> limbs;
+	std::unique_ptr<Gait> gait;
+	Transform root;
+	int landings[2] = { 0, 0 };
+	float worst_slide = 0.0f;       // a planted foot's movement between two ticks
+	float worst_reach = 0.0f;       // drawn ankle vs the foothold
+	bool flight = false;
+	bool was_planted[2] = { true, true };
+	Vec3 last[2];
+
+	explicit Walker(bool floor = true) {
+		if (floor) {
+			world.add_static_box(Transform{ Vec3{ 0, -0.5f, 0 }, Quat{} }, Vec3{ 100, 0.5f, 100 });
+		}
+		limbs = std::make_unique<Limbs>(*rig);
+		gait = std::make_unique<Gait>(*rig, *limbs, &world);
+		gait->reset(root);
+		for (int i = 0; i < 2; ++i) {
+			last[i] = gait->ankle(i);
+		}
+	}
+	/// Move the root at `v` for `seconds` (turning at `yaw_rate`), following the ground height.
+	void run(Vec3 v, float seconds, float yaw_rate = 0.0f) {
+		const int n = int(seconds / DT + 0.5f);
+		for (int k = 0; k < n; ++k) {
+			root.p += v * DT;
+			root.q = normalized(axis_angle(Vec3{ 0, 1, 0 }, yaw_rate * DT) * root.q);
+			const RayHit g = probes::ground_below(world, root.p + Vec3{ 0, 1.0f, 0 }, 3.0f);
+			if (g.hit) {
+				root.p.y = g.point.y;
+			}
+			gait->update(GaitInput{ root, v, DT });
+			bool both_air = true;
+			for (int i = 0; i < 2; ++i) {
+				const bool planted = gait->foot_planted(i);
+				if (planted && was_planted[i]) {
+					worst_slide = std::fmax(worst_slide, length(gait->plant(i) - last[i]));
+				}
+				if (planted && !was_planted[i]) {
+					landings[i]++;
+				}
+				both_air = both_air && !planted;
+				was_planted[i] = planted;
+				last[i] = gait->plant(i);
+				const int foot = limbs->limb(i == 0 ? LimbId::LegL : LimbId::LegR).end;
+				worst_reach = std::fmax(worst_reach, length(gait->pose()[size_t(foot)].p - gait->ankle(i)));
+			}
+			flight = flight || both_air;
+		}
+	}
+	float off_home(int i) const {
+		Vec3 d = gait->ankle(i) - gait->home(i);
+		d.y = 0.0f;
+		return length(d);
+	}
+};
+
+} // namespace
+
+TEST_CASE("gait: standing still - feet at home, no stepping") {
+	Walker w;
+	w.run(Vec3{}, 1.0f);
+	CHECK_FALSE(w.gait->stepping());
+	for (int i = 0; i < 2; ++i) {
+		CHECK(w.off_home(i) < 0.01f);
+		CHECK(w.gait->foot_planted(i));
+	}
+	CHECK(w.landings[0] + w.landings[1] == 0);
+	// The drawn pose stands: pelvis at its height, feet at the ankles.
+	CHECK(w.gait->pose()[0].p.y == doctest::Approx(w.rig->parts[0].rest.p.y).epsilon(0.05));
+	CHECK(w.worst_reach < 0.01f);
+}
+
+TEST_CASE("gait: walking - alternating steps, planted feet never slide, legs reach the footholds") {
+	Walker w;
+	w.run(Vec3{ 0, 0, 1.4f }, 6.0f);
+	const int steps = w.landings[0] + w.landings[1];
+	MESSAGE("walk 1.4 m/s, 6 s: ", steps, " steps (cadence ", w.gait->cadence(), "/s), worst planted slide ",
+			w.worst_slide * 1000.0f, " mm, worst ankle miss ", w.worst_reach * 100.0f, " cm");
+	CHECK(steps >= 10);
+	CHECK(steps <= 18);
+	CHECK(std::abs(w.landings[0] - w.landings[1]) <= 1);   // they take turns
+	CHECK(w.worst_slide < 1e-4f);                             // by construction
+	CHECK(w.worst_reach < 0.02f);
+	CHECK_FALSE(w.flight);                                    // a walk always has a foot down
+	// Keeping up: neither foot left behind.
+	for (int i = 0; i < 2; ++i) {
+		Vec3 d = w.gait->ankle(i) - w.root.p;
+		d.y = 0.0f;
+		CHECK(length(d) < 0.8f);
+	}
+	// The left foot stays on the left (+X for a body facing +Z).
+	CHECK(w.gait->ankle(0).x > w.gait->ankle(1).x);
+}
+
+TEST_CASE("gait: stopping brings the feet home and stands") {
+	Walker w;
+	w.run(Vec3{ 0, 0, 1.4f }, 3.0f);
+	w.run(Vec3{}, 2.0f);
+	CHECK_FALSE(w.gait->stepping());
+	CHECK(w.off_home(0) < 0.1f);
+	CHECK(w.off_home(1) < 0.1f);
+	CHECK(w.worst_slide < 1e-4f);
+}
+
+TEST_CASE("gait: running has a flight phase and keeps up") {
+	Walker w;
+	w.run(Vec3{ 0, 0, 4.5f }, 4.0f);
+	const int steps = w.landings[0] + w.landings[1];
+	MESSAGE("run 4.5 m/s, 4 s: ", steps, " steps, duty ", w.gait->duty());
+	CHECK(w.flight);
+	CHECK(w.worst_slide < 1e-4f);
+	CHECK(steps >= 8);
+	for (int i = 0; i < 2; ++i) {
+		Vec3 d = w.gait->ankle(i) - w.root.p;
+		d.y = 0.0f;
+		CHECK(length(d) < 1.4f);
+	}
+}
+
+TEST_CASE("gait: turning on the spot steps round") {
+	Walker w;
+	w.run(Vec3{}, 0.5f);
+	w.run(Vec3{}, 1.0f, PI / 2.0f);          // a quarter turn in a second, standing
+	CHECK(w.gait->stepping());
+	w.run(Vec3{}, 1.5f);
+	CHECK(w.landings[0] + w.landings[1] >= 2);   // both feet stepped round
+	CHECK_FALSE(w.gait->stepping());
+	CHECK(w.worst_slide < 1e-4f);
+	CHECK(w.off_home(0) < 0.1f);
+	CHECK(w.off_home(1) < 0.1f);
+}
+
+TEST_CASE("gait: stairs - every foothold on a step") {
+	Walker w;
+	// Ten 0.17 m steps, 0.3 m deep, starting 1 m ahead (+Z).
+	for (int k = 0; k < 10; ++k) {
+		const float top = 0.17f * float(k + 1);
+		w.world.add_static_box(Transform{ Vec3{ 0, top * 0.5f, 1.0f + 0.3f * float(k) + 0.15f + 3.0f }, Quat{} },
+				Vec3{ 2.0f, top * 0.5f, 3.15f });
+	}
+	const float ankle_h = w.gait->plant(0).y;     // on the flat floor at y 0
+	float worst = 0.0f;
+	for (int t = 0; t < 360; ++t) {
+		w.run(Vec3{ 0, 0, 0.9f }, DT);
+		for (int i = 0; i < 2; ++i) {
+			if (w.gait->foot_planted(i)) {
+				const Vec3 a = w.gait->plant(i);
+				const RayHit g = probes::ground_below(w.world, a + Vec3{ 0, 0.3f, 0 }, 1.0f);
+				REQUIRE(g.hit);
+				worst = std::fmax(worst, std::fabs(a.y - g.point.y - ankle_h));   // put down flat on the step under it
+			}
+		}
+	}
+	MESSAGE("stairs: climbed to ", w.root.p.y, " m, worst planted ankle off its step height ", worst * 100.0f, " cm");
+	CHECK(w.root.p.y > 1.0f);
+	CHECK(worst < 0.03f);
+	CHECK(w.worst_slide < 1e-4f);
+	CHECK(w.worst_reach < 0.03f);
+}
+
+namespace {
+
+/// Walk at `v` (world) facing +Z and measure what 8-way movement gets wrong: feet crossing (in
+/// the body frame), the pelvis sinking to reach a stretched foot, and the widest stance (lunges).
+struct EightWay {
+	float min_gap = 1e9f;       // left ankle's lateral lead over the right (+X is the left)
+	float min_pelvis = 1e9f;    // pelvis height over the root
+	float max_spread = 0.0f;    // horizontal distance between the ankles
+};
+
+/// The game's capsule: accelerates at 11 m/s2, brakes at 20 (fps.tres).
+Vec3 ramp(Vec3 cur, Vec3 want) {
+	const Vec3 d = want - cur;
+	const float a = dot(d, cur) < 0.0f ? 20.0f : 11.0f;
+	const float l = length(d);
+	return l > a * DT ? cur + d * (a * DT / l) : want;
+}
+
+EightWay measure(Walker& w, Vec3& vel, Vec3 v, float seconds) {
+	EightWay r;
+	const int n = int(seconds / DT + 0.5f);
+	for (int k = 0; k < n; ++k) {
+		vel = ramp(vel, v);
+		w.run(vel, DT);
+		const Vec3 a = w.gait->ankle(0), b = w.gait->ankle(1);
+		const float wp = w.gait->warp();      // the legs' frame: the facing (+Z) turned by the warp
+		r.min_gap = std::fmin(r.min_gap, (a.x - b.x) * std::cos(wp) - (a.z - b.z) * std::sin(wp));
+		r.min_pelvis = std::fmin(r.min_pelvis, w.gait->pose()[0].p.y - w.root.p.y);
+		r.max_spread = std::fmax(r.max_spread, std::hypot(a.x - b.x, a.z - b.z));
+	}
+	return r;
+}
+
+} // namespace
+
+TEST_CASE("gait: 8-way - strafing, backing and diagonals never cross the feet or lunge") {
+	// Plain forward walking is the yardstick: no direction may sink the hips or straddle more.
+	const float rest_h = Walker().rig->parts[0].rest.p.y;
+	Walker base;
+	Vec3 bv;
+	const EightWay fwd = measure(base, bv, Vec3{ 0, 0, 1.4f }, 4.0f);
+	const Vec3 dirs[] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 0, -1 }, { 0.7071f, 0, 0.7071f }, { -0.7071f, 0, -0.7071f },
+		{ 0.7071f, 0, -0.7071f } };
+	MESSAGE("forward: pelvis sank ", (rest_h - fwd.min_pelvis) * 100.0f, " cm, widest stance ", fwd.max_spread * 100.0f, " cm");
+	for (const Vec3& d : dirs) {
+		Walker w;
+		Vec3 vel;
+		const EightWay r = measure(w, vel, d * 1.4f, 4.0f);
+		MESSAGE("dir (", d.x, ", ", d.z, "): min gap ", r.min_gap * 100.0f, " cm, pelvis sank ", (rest_h - r.min_pelvis) * 100.0f,
+				" cm, widest stance ", r.max_spread * 100.0f, " cm, warp ", w.gait->warp());
+		CHECK(r.min_gap > 0.08f);                           // never crossed (in the legs' frame)
+		CHECK(r.min_pelvis >= fwd.min_pelvis - 0.01f);     // no slump
+		CHECK(r.max_spread <= fwd.max_spread + 0.01f);     // no lunge
+		CHECK(w.worst_slide < 1e-4f);
+		CHECK(w.worst_reach < 0.02f);
+	}
+}
+
+TEST_CASE("gait: reversing - forward to back, side to side, run to backing: no slump, no lunge") {
+	const float rest_h = Walker().rig->parts[0].rest.p.y;
+	struct Case {
+		Vec3 a, b;
+		float sink, spread;   // allowed: pelvis below rest / widest stance, m
+	};
+	const Case cases[] = { { { 0, 0, 1.4f }, { 0, 0, -1.4f }, 0.12f, 0.7f }, { { 1.4f, 0, 0 }, { -1.4f, 0, 0 }, 0.12f, 0.7f },
+		{ { 0, 0, 3.5f }, { 0, 0, -1.4f }, 0.2f, 0.95f } };   // (braking from a run: a hard plant and a dip)
+	for (const Case& c : cases) {
+		Walker w;
+		Vec3 vel;
+		measure(w, vel, c.a, 2.0f);
+		const EightWay r = measure(w, vel, c.b, 2.0f);
+		MESSAGE("reverse (", c.a.x, ",", c.a.z, ") -> (", c.b.x, ",", c.b.z, "): min gap ", r.min_gap * 100.0f,
+				" cm, pelvis sank ", (rest_h - r.min_pelvis) * 100.0f, " cm, widest ", r.max_spread * 100.0f, " cm");
+		CHECK(r.min_gap > 0.08f);
+		CHECK(rest_h - r.min_pelvis < c.sink);
+		CHECK(r.max_spread < c.spread);
+		CHECK(w.worst_slide < 1e-4f);
+		// And it settles into the new direction: both feet near the hips again.
+		for (int i = 0; i < 2; ++i) {
+			Vec3 d = w.gait->ankle(i) - w.root.p;
+			d.y = 0.0f;
+			CHECK(length(d) < 0.6f);
+		}
+	}
+}
+
+TEST_CASE("gait: momentum - leans into a change of motion, bounded, nothing flies") {
+	Walker w;
+	Vec3 vel;
+	const float cap = w.gait->settings().lean_max;
+	// Fastest any part moves against the root, per tick (m/s): the yardstick is a steady walk.
+	auto part_speed = [&](Vec3 v, float seconds, float& lean_min_z, float& lean_max_z, float& worst_lean) {
+		std::vector<Transform> last = w.gait->pose();
+		Vec3 last_root = w.root.p;
+		float fastest = 0.0f;
+		const int n = int(seconds / DT + 0.5f);
+		for (int k = 0; k < n; ++k) {
+			vel = ramp(vel, v);
+			w.run(vel, DT);
+			const Vec3 dr = w.root.p - last_root;
+			for (size_t i = 0; i < last.size(); ++i) {
+				fastest = std::fmax(fastest, length(w.gait->pose()[i].p - last[i].p - dr) / DT);
+			}
+			last = w.gait->pose();
+			last_root = w.root.p;
+			const Vec3 l = w.gait->lean();
+			lean_min_z = std::fmin(lean_min_z, l.z);
+			lean_max_z = std::fmax(lean_max_z, l.z);
+			worst_lean = std::fmax(worst_lean, length(l));
+		}
+		return fastest;
+	};
+	float lo = 0, hi = 0, worst = 0;
+	part_speed(Vec3{ 0, 0, 1.4f }, 0.4f, lo, hi, worst);
+	const float start_fwd = hi;                                    // setting off: leaned forward
+	lo = hi = 0;
+	const float steady = part_speed(Vec3{ 0, 0, 1.4f }, 2.0f, lo, hi, worst);
+	const float settled = length(w.gait->lean());
+	lo = hi = 0;
+	const float reversing = part_speed(Vec3{ 0, 0, -1.4f }, 1.5f, lo, hi, worst);
+	MESSAGE("lean: setting off ", start_fwd, " rad forward, settled ", settled, ", braking ", -lo, " rad back (cap ", cap,
+			"); fastest part vs the root: walking ", steady, " m/s, reversing ", reversing, " m/s");
+	CHECK(start_fwd > 0.08f);                 // setting off leans forward
+	CHECK(lo < -0.08f);                       // the reversal's braking leans back
+	CHECK(settled < 0.02f);                   // and a steady walk stands up straight
+	CHECK(worst <= cap + 1e-4f);              // bounded
+	CHECK(reversing < 1.5f * steady);         // nothing flies about
+}

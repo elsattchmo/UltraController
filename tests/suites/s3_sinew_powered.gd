@@ -51,7 +51,9 @@ func test_walking_powered_keeps_up() -> void:
 	info("walking: worst part %.3f m off the animation, fastest part %.1f m/s" % [worst, fastest])
 	check(r._powered_on, "still powered while walking")
 	check(worst < 0.15, "keeps up with the walk (worst %.3f m)" % worst)
-	check(fastest < 6.0, "no part flailing (%.1f m/s)" % fastest)
+	# (The gait's swinging foot / shin peaks ~6.5 m/s as a walk starts - the foot left behind by the
+	# acceleration catches up; flailing physics is far beyond that.)
+	check(fastest < 7.5, "no part flailing (%.1f m/s)" % fastest)
 
 
 func test_a_hit_pushes_the_part_and_it_recovers() -> void:
@@ -95,3 +97,39 @@ func test_spawn_and_teleport_snap_onto_the_animation() -> void:
 	info("just spawned: worst %.3f m; after a 11 m teleport: worst %.3f m" % [worst_spawn, worst_tp])
 	check(worst_spawn < 0.10, "no T-pose creeping down after the spawn (%.3f m)" % worst_spawn)
 	check(worst_tp < 0.10, "no body left behind by a teleport (%.3f m)" % worst_tp)
+
+
+## Physics shows only where something happens: on the move or with a gun in hand the body plays
+## the animation (IK included) exactly; a hit makes the struck chain physical, then it hands back.
+func test_animated_when_running_or_armed_physical_when_hit() -> void:
+	if not powered:
+		return
+	load_playground()
+	var c := _sinew(marker("spawn").global_position + Vector3(0, 0, -3))
+	await ticks(60)
+	var r := c.ragdoll as SinewRagdoll
+	var hand := r._part("RightHand")
+	var chest := r._part("UpperChest")
+	check(r.part_w[hand] > 0.99 and r.part_w[chest] > 0.99, "standing unarmed: the upper body is physical")
+	var b := bot(c)
+	b.set_steps([{"ticks": 90, "move": Vector2(0, 1), "buttons": InputFrame.B_SPRINT}])
+	await ticks(80)
+	info("running at %.1f m/s: hand shown %.2f physics, chest %.2f" % [Vector2(c.state.vel.x, c.state.vel.z).length(), r.part_w[hand], r.part_w[chest]])
+	check(r.part_w[hand] == 0.0 and r.part_w[chest] == 0.0, "running: arms and chest play the animation exactly")
+	await ticks(60)
+	UltraItems.give(c, &"pistol")
+	var uid := 0
+	for i in c.inventory.size():
+		var it := c.inventory.get_slot(i)
+		if it and it.def_id == &"pistol":
+			uid = it.uid
+	b.set_steps([{"ticks": 60, "slot": c.inventory.find_uid(uid) + 1}])
+	await ticks(70)
+	check(c.state.held_uid != 0, "pistol in hand")
+	check(r.part_w[hand] == 0.0, "armed: the hands stay where the IK puts them (shown %.2f physics)" % r.part_w[hand])
+	c.react_to_hit(UltraLimbs.Region.ARM_R, Vector3(1, 0, 0), 40.0)
+	await ticks(2)
+	check(r.part_w[hand] > 0.99, "a hit on the gun arm makes it physical")
+	check(r.part_w[chest] == 0.0, "only that arm")
+	await ticks(90)
+	check(r.part_w[hand] == 0.0, "then it hands back to the animation (%.2f)" % r.part_w[hand])

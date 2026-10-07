@@ -100,19 +100,10 @@ Quat Limbs::target_world(const Character& c, int part) const {
 	return normalized(c.part_transform(parent).q * c.effective_target(part));
 }
 
-bool Limbs::solve_two_bone(const Character& c, const LimbInfo& l, Vec3 target, Solve& out) const {
-	if (l.upper < 0 || !c.attached(l.lower)) {
-		return false;
-	}
-	const PartDef& up = _rig.parts[size_t(l.upper)];
-	const PartDef& lo = _rig.parts[size_t(l.lower)];
-	if (up.parent < 0 || lo.joint != JointKind::Hinge) {
-		return false;
-	}
-	const Transform parent = c.part_transform(up.parent);
-	const Vec3 shoulder = xform(parent, up.frame_parent.p);
-	const Quat upper_base = normalized(parent.q * c.effective_target(l.upper));
-	const float d = length(target - shoulder);
+void two_bone_ik(const Rig& rig, const LimbInfo& l, Vec3 root, Quat upper_base, Vec3 target, Quat& upper_world,
+		Quat& lower_local) {
+	const PartDef& lo = rig.parts[size_t(l.lower)];
+	const float d = length(target - root);
 	// The wrist / ankle in the upper bone's frame at hinge angle a; its distance from the root
 	// joint shrinks as the hinge flexes. Sample the range, then bisect inside the best bracket.
 	auto wrist = [&](float a) { return lo.frame_parent.p + rotate(hinge_local(lo, a), l.end_offset); };
@@ -148,17 +139,31 @@ bool Limbs::solve_two_bone(const Character& c, const LimbInfo& l, Vec3 target, S
 		}
 		best = 0.5f * (lo_a + hi_a);
 	}
-	out.parent = parent.q;
-	out.root = shoulder;
-	out.lower_local = hinge_local(lo, best);
-	// Swing the upper bone (the least turn from its animated orientation) so the wrist / ankle
-	// lies along the line to the target: the elbow / knee keeps the clip's side.
+	lower_local = hinge_local(lo, best);
+	// Swing the upper bone (the least turn from its base orientation) so the wrist / ankle lies
+	// along the line to the target: the elbow / knee keeps the base pose's side.
 	const Vec3 v = rotate(upper_base, wrist(best));
-	const Vec3 to = target - shoulder;
-	out.upper_world = upper_base;
+	const Vec3 to = target - root;
+	upper_world = upper_base;
 	if (length(v) > 1e-5f && length(to) > 1e-5f) {
-		out.upper_world = normalized(from_to(normalized(v), normalized(to)) * upper_base);
+		upper_world = normalized(from_to(normalized(v), normalized(to)) * upper_base);
 	}
+}
+
+bool Limbs::solve_two_bone(const Character& c, const LimbInfo& l, Vec3 target, Solve& out) const {
+	if (l.upper < 0 || !c.attached(l.lower)) {
+		return false;
+	}
+	const PartDef& up = _rig.parts[size_t(l.upper)];
+	const PartDef& lo = _rig.parts[size_t(l.lower)];
+	if (up.parent < 0 || lo.joint != JointKind::Hinge) {
+		return false;
+	}
+	const Transform parent = c.part_transform(up.parent);
+	out.parent = parent.q;
+	out.root = xform(parent, up.frame_parent.p);
+	const Quat upper_base = normalized(parent.q * c.effective_target(l.upper));
+	two_bone_ik(_rig, l, out.root, upper_base, target, out.upper_world, out.lower_local);
 	return true;
 }
 

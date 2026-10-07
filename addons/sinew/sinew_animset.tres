@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="SinewAnimationSet" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/sinew/sinew_animation_set.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+overrides = {}
+gait_walk = &"walk_f"
+gait_run = &"jog_f"
+gait_sprint = &"sprint_f"

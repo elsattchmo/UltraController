@@ -1033,12 +1033,91 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   stepped first); fallen or careering > 0.9 m off the capsule -> offline `knock_down(com velocity)`, legs
   stay physical into the fall. A torso hit slackens only the torso, to `torso_relax_tone` 0.6 (all of the
   upper body at 0.25 folded it over). `balance_settings` passes any BalanceSettings field by name.
+- **Physics shows per part** (`SinewRagdoll.part_w` / `_update_parts`, GTA IV's way): powered, the body
+  plays the animation EXACTLY (this frame's pose, the IK included: hands on the gun, feet planted) and
+  turns physical only where something happens - standing still with empty hands the upper body (its idle
+  life); a hit: the struck chain for `hit_window` 0.9 s (arm hit = that arm from the shoulder; body / head =
+  the whole upper body); a stagger: everything; procedural control (`reach` etc.) its limb while driven.
+  Running / armed / carrying / traversal = animation. Weights ease in 0.15 s, out 0.3 s while the part is
+  still physical, then it goes kinematic. SinewPoseModifier writes EVERY part (an animated child under a
+  physical parent is set to its animated global pose). Before this the whole upper body was always physics
+  AFTER the IK passes: arms trailed at a run and the hands slid off the guns.
+- **Own animation driver (S6a)**: `SinewCharacter._build_visual` is a full override (no super): `SinewAnimDriver
+  extends UltraAnimDriver` (the type `anim` is declared as) plays the referenced clips AS THEY ARE - no
+  InertialBlend / BodyDynamics / FootIK / ArmClear / WeaponPose / HandIK / Look (skeleton passes: Injury,
+  Sinew, Dismember), no TraversalHands. One tree: state machine over the motor states (ground = BlendSpace2D
+  x right / y forward, 1 walk 2 run 3 sprint, rate = speed / authored; crouch / prone / swim idle<->go; air,
+  land, hang, ladder, wall, rope, slide; timed climb_up / vault / rm / get-ups), upper-body item layer (the
+  held item's anim_roles idle / aim clip), swing + hit one-shots. `hand_ik` stays null (the equipment then
+  leaves the hands to the clip); the equipment's prop-carrying path calls hand IK unguarded, so
+  SinewCharacter lends it an INACTIVE `prop_hand_ik` only while `state.held_id != 0`. Member names must
+  not clash with UltraAnimDriver's (`_swing_left`, `_drive_ground`... are taken: parse error).
+  Clip references: `SinewAnimationSet extends AnimationSet` (`overrides` role -> "library/clip" over `base`
+  = the body profile's set; `resolved()` gives each character its own copy - items write roles into it);
+  default `addons/sinew/sinew_animset.tres` (empty = clips as imported), `SinewCharacter.sinew_anim_set`
+  per character; `gait_walk / run / sprint` name the reference cycles for the gait (S6c).
+- **Gait (S6b, core `sinew/gait.hpp`)**: procedural walking / running. One phase for both feet (left 0,
+  right 0.5); a foot swings when its phase >= duty (walk 0.62 = double support, run 0.36 = flight), cadence
+  1.35 + 0.42 x speed steps/s (<= 3.3). A planted foot is LOCKED (planted slide 0 mm by construction); a
+  swinging foot heads for the hip's place at touchdown + half the stance travel, on the ground under it
+  (probes), over a sin arc. Starting off, the foot that's behind (or furthest off its spot) lifts AT ONCE
+  (from phase 0 the first foot stayed down 0.9 m and the pelvis sank to reach it). Standing still it keeps
+  stepping until both feet are home (`home_tolerance` 0.1 m) and lined up with the facing
+  (`turn_tolerance` 0.55 rad): stopping and turning on the spot step. Pelvis: bob / sway / run crouch, and
+  DROPS until the hips reach both ankles (`max_reach`). Body from `GaitCycle`s (local rotations sampled per
+  phase, phase 0 = left contact, blended by speed) or, without cycles, procedural (arms down from the rest
+  T + swing against the legs, spine counter-twist, lean at a run). Legs: `two_bone_ik` (factored out of
+  Limbs: works on a pose) onto the ankles; feet flat with the yaw they were put down with.
+- **Gait in the game (S6c)**: `SinewRagdoll.gait` (on) - `_setup_gait` (after every `_make_character`) gives
+  the core gait the cycles `SinewGaitCycles.build` samples off SinewAnimationSet.gait_walk / run / sprint
+  (24 phases from the clip's `plant_phase` = left contact: each part's rotation in its parent PART's frame,
+  the pelvis in model = skeleton space, position tracks x `motion_scale`) and the idle clip's first frame.
+  `_update_gait` (each Sinew tick, IDLE / MOVE / TURN_IN_PLACE / LAND on the ground) feeds the root
+  (`Basis(UP, body_yaw)` at state.pos x visual_root->skeleton) and state.vel; SinewPoseModifier blends the
+  interpolated gait pose into the recorded animated pose DOWN THE CHAIN in local space (blending world
+  poses left the clip's arms floating 9 cm off the gait's pelvis), weights `gait_w` (0.2 s) x `gait_part_w`:
+  pelvis + legs 1; the upper body 0 standing / with an item / during a one-shot (`SinewAnimDriver.upper_busy`:
+  a hit flinch, a swing - the gait hid the hit clip), up to 1 by 0.6 m/s. That pose is what shows and what
+  the body tracks / kinematic parts follow. Foot roll (core): heel strike toes-up (`toe_up` 0.22, fading at a
+  run), heel rising round the ball before push-off (`heel_rise` 0.6) - without it the planted ankle pinned
+  flat couldn't span a stride and the pelvis sank into lunges; `ankle()` = drawn (rolling), `plant()` =
+  where it was put down (locked). Step length <= `step_max_walk` 0.62 / `step_max_run` 1.15 x leg length
+  (cadence rises for short legs, up to 5 steps/s). Measuring a planted foot: the smaller of the ankle's and
+  the toe's frame-to-frame move (one of them is the pivot). Tour `sinew_gait_review` (side on).
+- **8-way gait + momentum** (core `Gait`, sinew/src/gait.cpp; tests `gait: 8-way`, `gait: reversing`,
+  `gait: momentum` measured against plain forward walking, with velocities ramped like fps.tres:
+  accel 11, brake 20 m/s2 - a velocity step is not what the game does):
+  * Hip warp: the legs walk in a frame turned toward the travel (0.5 x the angle, <= 0.7 rad; backing
+    diagonals toward the backward direction, hysteresis at the side), pelvis 80 % of it, the spine turns
+    it back (chest keeps facing). A pure side-shuffle at 1.4 m/s with uncrossed feet can't keep up.
+  * Step length per direction (back 0.72, side 0.5 of forward; cadence rises); no crossing: a foothold
+    keeps `stance_gap` 13 cm sideways (legs' frame) from the other foot.
+  * A swinging foot lands only when ITS swing is through (the cycle wraps; progress from the phase it
+    lifted at) - a duty change while braking from a run dropped a mid-swing foot 1.5 m ahead.
+  * A standing foot left stretched behind the motion hurries the cycle (<= 2.5x, eased 20/s; full
+    hurry with both feet down) - never a jump in phase: that snapped the other foot's roll. A planted
+    foot's roll changes <= `roll_rate` 6 rad/s; the swinging foot is drawn rolled into the heel strike.
+  * Swing footholds follow a change of motion at <= `retarget_speed` 6 m/s.
+  * Momentum lean: a damped spring (2.2 Hz, zeta 0.55) toward 0.3 x a/g, <= 0.25 rad, <= 2.5 rad/s;
+    pelvis tips 35 %, spine the rest, arms trail 0.7 x; no pelvis shift (the braking foot is already ahead).
+  * SinewRagdoll: the upper body goes physical only after `calm_delay` 0.35 s still (a reversal passing
+    zero speed made it physical while the pelvis swung round: it folded over).
+  * s7 slide = smallest move of heel, ankle and toe (a heel-strike pivot isn't a slide).
+  Tour `sinew_8way_review` (facing fixed: 8 directions, reversals).
+- **Unarmed push** (test tool, `SinewCharacter.push` / `can_push`): empty hands (no prop held,
+  nothing equipped, on the ground) + the throw button (`uc_throw`, the one that throws a held box):
+  a tap shoves the character in front 3 m/s (rocks it back ~20 cm), holding charges to 5 m/s over
+  0.8 s (past `shove_knockdown` 3.5: knocked over); loose props get the same dv x mass (<= 80 kg).
+  A 0-damage `impact` DamageInfo with `shove`, applied PUSH_CONTACT 0.18 s after the release by the
+  authority; arms = SinewAnimDriver `play_push` (UAL Push, upper-body one-shot). Suite s8.
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
   data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
   coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),
   grey = kinematic (animated), dark = cut; bones; COM, capture point, support polygon; label (mode, hardest
   muscle). Cycles off / overlay (no depth test) / x-ray (skeleton meshes hidden). Tour `sinew_debug_review`.
   A new class_name needs `godot --headless --import` before a tour can use it (global class cache).
-- Tests: core `sinew_tests` (34), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
-  knock-down, death, sever, zombie) / s4 (reach, look, contacts, probes) / s5 (stagger recovers, a blow it
-  can't take knocks it down, light hits don't stagger). Tours `sinew_review`, `sinew_debug_review`.
+- Tests: core `sinew_tests` (40; gait: standing, walking, stopping, running, turning, stairs), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
+  knock-down, death, sever, zombie) / s4 (reach, look, contacts, probes) / s3 also: animated when running / armed, a hit on the gun arm / s5 (stagger recovers, a blow it
+  can't take knocks it down, light hits don't stagger) / s6 (no IK on the skeleton, clips play, references
+  re-point, a gun still shows) / s7 (gait: cycles, planted feet while walking / sprinting, stairs, off).
+  Tours `sinew_review`, `sinew_debug_review`, `sinew_gait_review`.
