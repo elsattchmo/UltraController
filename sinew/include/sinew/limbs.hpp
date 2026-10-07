@@ -70,6 +70,12 @@ private:
 	Quat target_world(const Character& c, int part) const;
 };
 
+/// Two-bone IK on a limb (arm / leg) for a pose: the upper bone's joint at `root`, its base world
+/// orientation `upper_base` (which side the elbow / knee bends to), the wrist / ankle to `target`.
+/// Gives the upper bone's world orientation and the hinge's local rotation.
+void two_bone_ik(const Rig& rig, const LimbInfo& l, Vec3 root, Quat upper_base, Vec3 target, Quat& upper_world,
+		Quat& lower_local);
+
 /// Environment probes against the level (character parts are never seen).
 struct EdgeProbe {
 	bool found = false;

@@ -1056,13 +1056,25 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   = the body profile's set; `resolved()` gives each character its own copy - items write roles into it);
   default `addons/sinew/sinew_animset.tres` (empty = clips as imported), `SinewCharacter.sinew_anim_set`
   per character; `gait_walk / run / sprint` name the reference cycles for the gait (S6c).
+- **Gait (S6b, core `sinew/gait.hpp`)**: procedural walking / running. One phase for both feet (left 0,
+  right 0.5); a foot swings when its phase >= duty (walk 0.62 = double support, run 0.36 = flight), cadence
+  1.35 + 0.42 x speed steps/s (<= 3.3). A planted foot is LOCKED (planted slide 0 mm by construction); a
+  swinging foot heads for the hip's place at touchdown + half the stance travel, on the ground under it
+  (probes), over a sin arc. Starting off, the foot that's behind (or furthest off its spot) lifts AT ONCE
+  (from phase 0 the first foot stayed down 0.9 m and the pelvis sank to reach it). Standing still it keeps
+  stepping until both feet are home (`home_tolerance` 0.1 m) and lined up with the facing
+  (`turn_tolerance` 0.55 rad): stopping and turning on the spot step. Pelvis: bob / sway / run crouch, and
+  DROPS until the hips reach both ankles (`max_reach`). Body from `GaitCycle`s (local rotations sampled per
+  phase, phase 0 = left contact, blended by speed) or, without cycles, procedural (arms down from the rest
+  T + swing against the legs, spine counter-twist, lean at a run). Legs: `two_bone_ik` (factored out of
+  Limbs: works on a pose) onto the ankles; feet flat with the yaw they were put down with.
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
   data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
   coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),
   grey = kinematic (animated), dark = cut; bones; COM, capture point, support polygon; label (mode, hardest
   muscle). Cycles off / overlay (no depth test) / x-ray (skeleton meshes hidden). Tour `sinew_debug_review`.
   A new class_name needs `godot --headless --import` before a tour can use it (global class cache).
-- Tests: core `sinew_tests` (34), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
+- Tests: core `sinew_tests` (40; gait: standing, walking, stopping, running, turning, stairs), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
   knock-down, death, sever, zombie) / s4 (reach, look, contacts, probes) / s3 also: animated when running / armed, a hit on the gun arm / s5 (stagger recovers, a blow it
   can't take knocks it down, light hits don't stagger) / s6 (no IK on the skeleton, clips play, references
   re-point, a gun still shows). Tours `sinew_review`, `sinew_debug_review`.
