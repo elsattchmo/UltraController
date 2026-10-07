@@ -84,7 +84,7 @@ func _run(filter: Callable) -> SinewMoveMetrics:
 				print("DUMP %s t%d hips %.2f drop %.3f gap %+.1f L%s R%s %s%s v %.2f dirw %.2f step %.2f" % [f.label, f.t, h.y - (f.pos as Vector3).y,
 						f.drop, SinewMoveMetrics.legs_gap(bs) * 100.0, loc.call(bs.LeftFoot), loc.call(bs.RightFoot),
 						"L" if f.planted_l else "-", "R" if f.planted_r else "-", (f.vel as Vector2).length(), f.dirw, f.step_max],
-						" gaitR %s %s gw %.2f lw %.2f %s" % [loc.call(f.gait_ankles[1]), f.state, f.gait_w, f.legs_w, SinewMoveMetrics.legs_gap_pair(bs)])
+						" gaitR %s %s gw %.2f lw %.2f %s gaitgap %+.1f" % [loc.call(f.gait_ankles[1]), f.state, f.gait_w, f.legs_w, SinewMoveMetrics.legs_gap_pair(bs), f.gait_gap * 100.0])
 	return m
 
 

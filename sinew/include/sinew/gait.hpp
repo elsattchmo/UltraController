@@ -98,6 +98,8 @@ struct GaitSettings {
 	float cross_sep = 0.22f;                    ///< a crossover step lands at least this far in front of / behind the other foot (m)
 	float side_reach = 0.35f;                   ///< a standing foot further out to the side of its hip than this hurries the steps (m)
 	float side_settle = 0.3f, side_settle_angle = 0.45f;   ///< crossover steps only after this long (s) within this of sideways (rad)
+	float max_drop_moving = 0.15f;              ///< moving, the hips sink at most this to reach a foot (m)
+	float side_accel = 1.6f;                    ///< the drive speeds the body up sideways (off its facing) at most this (m/s2)
 	float teleport_dist = 0.6f;                 ///< the root moving further than this in one update = a teleport (m)
 	float drop_snap_rate = 1.0f, drop_snap_speed = 3.0f;   ///< the hips' drop never changes faster than rate + speed x this (m/s)
 	float drop_fall_clip = 0.4f;                ///< walking on a clip's legs: the hips come back up this fast (m/s)
@@ -199,7 +201,8 @@ public:
 	/// The hips' yaw off the facing this tick (rad, + left): standing, they sit between feet and facing.
 	float pelvis_turn() const { return _pelvis_turn; }
 	float pelvis_drop() const { return _shown_drop; }   ///< how far the hips are lowered to reach the feet (m)
-	bool feet_pivoting() const { return _pivoting; }   ///< a planted foot is swivelling in place
+	bool feet_pivoting() const { return _pivoting; }
+	float legs_gap() const { return _legs_gap; }   ///< the posed legs' closest approach as capsules (m; < 0 = through)   ///< a planted foot is swivelling in place
 	/// Both feet down on their standing spots, facing as the stance does (the clip's own standing legs match).
 	bool feet_home() const;
 	/// Per reference cycle: {authored speed, measured ground speed, stride m, duty, travel angle off the facing, rad} (debug).
@@ -330,6 +333,7 @@ private:
 	float _warp = 0.0f;
 	bool _pivoting = false;
 	float _side_time = 0.0f;
+	float _legs_gap = 1.0f;
 	bool _pivoting_last[2] = { false, false };
 	float _drop = 0.0f, _shown_drop = 0.0f, _dt = 1.0f / 60.0f;
 	Vec3 _cmd, _cop, _trim, _drive_acc;

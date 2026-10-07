@@ -832,6 +832,7 @@ Dictionary SinewPhysics::character_gait_state(int character) const {
 	d["pelvis_drop"] = g.pelvis_drop();
 	d["pivoting"] = g.feet_pivoting();
 	d["feet_home"] = g.feet_home();
+	d["legs_gap"] = g.legs_gap();
 	d["capture_margin"] = g.capture_margin();
 	Array sup;
 	for (const sinew::Vec3& p : g.support()) {

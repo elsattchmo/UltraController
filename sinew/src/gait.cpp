@@ -12,7 +12,7 @@ namespace sinew {
 namespace {
 
 constexpr int MIN_STANCE_TICKS = 6;   // a foot just put down stays down this long before an early lift
-constexpr int MIN_SWING_TICKS = 6;    // and a foot just lifted stays up this long
+constexpr int MIN_SWING_TICKS = 4;    // and a foot just lifted stays up this long
 
 float frac(float x) { return x - std::floor(x); }
 float smooth(float s) { return s * s * (3.0f - 2.0f * s); }
@@ -1070,7 +1070,9 @@ void Gait::step_feet(float dt) {
 			// Down: the foot stays exactly here until it lifts again. (Where the drawn foot actually is, if the
 			// swing's speed cap held it short of the foothold: put down out there, the leg snapped 1.4 m in a tick.)
 			f.swinging = false;
-			if (f.held_back && length(flat(f.eff - f.target, U)) > 0.05f) {
+			// (Or out of the leg's reach - a sprint reversal planted a foot 1.66 m from the hips.)
+			const bool out_of_reach = length(flat(f.target - hip_ground(i), U)) > 0.9f * _leg_len;
+			if ((f.held_back || out_of_reach) && length(flat(f.eff - f.target, U)) > 0.05f) {
 				Vec3 at = flat(f.eff, U) + U * dot(f.target, U);
 				Quat g;
 				fit_ground(at, f.land_yaw, g, false);
@@ -1507,6 +1509,18 @@ Vec3 Gait::drive(Vec3 com, Vec3 velocity, Vec3 command, float dt) {
 	}
 	a_pend = a_track + (a_pend - a_track) * feel;
 	Vec3 a = a_stand * (1.0f - k) + a_pend * k;
+	// Speeding up sideways (off the facing) is held to `side_accel`: side steps can't catch a body that sets
+	// off sideways as fast as forward - the trailing foot was left 0.7 m out and the hips sank to reach it.
+	{
+		Vec3 fwd = flat(rotate(_root.q, _rig.forward), U);
+		if (length(fwd) > 1e-4f) {
+			const Vec3 side = normalized(cross(U, normalized(fwd)));
+			const float as = dot(a, side), vs = dot(v, side);
+			if (as * vs >= 0.0f && std::fabs(as) > _s.side_accel) {
+				a = a - side * (as - (as > 0.0f ? _s.side_accel : -_s.side_accel));
+			}
+		}
+	}
 	if (length(a) > a_max) {
 		a = normalized(a) * a_max;
 	}
@@ -1639,6 +1653,12 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 			continue;
 		}
 		const float allowed = std::sqrt(std::max(L * L - dh * dh, 0.0f));
+		// (Moving, a foot stretched out along the ground gets at most `max_drop_moving` of the hips - the leg
+		// straightens, the foot is due up; one lower down - a stair - all it needs.)
+		if (_stepping && _speed > 0.3f && dh > 0.45f * L && dot(_feet[i].pos - _root.p, U) > -0.05f) {
+			drop = std::max(drop, std::min(dz - allowed, _s.max_drop_moving));
+			continue;
+		}
 		// (At a run, a foot the hips would have to sink more than `run_drop_max` for lifts instead: a
 		// sprint's trailing foot pulled them down 35 cm in five ticks before it let go.)
 		if (_speed > 2.0f && dz - allowed > _s.run_drop_max) {
@@ -1773,6 +1793,11 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 						// Dead centre: out to the leg's own side.
 						d = flat(_feet[i].eff - _feet[o].eff, U);
 					}
+					if (length(d) < 0.02f) {
+						// (Still nothing to go by - ankles side by side in a turn: the left leg goes left, the right right.)
+						const Vec3 lv = normalized(cross(U, flat(rotate(legs_q(), _rig.forward), U)));
+						d = lv * (i == 0 ? 1.0f : -1.0f);
+					}
 					away = length(d) > 1e-5f ? normalized(d) : Vec3{};
 				}
 			}
@@ -1788,7 +1813,7 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 	solve_leg(order[1]);
 	const int sw = order[1], st = order[0];
 	if (_leg[sw] >= 0 && _leg[st] >= 0 && _feet[sw].swinging) {
-		for (int it = 0; it < 3; ++it) {
+		for (int it = 0; it < 6; ++it) {
 			Vec3 away;
 			const float g = leg_gap(sw, st, away);
 			if (g >= _s.leg_clear || length(away) < 0.5f) {
@@ -1805,6 +1830,7 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		for (int it = 0; it < 4; ++it) {
 			Vec3 away;
 			const float g = leg_gap(0, 1, away);
+			_legs_gap = g;
 			if (g >= _s.leg_clear) {
 				break;
 			}

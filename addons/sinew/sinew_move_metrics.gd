@@ -84,7 +84,7 @@ func _capture() -> Dictionary:
 			"cadence": float(st.get("cadence", 0.0)), "dirw": float(st.get("clip_dirw", -1.0)),
 			"step_max": float(st.get("step_max", 0.0)), "sink": _sinks(bones) if record_sinks else [],
 			"gait_ankles": [st.get("ankle_l", Vector3.ZERO), st.get("ankle_r", Vector3.ZERO)],
-			"gait_w": ragdoll.gait_w, "legs_w": ragdoll.gait_part_w[ragdoll._part("RightUpperLeg")] if ragdoll.gait_part_w.size() > 0 else -1.0}
+			"gait_gap": float(st.get("legs_gap", 1.0)), "gait_w": ragdoll.gait_w, "legs_w": ragdoll.gait_part_w[ragdoll._part("RightUpperLeg")] if ragdoll.gait_part_w.size() > 0 else -1.0}
 
 
 ## How far each sole point (toe tip, under the ankle, heel) is under the ground beneath it (m, + = into it),
