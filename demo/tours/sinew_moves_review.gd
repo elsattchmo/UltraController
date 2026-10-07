@@ -1,0 +1,210 @@
+extends "res://demo/tours/tour_base.gd"
+## The moves the user reported broken, filmed and measured (tools/sinew/moves_report.py reads it):
+## standing (unarmed / pistol / rifle, each with Sinew's gait and with the clip alone as the reference),
+## walking forward (from behind), the four diagonals, a sprint start, sprint turns (sweep and 180 flick),
+## walk and sprint reversals. Every tick: the leg bones, chest, facing / aim, speed, the gait's state.
+##   godot --path . --fixed-fps 60 --resolution 1280x720 -- --tour=sinew_moves_review --controller=sinew
+##         --out=<dir> [--only=<segment substring>]
+## (Durations in physics ticks: the tour's clock is real time and frame grabs are slow.)
+
+const EVERY := 3
+const CROP := Vector2i(640, 720)
+const BONES := ["Hips", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "LeftToes", "RightUpperLeg", "RightLowerLeg",
+		"RightFoot", "RightToes", "LeftUpperArm", "RightUpperArm", "Head"]
+const D := 0.70710678
+
+var _c: UltraCharacter
+var _r: SinewRagdoll
+var _cam: Camera3D
+var _cam_mode := "front"
+var _frames: Array = []
+var _rec := false
+var _n := 0
+var _shot := 0
+var _ids: Dictionary = {}
+var _pending: Dictionary = {}
+var _label := ""
+var _tick0 := 0
+
+
+func _build() -> void:
+	out_dir = out_dir.replace("/m1", "/sinew_moves_review")
+	var sprint := InputFrame.B_SPRINT
+	var segs := [
+		# label, ticks, step extras, camera, gait on
+		["@flat", 40, {"slot": 0}, "front", true],
+		["idle unarmed", 150, {"slot": 0}, "front", true],
+		["idle unarmed (clip)", 90, {"slot": 0}, "front", false],
+		["idle pistol", 180, {"slot": 1}, "front", true],
+		["idle pistol (clip)", 90, {"slot": 1}, "front", false],
+		["idle rifle", 180, {"slot": 2}, "front", true],
+		["idle rifle (clip)", 90, {"slot": 2}, "front", false],
+		["@reset", 60, {"slot": 0}, "behind", true],
+		["walk fwd", 180, {"move": Vector2(0, 1)}, "behind", true],
+		["@reset", 40, {}, "behind", true],
+		["walk fwd-left", 150, {"move": Vector2(-D, D)}, "behind", true],
+		["@reset", 40, {}, "behind", true],
+		["walk fwd-right", 150, {"move": Vector2(D, D)}, "behind", true],
+		["@reset", 40, {}, "front", true],
+		["walk back-left", 150, {"move": Vector2(-D, -D)}, "front", true],
+		["@reset", 40, {}, "front", true],
+		["walk back-right", 150, {"move": Vector2(D, -D)}, "front", true],
+		["@reset", 60, {}, "side", true],
+		["sprint start", 150, {"move": Vector2(0, 1), "buttons": sprint}, "side", true],
+		["sprint turn 90/s", 120, {"move": Vector2(0, 1), "buttons": sprint, "yaw_rate": 90.0}, "behind", true],
+		["sprint flick 180", 120, {"move": Vector2(0, 1), "buttons": sprint, "yaw_add": 180}, "behind", true],
+		["stop from sprint", 90, {}, "side", true],
+		["@reset", 40, {}, "side", true],
+		["walk then", 90, {"move": Vector2(0, 1)}, "side", true],
+		["walk reversal", 120, {"move": Vector2(0, -1)}, "side", true],
+		["@reset", 40, {}, "side", true],
+		["sprint then", 120, {"move": Vector2(0, 1), "buttons": sprint}, "side", true],
+		["sprint reversal", 120, {"move": Vector2(0, -1)}, "side", true],
+		["stop", 60, {}, "side", true],
+		["@stairs", 30, {}, "side", true],
+		["stairs up", 280, {"move": Vector2(0, 1), "yaw": 0}, "side", true],
+		["stairs down", 240, {"move": Vector2(0, 1), "yaw": 180}, "side", true],
+	]
+	var only := String(main.args.get("only", ""))
+	steps = [{"teleport": "speed_start", "t": 0.6, "yaw": 0, "pitch": -4, "view_tp": true, "slot": 0},
+			{"call": _setup, "t": 600.0, "until": _ticks.bind(30)}]
+	for s: Array in segs:
+		var label: String = s[0]
+		if only != "" and not label.contains(only) and not label.begins_with("@"):
+			continue
+		var st: Dictionary = (s[2] as Dictionary).duplicate()
+		if label == "@reset":
+			st["teleport"] = "speed_start"
+			st["yaw"] = 0
+		elif label == "@stairs":
+			steps.append({"call": _to_stairs, "t": 0.1, "yaw": 0})
+		elif label == "@flat":
+			# (Level ground: the speed track's start marker stands on a 5 cm edge.)
+			steps.append({"call": _to_flat, "t": 0.1, "yaw": 0})
+		if st.has("yaw_add"):
+			st.erase("yaw_add")
+			st["call"] = _seg.bind(label, s[3], s[4], 180.0)
+		else:
+			st["call"] = _seg.bind(label, s[3], s[4], 0.0)
+		st["t"] = 600.0
+		st["until"] = _ticks.bind(int(s[1]))
+		steps.append(st)
+	steps.append({"call": _finish, "t": 0.2})
+
+
+func _seg(label: String, cam: String, gait_on: bool, yaw_add: float) -> void:
+	_label = label
+	_cam_mode = cam
+	_tick0 = Engine.get_physics_frames()
+	if yaw_add != 0.0:
+		_bot.live_yaw += deg_to_rad(yaw_add)
+	if _r and _r.gait != gait_on:
+		_r.gait = gait_on
+		_r._setup_gait()
+	print("moves_review: ", label, " at tick ", _tick0)
+
+
+func _to_flat() -> void:
+	if _c:
+		_c.teleport(main.map.call("marker", "spawn").global_position + Vector3(-16, 0, -3), 0.0)
+
+
+func _to_stairs() -> void:
+	if _c:
+		_c.teleport(Vector3(30.0, 0.05, -17.0), 0.0)
+
+
+func _ticks(n: int) -> bool:
+	return Engine.get_physics_frames() - _tick0 >= n
+
+
+func _setup() -> void:
+	_c = main.player
+	_r = _c.ragdoll as SinewRagdoll
+	for n in get_tree().root.find_children("*", "CanvasLayer", true, false):
+		(n as CanvasLayer).visible = false
+	_cam = Camera3D.new()
+	main.add_child(_cam)
+	_cam.fov = 45.0
+	_cam.current = true
+	var sk := _c.skeleton
+	for b in BONES:
+		_ids[b] = sk.find_bone(b)
+	sk.skeleton_updated.connect(_on_posed)
+	_rec = true
+	_tick0 = Engine.get_physics_frames()
+
+
+func _process(delta: float) -> void:
+	super._process(delta)
+	if _cam and _c and _c.visual_root:
+		var root := _c.visual_root.global_position
+		var yaw := Basis(Vector3.UP, _c.state.body_yaw)
+		var fwd := yaw * Vector3(0, 0, -1)
+		var right := yaw * Vector3(1, 0, 0)
+		var at := root + Vector3.UP * 0.9
+		match _cam_mode:
+			"front": _cam.global_position = root + fwd * 3.4 + Vector3.UP * 1.1
+			"behind": _cam.global_position = root - fwd * 3.4 + Vector3.UP * 1.5
+			_: _cam.global_position = root + right * 4.2 + Vector3.UP * 1.0
+		_cam.look_at(at, Vector3.UP)
+	if _rec and not _pending.is_empty():
+		var rec := _pending
+		_pending = {}
+		if _n % EVERY == 0 and _label != "" and not _label.begins_with("@"):
+			await RenderingServer.frame_post_draw
+			var img := get_viewport().get_texture().get_image()
+			var sz := img.get_size()
+			var crop := img.get_region(Rect2i((sz.x - CROP.x) / 2, (sz.y - CROP.y) / 2, CROP.x, CROP.y))
+			var name := "f%05d.png" % _shot
+			crop.save_png(out_dir.path_join(name))
+			rec["image"] = name
+			_shot += 1
+		_frames.append(rec)
+		_n += 1
+
+
+func _on_posed() -> void:
+	if not _rec or _label == "" or _label.begins_with("@"):
+		return
+	var sk := _c.skeleton
+	var bones := {}
+	for b in BONES:
+		var i: int = _ids[b]
+		if i >= 0:
+			var p := (sk.global_transform * sk.get_bone_global_pose(i)).origin
+			bones[b] = [p.x, p.y, p.z]
+	var st: Dictionary = _r.world.physics.call("character_gait_state", _r._id) if _r else {}
+	_pending = {"t": Engine.get_physics_frames(), "label": _label, "bones": bones,
+			"aim": float(_bot.live_yaw), "body": _c.state.body_yaw, "state": MotorState.Id.keys()[_c.state.state],
+			"vel": [_c.state.vel.x, _c.state.vel.z], "pos": [_c.state.pos.x, _c.state.pos.y, _c.state.pos.z],
+			"planted_l": bool(st.get("planted_l", true)), "planted_r": bool(st.get("planted_r", true)),
+			"stepping": bool(st.get("stepping", false)), "gait_on": _r != null and _r.gait,
+			"twist": _r.torso_twist if _r else 0.0, "pelvis_turn": float(st.get("pelvis_turn", 0.0)),
+			"cadence": float(st.get("cadence", 0.0)), "dirw": float(st.get("clip_dirw", -1.0)),
+			"step_max": float(st.get("step_max", 0.0)), "sink": _sinks(bones)}
+
+
+## How far each toe / heel is under the ground beneath it (m, + = into it), probed in Sinew's world.
+func _sinks(bones: Dictionary) -> Array:
+	var out := []
+	for side in ["Left", "Right"]:
+		if not bones.has(side + "Toes") or not bones.has(side + "Foot"):
+			continue
+		var toe := Vector3(bones[side + "Toes"][0], bones[side + "Toes"][1], bones[side + "Toes"][2])
+		var ankle := Vector3(bones[side + "Foot"][0], bones[side + "Foot"][1], bones[side + "Foot"][2])
+		var ahead := toe + (toe - ankle) * 0.6           # the toe tip, past the toe joint
+		for p: Vector3 in [ahead, ankle]:
+			var hit: Dictionary = _r.world.physics.call("ground_below", p + Vector3.UP * 0.45, 1.2)
+			if bool(hit.get("hit", false)):
+				var sole := p.y - (0.03 if p == ahead else 0.08)
+				out.append((hit.point as Vector3).y - sole)
+	return out
+
+
+func _finish() -> void:
+	_rec = false
+	var f := FileAccess.open(out_dir.path_join("frames.json"), FileAccess.WRITE)
+	f.store_string(JSON.stringify({"every": EVERY, "frames": _frames}))
+	f.close()
+	print("moves_review: %d ticks, %d frames -> %s" % [_frames.size(), _shot, out_dir])

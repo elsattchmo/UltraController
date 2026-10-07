@@ -133,6 +133,9 @@ var _motion_vel := Vector3.ZERO
 @export var pivot_accel := 2400.0
 const PIVOT_FROM := deg_to_rad(20.0)
 const PIVOT_FULL := deg_to_rad(90.0)
+const PIVOT_TRAVEL_FROM := 2.5    ## m/s: above this the facing follows the travel (eased in by PIVOT_TRAVEL_FULL)
+const PIVOT_TRAVEL_FULL := 4.0
+const PIVOT_SPRINT_SHARE := 0.3    ## of pivot_rate left at a sprint
 const PIVOT_PUSH := 0.15           ## share of the push-off left while the body faces well away
 var _pivot_v := 0.0
 var _pivot_on := false
@@ -163,6 +166,10 @@ func receive_push(dv: Vector3) -> bool:
 	state.vel = Vector3(_motion_vel.x, state.vel.y, _motion_vel.z)
 	_stumble_t = STUMBLE_TIME
 	_trip_t = 0.0
+	var sr := ragdoll as SinewRagdoll
+	if sr and sr.world and sr._id != 0:
+		# A disturbance: the feet catch the body with full capture steps (a change of mind gets one braking step).
+		sr.world.physics.call("character_gait_disturb", sr._id, STUMBLE_TIME)
 	if ragdoll is SinewRagdoll and h.length() > 0.01:
 		(ragdoll as SinewRagdoll).jolt(h.normalized(), 12.0 * h.length())
 	return true
@@ -292,10 +299,20 @@ func _pivot(input: InputFrame, delta: float) -> float:
 	if not _pivot_on:
 		_pivot_on = true
 		_pivot_yaw = want
+	# At speed the facing follows where the body is actually going (a sprint can't face about while it
+	# still runs the old way), and turns slower the faster it goes: turning round from a sprint is
+	# slow down, plant, pivot - the push-off waits for the facing (PIVOT_PUSH).
+	var hv := Vector2(state.vel.x, state.vel.z)
+	var sp := hv.length()
+	var travel_w := smoothstep(PIVOT_TRAVEL_FROM, PIVOT_TRAVEL_FULL, sp)
+	if travel_w > 0.0:
+		want = _pivot_yaw + angle_difference(_pivot_yaw, want) * (1.0 - travel_w) \
+				+ angle_difference(_pivot_yaw, atan2(-hv.x, -hv.y)) * travel_w
 	var err := angle_difference(_pivot_yaw, want)
 	# Eased: speeds up and brakes to arrive (never overshoots).
 	var acc := deg_to_rad(pivot_accel)
-	var top := minf(deg_to_rad(pivot_rate), sqrt(2.0 * acc * absf(err)))
+	var rate := deg_to_rad(pivot_rate) * lerpf(1.0, PIVOT_SPRINT_SHARE, smoothstep(2.0, 6.0, sp))
+	var top := minf(rate, sqrt(2.0 * acc * absf(err)))
 	_pivot_v = move_toward(_pivot_v, signf(err) * top, acc * delta)
 	var step := _pivot_v * delta
 	if absf(step) >= absf(err):

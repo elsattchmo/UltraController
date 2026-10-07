@@ -140,7 +140,9 @@ public:
 	/// Advance by dt with the character's ground point / facing and velocity; the world pose per part.
 	/// `command` (a Vector3, optional): the motion wanted - footholds brake / catch toward it.
 	Array character_gait_update(int character, const Transform3D& root, const Vector3& velocity, double dt,
-			const Variant& command = Variant());
+			const Variant& command, const Variant& home_feet = Variant());
+	bool character_gait_stepping(int character) const;
+	void character_gait_disturb(int character, double seconds);
 	/// Physical motion: the velocity after dt for a body at `com` moving at `velocity` toward
 	/// `command`, as far as its planted feet allow (Gait::drive).
 	/// A ball (dynamic, continuous collision) in the world: hits character parts and the level.

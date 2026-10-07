@@ -227,7 +227,7 @@ func _update_gait(dt: float) -> void:
 	if _gait_running:
 		var pose: Array[Transform3D] = []
 		var cmd: Variant = character.get("motion_command")
-		pose.assign(world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt, cmd))
+		pose.assign(world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt, cmd, _clip_feet()))
 		gait_prev = gait_now if gait_now.size() == pose.size() else pose
 		gait_now = pose
 	gait_w = move_toward(gait_w, 1.0 if want else 0.0, dt / 0.2)
@@ -238,9 +238,56 @@ func _update_gait(dt: float) -> void:
 	# holding an item or playing a one-shot (a hit flinch, a swing) it keeps the clips.
 	var drv := character.anim as SinewAnimDriver
 	var busy := st.held_uid != 0 or st.held_id != 0 or (drv != null and drv.upper_busy())
-	var upper := 0.0 if busy else smoothstep(0.1, 0.6, Vector2(st.vel.x, st.vel.z).length())
+	var speed := Vector2(st.vel.x, st.vel.z).length()
+	var upper := 0.0 if busy else smoothstep(0.1, 0.6, speed)
+	# Standing and settled, the legs are the clip's own (its width, its stance - the gait put the feet
+	# under the hips with bent knees); stepping or moving, the gait's - eased both ways (a step lifts
+	# off the clip's spot, where the gait's feet already are).
+	var stepping := _gait_running and (speed > 0.05 or bool(world.physics.call("character_gait_stepping", _id)))
+	var legs := 1.0 if stepping or not _clip_feet_on_ground() else 0.0
 	for i in parts.size():
-		gait_part_w[i] = 1.0 if _walks(i) else move_toward(gait_part_w[i], upper, dt / 0.25)
+		if _walks(i):
+			gait_part_w[i] = move_toward(gait_part_w[i], legs, dt / (0.12 if stepping else 0.3))
+		else:
+			gait_part_w[i] = move_toward(gait_part_w[i], upper, dt / 0.25)
+
+
+## The clip's feet as world transforms (the gait's standing spots), or null before the first frame.
+func _clip_feet() -> Variant:
+	if modifier == null or modifier.clip_pose.size() != parts.size():
+		return null
+	if _feet_parts.is_empty():
+		for i in parts.size():
+			var b: String = character.skeleton.get_bone_name(parts[i].bone)
+			if b == "LeftFoot" or b == "RightFoot":
+				_feet_parts.append(i)
+		if _feet_parts.size() == 2 and character.skeleton.get_bone_name(parts[_feet_parts[0]].bone) != "LeftFoot":
+			_feet_parts.reverse()
+	if _feet_parts.size() != 2:
+		return null
+	var sk_xf := character.skeleton.global_transform
+	var out := []
+	for i: int in _feet_parts:
+		var t: Transform3D = sk_xf * modifier.clip_pose[i]
+		out.append(Transform3D(t.basis.orthonormalized(), t.origin))
+	return out
+
+
+var _feet_parts: Array[int] = []
+
+
+## Is the ground level under the clip's feet (where they stand on flat ground)? On a stair or a slope
+## the clip's feet would sink into it or float: the gait's ground-fitted legs stay.
+func _clip_feet_on_ground() -> bool:
+	var feet: Variant = _clip_feet()
+	if feet == null:
+		return false
+	var y0 := character.state.pos.y
+	for t: Transform3D in feet:
+		var hit: Dictionary = world.physics.call("ground_below", Vector3(t.origin.x, y0 + 0.4, t.origin.z), 1.0)
+		if hit.is_empty() or not bool(hit.get("hit", false)) or absf((hit.point as Vector3).y - y0) > 0.03:
+			return false
+	return true
 
 
 ## The torso's turn toward the aim: the aim off the hips (the facing, plus the gait's hip offset when
