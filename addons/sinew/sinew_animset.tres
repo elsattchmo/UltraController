@@ -4,7 +4,12 @@
 
 [resource]
 script = ExtResource("1")
-overrides = {}
+overrides = {
+"jog_f": "mixamo/U_Run_F",
+"sprint_f": "mixamo/S_Fast",
+"walk_f": "mixamo/N_StdWalk2"
+}
 gait_walk = &"walk_f"
 gait_run = &"jog_f"
 gait_sprint = &"sprint_f"
+gait_run_upper = Array[StringName]([&"walk_f", &"sprint_f", &"sprint_f"])

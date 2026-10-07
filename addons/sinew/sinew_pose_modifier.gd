@@ -13,6 +13,9 @@ var ragdoll: SinewRagdoll
 var blend := 0.0
 ## The animated pose of each part's bone, skeleton space, as of the last frame.
 var anim_pose: Array[Transform3D] = []
+## Torso twist shares, by bone (the head's part sits on the neck bone).
+const TWIST_SHARE := {"Spine": 0.15, "Chest": 0.15, "UpperChest": 0.2, "Neck": 0.5}
+var _twist_parts: Array = []     ## [[part index, share, [subtree part indices]], ...]
 
 
 func _process_modification_with_delta(_delta: float) -> void:
@@ -47,8 +50,13 @@ func _process_modification_with_delta(_delta: float) -> void:
 			var local_clip: Transform3D = (clip[p] as Transform3D).affine_inverse() * clip[i]
 			var local_gait: Transform3D = g[p].affine_inverse() * g[i]
 			anim_pose[i] = anim_pose[p] * local_clip.interpolate_with(local_gait, k)
+	# The torso toward the aim, spread up the spine (the neck and head most), each part turning
+	# everything above it about its own joint round the skeleton's up.
+	var twisted := absf(ragdoll.torso_twist) > 1e-4
+	if twisted:
+		_twist(sk, n)
 	if blend <= 0.0 or ragdoll.pose_now.size() != n:
-		if gait:
+		if gait or twisted:
 			for i in n:
 				sk.set_bone_global_pose(ragdoll.parts[i].bone, anim_pose[i])
 		return
@@ -64,3 +72,30 @@ func _process_modification_with_delta(_delta: float) -> void:
 		var phys := to_skel * w
 		var xf := anim_pose[i].interpolate_with(phys, k) if k < 1.0 else phys
 		sk.set_bone_global_pose(ragdoll.parts[i].bone, xf)
+
+
+func _twist(sk: Skeleton3D, n: int) -> void:
+	if _twist_parts.is_empty():
+		for i in n:
+			var bone: String = sk.get_bone_name(ragdoll.parts[i].bone)
+			if TWIST_SHARE.has(bone):
+				var sub: Array[int] = []
+				for j in n:
+					var k := j
+					while k >= 0 and k != i:
+						k = ragdoll.parts[k].parent
+					if k == i:
+						sub.append(j)
+				_twist_parts.append([i, float(TWIST_SHARE[bone]), sub])
+		if _twist_parts.is_empty():
+			_twist_parts.append([-1, 0.0, []])
+	var up := (sk.global_transform.basis.inverse() * Vector3.UP).normalized()
+	for t: Array in _twist_parts:
+		var i: int = t[0]
+		if i < 0:
+			return
+		var pivot: Vector3 = anim_pose[i].origin
+		var r := Transform3D(Basis(up, ragdoll.torso_twist * float(t[1])), Vector3.ZERO)
+		var about := Transform3D(Basis(), pivot) * r * Transform3D(Basis(), -pivot)
+		for j: int in t[2]:
+			anim_pose[j] = about * anim_pose[j]

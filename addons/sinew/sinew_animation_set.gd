@@ -15,6 +15,14 @@ extends AnimationSet
 @export var gait_walk: StringName = &"walk_f"
 @export var gait_run: StringName = &"jog_f"
 @export var gait_sprint: StringName = &"sprint_f"
+## Directional reference cycles (the core finds each clip's way of travel from its feet): backing and
+## side steps take their legs, hips and feet from these, blended round the compass; empty = none.
+@export var gait_back: StringName = &"walk_b"
+@export var gait_left: StringName = &"strafe_l"
+@export var gait_right: StringName = &"strafe_r"
+## The run cycle's upper body (spine up, arms) as the average of these roles' cycles instead of its own
+## (matched by heel strike) - for a run clip with good legs and posed arms. Empty = its own.
+@export var gait_run_upper: Array[StringName] = []
 
 
 ## A working copy for one character: base roles + overrides merged (items add their own roles to it,
@@ -33,4 +41,8 @@ func resolved(fallback: AnimationSet) -> SinewAnimationSet:
 	out.gait_walk = gait_walk
 	out.gait_run = gait_run
 	out.gait_sprint = gait_sprint
+	out.gait_run_upper = gait_run_upper
+	out.gait_back = gait_back
+	out.gait_left = gait_left
+	out.gait_right = gait_right
 	return out

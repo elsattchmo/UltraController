@@ -526,3 +526,17 @@ TEST_CASE("gait drive: a shove is stumbled out of in steps; one too hard can't b
 	CHECK(hard.travelled > light.travelled);
 	CHECK(huge.worst_margin < 0.0f);                   // this one the feet can't catch
 }
+
+TEST_CASE("gait: standing tall - straight legs at rest, and back up after a walk") {
+	Walker w;
+	const float rest_h = w.rig->parts[0].rest.p.y;
+	w.run(Vec3{}, 0.5f);
+	const float before = w.gait->pose()[0].p.y - w.root.p.y;
+	Vec3 vel;
+	measure(w, vel, Vec3{ 0, 0, 1.4f }, 2.0f);
+	measure(w, vel, Vec3{}, 2.0f);
+	const float after = w.gait->pose()[0].p.y - w.root.p.y;
+	MESSAGE("standing pelvis ", before, " (rest ", rest_h, "), after a walk and 2 s still ", after);
+	CHECK(before > rest_h - 0.01f);
+	CHECK(after > rest_h - 0.015f);
+}

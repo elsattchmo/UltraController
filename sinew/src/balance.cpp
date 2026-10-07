@@ -103,6 +103,10 @@ Balancer::Balancer(Character& c, const Limbs& limbs, const BalanceSettings& sett
 		if (d.box) {
 			const Transform box = d.rest * d.box_xform;
 			_ankle_height = dot(d.rest.p, c.rig().up) - (dot(box.p, c.rig().up) - d.box_half.y);
+			// The longer lever of the sole about the ankle (to the toes), m.
+			const Vec3 fwd = c.rig().forward;
+			const float a = dot(d.rest.p, fwd), b = dot(box.p, fwd);
+			_sole_lever = std::max({ b + d.box_half.z - a, a - (b - d.box_half.z), 0.05f });
 		}
 	}
 }
@@ -260,6 +264,7 @@ void Balancer::pre_step(float dt) {
 		for (int i = 0; i < 2; ++i) {
 			for (int p : _limbs.limb(leg(i)).parts) {
 				_c.set_part_gravity_compensation(p, true);
+				_c.set_part_torque_cap(p, -1.0f);
 			}
 		}
 		_swing = -1;
@@ -449,6 +454,11 @@ void Balancer::stance_forces(float /*dt*/) {
 		}
 	}
 	const Rig& rig = _c.rig();
+	// A standing ankle pushes no harder than its share of the weight times the sole's lever: past
+	// that the foot tips onto its toes (an uncapped ankle strategy rose the body 15 cm onto tiptoe
+	// after a knock; then it's the hip's and a step's job).
+	const float g = length(_c.world().gravity());
+	const float ankle_cap = _c.mass() * g * _sole_lever * _s.ankle_cap / float(std::max(n, 1));
 	for (int i = 0; i < 2; ++i) {
 		const LimbInfo& l = _limbs.limb(leg(i));
 		const bool st = _planted[i] && i != _swing;
@@ -456,6 +466,9 @@ void Balancer::stance_forces(float /*dt*/) {
 			if (p >= 0) {
 				_c.set_part_stiffness(p, st ? _s.stance_stiffness : 1.0f);
 			}
+		}
+		if (l.end >= 0) {
+			_c.set_part_torque_cap(l.end, st && _s.ankle_cap > 0.0f ? ankle_cap : -1.0f);
 		}
 	}
 	if (n == 0) {

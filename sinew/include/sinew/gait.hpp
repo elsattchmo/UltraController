@@ -17,6 +17,7 @@
 #include "sinew/physics_world.hpp"
 #include "sinew/rig.hpp"
 
+#include <array>
 #include <vector>
 
 namespace sinew {
@@ -26,6 +27,10 @@ struct GaitCycle {
 	float speed = 1.3f;                         ///< m/s it was authored at
 	std::vector<std::vector<Quat>> samples;     ///< [sample][part]: local rotation (the root part: model space)
 	std::vector<float> pelvis_height;           ///< [sample] pelvis height over the ground, model space
+	/// The legs' own paths (optional; model space, relative to the pelvis' ground point): with them the
+	/// gait takes its stride, ground contact, landing point, swing lift and foot roll from the clip.
+	std::vector<Vec3> ankle[2], toe[2];         ///< [foot][sample] (0 left, 1 right)
+	float length = 0.0f;                        ///< the clip's length, s (one stride at `speed`)
 };
 
 struct GaitSettings {
@@ -54,13 +59,23 @@ struct GaitSettings {
 	float stop_speed = 0.08f;                   ///< slower than this = standing
 	float home_tolerance = 0.1f;                ///< a standing foot this far off its spot steps home
 	float turn_tolerance = 0.55f;               ///< rad between a foot and the facing: step round
-	float max_reach = 0.95f;                    ///< share of the leg length the hip may be from an ankle (knees never locked)
+	/// Turning on the spot: a step turns at most this far past the other foot (rad) - a big turn is
+	/// a few pivot steps; the steps quicken with the turn left (x(1 + turn_cadence x rad), capped);
+	/// the hips sit `pelvis_follow` of the way from the feet's facing to the body's.
+	float step_turn = 1.3f, turn_cadence = 1.5f, cadence_turn_max = 3.4f, pelvis_follow = 0.5f;
+	float foot_clear = 0.16f;                   ///< a swinging ankle keeps this far from the standing one, m
+	/// Setting off slower than this (m/s) with the facing more than `pivot_turn` (rad) off the feet:
+	/// pivot steps first.
+	float pivot_speed = 0.7f, pivot_turn = 0.6f;
+	float max_reach = 0.95f;                    ///< share of the leg length the hip may be from an ankle moving (knees never locked)
+	float max_reach_standing = 0.995f;          ///< ... standing still (straight legs, as the idle pose has them)
 	/// Knees: the body carries itself lower the faster it goes (m): walking, running, sprinting.
 	float knee_bend = 0.025f, knee_bend_run = 0.08f, knee_bend_sprint = 0.11f, sprint_speed = 6.0f;
 	/// Flow: the reference cycles' own pelvis bob kept at this share; the drop a stretched leg
 	/// needs is eased - in at `drop_rise` m/s, out at `drop_fall` (the hips settle low through a
 	/// stride instead of dipping at every step); only what's beyond that by `drop_slack` is taken at once.
 	float cycle_bob = 0.6f, drop_rise = 0.15f, drop_fall = 0.06f, drop_slack = 0.06f;
+	float drop_fall_standing = 0.3f;            ///< stopped: the hips come back up this fast (m/s)
 	/// 8-way: the longest step backing / sideways as a share of the forward one (the cadence rises
 	/// to make up the speed: short quick side-steps, never a lunge).
 	float step_back = 0.72f, step_side = 0.65f;
@@ -90,12 +105,15 @@ struct GaitSettings {
 	/// omega = sqrt(g / h)) over its centre of pressure, which can only be inside the planted soles
 	/// (heel up: the balls; toes up: the heels; no foot down: nowhere - no push in flight).
 	/// It aims to reach the command in `drive_tau` s, never pushing harder than `friction` x g.
-	float drive_tau = 0.2f, friction = 0.45f;
+	float drive_tau = 0.2f, friction = 0.6f;
 	float capture_gain = 1.5f;                  ///< foothold feedback on (velocity - command) / omega
-	float land_max = 0.85f;                     ///< a foothold at most this share of the leg from the hip
+	float land_max = 0.75f;                     ///< a foothold at most this share of the leg from the hip
 	float sole_half_width = 0.045f;             ///< the support's half width at each foot, m
 	float toe_ahead = 0.06f;                    ///< sole support past the ball, m
 	float standing_accel = 3.0f;                ///< barely moving: plain capped acceleration (no pendulum)
+	/// Speeding up along the way it's going, a planted leg's push-off adds up to this (m/s2) to the
+	/// pendulum's tipping.
+	float push_accel = 2.5f;
 	/// Speed trim: the feet reach further ahead of the ankle than behind it, so pushing on and
 	/// braking aren't equal - an integral on (command - velocity), <= `trim_max` x the command,
 	/// lets a steady walk settle at the speed asked for. Fades when stopping.
@@ -139,6 +157,20 @@ public:
 	Vec3 foothold(int foot) const { return _feet[size_t(foot)].target; }
 	Vec3 home(int foot) const;
 	float cadence() const { return _cadence; }
+	/// Debug: travel off the facing (rad, + left), the directional clips' share, this tick's longest step.
+	float travel_angle() const { return _theta; }
+	float clip_dirw() const { return _cl.ok ? _cl.dirw : -1.0f; }
+	float step_max() const { return _step_max; }
+	/// The hips' yaw off the facing this tick (rad, + left): standing, they sit between feet and facing.
+	float pelvis_turn() const { return _pelvis_turn; }
+	/// Per reference cycle: {authored speed, measured ground speed, stride m, duty, travel angle off the facing, rad} (debug).
+	std::vector<std::array<float, 5>> clip_info() const {
+		std::vector<std::array<float, 5>> out;
+		for (size_t i = 0; i < _clip.size() && i < _cycles.size(); ++i) {
+			out.push_back({ _cycles[i].speed, _clip[i].true_speed, _clip[i].stride, _clip[i].duty, _clip[i].angle });
+		}
+		return out;
+	}
 	/// Physical motion: the velocity after `dt` for a body at `com` (ground point under the centre
 	/// of mass) moving at `velocity`, wanting `command` - accelerated only as its feet allow (see
 	/// GaitSettings::drive_tau). Uses the feet as of the last update(); call once per tick.
@@ -182,12 +214,46 @@ private:
 		int down_t = 100;    ///< ticks since it was put down
 		float lift_p = 0.62f; ///< the foot's phase when it lifted (the swing runs from there to 1)
 		float p = 0.0f;      ///< foot phase last tick
+		Vec3 lift_off;       ///< swing on the clip's path: where it lifted, off that path (flat, world)
+		Quat land_yaw;       ///< the facing it will be put down with (the clip's foot angle on its path)
 	};
 	const Rig& _rig;
 	const Limbs& _limbs;
 	const PhysicsWorld* _world;
 	GaitSettings _s;
 	std::vector<GaitCycle> _cycles;
+	/// What the gait takes from each cycle's leg paths (parallel to _cycles; `ok` false without paths).
+	struct ClipLegs {
+		bool ok = false;
+		float stride = 1.0f;     ///< m per stride (two steps): the clip's true ground speed x its length
+		float true_speed = 1.0f; ///< the clip's ground speed measured off its planted feet
+		float duty = 0.6f;       ///< share of a foot's cycle on the ground
+		float ahead = 0.25f;     ///< ankle ahead of the hips at contact, share of the stride
+		std::vector<float> lift[2];   ///< [foot][foot-phase sample]: ankle height over its lowest, m
+		std::vector<float> pitch[2];  ///< [foot][foot-phase sample]: foot roll, rad (+ heel up)
+		std::vector<float> fwd[2];    ///< [foot][foot-phase sample]: ankle ahead of the hips, share of the stride
+		std::vector<float> across[2]; ///< [foot][foot-phase sample]: ankle left of the hips' line of travel, m
+		std::vector<float> yaw[2];    ///< [foot][foot-phase sample]: the foot's facing off the body's, rad (+ left)
+		float speed = 1.0f;      ///< authored speed
+		float angle = 0.0f;      ///< the way the clip travels off its facing, rad (+ left, pi = backing)
+		float dirw = 0.0f;       ///< blended: the share from directional (back / side) clips
+		float foot_off = 0.5f;   ///< the right foot's touchdown, as a phase after the left's
+		float duty_f[2] = { 0.6f, 0.6f };  ///< each foot's share of the cycle on the ground
+	};
+	std::vector<ClipLegs> _clip;
+	ClipLegs _cl;                ///< this tick's (blended for the speed)
+	/// The clip legs blended for a speed and a direction of travel off the facing (empty `ok` = none);
+	/// lift / pitch / paths looked up by foot phase.
+	ClipLegs clip_legs(float speed, float theta) const;
+	/// Which cycles, how much: forward ones by speed, directional (back / side) ones by the angle of
+	/// travel (rad, + left), fading out above their own speed.
+	std::vector<std::pair<size_t, float>> cycle_weights(float speed, float theta) const;
+	float _theta = 0.0f;         ///< travel off the facing (rad, + left), last time it moved
+	float _turn = 0.0f;          ///< standing: the facing off the feet's (rad, + left)
+	float _pelvis_turn = 0.0f;   ///< the hips' yaw off the facing (rad)
+	float yaw_off(const Quat& q) const;  ///< a facing's yaw off the legs' (rad, + left)
+	float turn_step_yaw(int foot) const; ///< standing: the facing (off the legs') a turning step puts this foot down at
+	static float sample_at(const std::vector<float>& v, float phase);
 	std::vector<Quat> _idle;
 	float _idle_height = -1.0f;
 	std::vector<Quat> _rest_local;

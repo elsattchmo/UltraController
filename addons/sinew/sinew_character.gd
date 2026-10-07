@@ -125,6 +125,17 @@ func _process(delta: float) -> void:
 var motion_command: Variant = null
 const MOTION_STATES := [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TURN_IN_PLACE]
 var _motion_vel := Vector3.ZERO
+## Pivot starts (third person, physical motion, no gun up): the body turns toward its new facing at a
+## human pace instead of the motor's snap (900 deg/s moving) - eased, at most `pivot_rate` deg/s - and
+## while it's still well round (more than PIVOT_FROM) the legs can only push off weakly: the speed
+## builds once the first step has turned the body (RDR2: the turn plays before the run).
+@export var pivot_rate := 400.0
+@export var pivot_accel := 2400.0
+const PIVOT_FROM := deg_to_rad(20.0)
+const PIVOT_FULL := deg_to_rad(90.0)
+const PIVOT_PUSH := 0.15           ## share of the push-off left while the body faces well away
+var _pivot_v := 0.0
+var _pivot_on := false
 var _motion_on := false
 
 # ------------------------------------------------------------------ being pushed
@@ -215,8 +226,10 @@ func _drive_motion(input: InputFrame, delta: float) -> void:
 			and state.state in MOTION_STATES and state.is_grounded() and state.platform_id == 0
 	if not on:
 		_motion_on = false
+		_pivot_on = false
 		motion_command = null
 		return
+	var lag := _pivot(input, delta)
 	# What the motor wants: its own target speed along the stick (a copy: it sets flags).
 	var wish := input.move_world(input.yaw)
 	var speed := motor.target_ground_speed(state.copy(), input) if wish.length() > 0.01 else 0.0
@@ -229,6 +242,9 @@ func _drive_motion(input: InputFrame, delta: float) -> void:
 	var v0 := _motion_vel if _motion_on else hv
 	var v: Vector3 = r.world.physics.call("character_gait_drive", r._id, state.pos, v0, u, delta)
 	v.y = 0.0
+	# Still turning round: little push-off (braking is never held back).
+	if v.length() > v0.length():
+		v = v0 + (v - v0) * lerpf(1.0, PIVOT_PUSH, smoothstep(PIVOT_FROM, PIVOT_FULL, lag))
 	# The motor already moved the capsule at its own velocity: move it by the difference.
 	var dv := v - hv
 	if dv.length_squared() > 1e-8:
@@ -261,6 +277,42 @@ func _drive_motion(input: InputFrame, delta: float) -> void:
 			motion_command = null
 			tripped.emit(v)
 			knock_down(v + Vector3.UP * 0.6)
+
+
+## The body's facing after the motor's step, turned at a human pace (see pivot_rate); returns how far it
+## still is from where the motor wanted it (rad). The motor moves along the aim, never the body's
+## facing, so the facing is presentation here (offline only, like the rest of physical motion).
+func _pivot(input: InputFrame, delta: float) -> float:
+	var want := state.body_yaw
+	var gun := UltraMotor.gun_up(state)
+	if not input.has(InputFrame.B_VIEW_TP) or gun or pivot_rate <= 0.0:
+		_pivot_on = false
+		_pivot_v = 0.0
+		return 0.0
+	if not _pivot_on:
+		_pivot_on = true
+		_pivot_yaw = want
+	var err := angle_difference(_pivot_yaw, want)
+	# Eased: speeds up and brakes to arrive (never overshoots).
+	var acc := deg_to_rad(pivot_accel)
+	var top := minf(deg_to_rad(pivot_rate), sqrt(2.0 * acc * absf(err)))
+	_pivot_v = move_toward(_pivot_v, signf(err) * top, acc * delta)
+	var step := _pivot_v * delta
+	if absf(step) >= absf(err):
+		step = err
+		_pivot_v = 0.0
+	_pivot_yaw = wrapf(_pivot_yaw + step, -PI, PI)
+	state.body_yaw = _pivot_yaw
+	# How far round it still has to go: to where the motor is taking the facing (the aim, facing the
+	# aim; the way it moves otherwise) - not the motor's next step, which starts from here each tick.
+	var goal := input.yaw
+	if profile.tp_rotation != MovementProfile.Rotation.FACE_AIM:
+		var w := input.move_world(input.yaw)
+		goal = atan2(-w.x, -w.z) if Vector2(w.x, w.z).length() > 0.1 else want
+	return maxf(absf(angle_difference(_pivot_yaw, want)), absf(angle_difference(_pivot_yaw, goal)))
+
+
+var _pivot_yaw := 0.0
 
 
 # ------------------------------------------------------------------ unarmed push (testing)

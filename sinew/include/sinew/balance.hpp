@@ -23,6 +23,9 @@ namespace sinew {
 struct BalanceSettings {
 	float ankle_kp = 4.0f;        ///< shin lean (rad) per metre of COM off its target
 	float ankle_kd = 1.5f;        ///< ... and per m/s of COM speed (damping)
+	/// A standing ankle's torque cap as a share of (weight on it x the sole's lever): 1 = right up to
+	/// tipping onto the toes; 0 = uncapped.
+	float ankle_cap = 0.75f;
 	float max_lean = 0.25f;       ///< rad
 	float stance_stiffness = 6.0f;  ///< standing hips / ankles: muscle stiffness factor
 	float step_margin = 0.05f;    ///< capture point this far outside the support -> step
@@ -90,6 +93,7 @@ private:
 	Vec3 _com_target;
 	bool _has_com_target = false;
 	float _ankle_height = 0.08f;
+	float _sole_lever = 0.15f;   ///< ankle to the toe end of the sole, m
 	// state
 	Vec3 _com, _com_vel, _cp;
 	float _cp_out = 0.0f;

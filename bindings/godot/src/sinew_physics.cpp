@@ -541,6 +541,7 @@ void SinewPhysics::character_balance_enable(int character, bool on, const Dictio
 			// Hand the legs back: no stiffened stance muscles, compensation on, no assist.
 			for (int i = 0; i < c->part_count(); ++i) {
 				c->set_part_stiffness(i, 1.0f);
+				c->set_part_torque_cap(i, -1.0f);
 				c->set_part_gravity_compensation(i, true);
 			}
 			if (c->root_assist() > 0.0f) {
@@ -701,6 +702,18 @@ void SinewPhysics::character_gait_set_cycles(int character, const Array& cycles)
 		for (int k = 0; k < h.size(); ++k) {
 			c.pelvis_height.push_back(h[k]);
 		}
+		c.length = float(double(d.get("length", 0.0)));
+		const char* keys[2][2] = { { "ankle_l", "toe_l" }, { "ankle_r", "toe_r" } };
+		for (int f = 0; f < 2; ++f) {
+			const PackedVector3Array an = d.get(keys[f][0], PackedVector3Array());
+			const PackedVector3Array to = d.get(keys[f][1], PackedVector3Array());
+			for (int k = 0; k < an.size(); ++k) {
+				c.ankle[f].push_back(to_sinew(an[k]));
+			}
+			for (int k = 0; k < to.size(); ++k) {
+				c.toe[f].push_back(to_sinew(to[k]));
+			}
+		}
 		out.push_back(c);
 	}
 	it->second->set_cycles(out);
@@ -748,6 +761,11 @@ int64_t SinewPhysics::add_ball(const Vector3& position, const Vector3& velocity,
 	return int64_t(_world->add_ball(to_sinew(position), to_sinew(velocity), float(radius), float(mass), float(restitution)));
 }
 
+double SinewPhysics::character_gait_pelvis_turn(int character) const {
+	auto it = _gaits.find(character);
+	return it == _gaits.end() ? 0.0 : double(it->second->pelvis_turn());
+}
+
 Vector3 SinewPhysics::character_gait_drive(int character, const Vector3& com, const Vector3& velocity, const Vector3& command,
 		double dt) {
 	auto it = _gaits.find(character);
@@ -782,6 +800,15 @@ Dictionary SinewPhysics::character_gait_state(int character) const {
 	d["duty"] = g.duty();
 	d["warp"] = g.warp();
 	d["cop"] = to_godot(g.cop());
+	Array clips;
+	for (const auto& c : g.clip_info()) {
+		clips.push_back(Array::make(c[0], c[1], c[2], c[3], c[4]));
+	}
+	d["clips"] = clips;
+	d["travel_angle"] = g.travel_angle();
+	d["clip_dirw"] = g.clip_dirw();
+	d["step_max"] = g.step_max();
+	d["pelvis_turn"] = g.pelvis_turn();
 	d["capture_margin"] = g.capture_margin();
 	Array sup;
 	for (const sinew::Vec3& p : g.support()) {
@@ -907,6 +934,7 @@ void SinewPhysics::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("character_gait_update", "character", "root", "velocity", "dt", "command"), &SinewPhysics::character_gait_update,
 			DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("character_gait_leg_effort", "character"), &SinewPhysics::character_gait_leg_effort);
+	ClassDB::bind_method(D_METHOD("character_gait_pelvis_turn", "character"), &SinewPhysics::character_gait_pelvis_turn);
 	ClassDB::bind_method(D_METHOD("character_gait_drive", "character", "com", "velocity", "command", "dt"), &SinewPhysics::character_gait_drive);
 	ClassDB::bind_method(D_METHOD("character_gait_state", "character"), &SinewPhysics::character_gait_state);
 	ClassDB::bind_method(D_METHOD("ground_below", "point", "max_distance"), &SinewPhysics::ground_below, DEFVAL(3.0));
