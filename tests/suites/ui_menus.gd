@@ -224,6 +224,44 @@ func test_main_menu_level_select_with_pad() -> void:
 	await _frames(2)
 
 
+## The Character section: controller (UltraController / Sinew) and model rows between the levels
+## and "Single player", reachable and pickable with a pad.
+func test_main_menu_character_select_with_pad() -> void:
+	var fake := FakeCharacterMain.new()
+	add_child(fake)
+	var m: CanvasLayer = (load("res://demo/ui/main_menu.gd") as Script).new()
+	m.set("main", fake)
+	add_child(m)
+	await _frames(3)
+	var b: Dictionary = m.get("_char_buttons")
+	check(b.has("controller:ultra") and b.has("controller:sinew") and b.has("model:mannequin") and b.has("model:zombie"), "a toggle per controller and model (%s)" % [b.keys()])
+	check((b["controller:ultra"] as Button).button_pressed and (b["model:mannequin"] as Button).button_pressed, "the current picks are the pressed ones")
+	check(_focus_text() == "Single player", "focus still opens on Single player (got %s)" % _focus_text())
+	await _pad(PAD_UP)
+	check(get_viewport().gui_get_focus_owner() == b["model:mannequin"], "D-pad up from Single player reaches the model row (got %s)" % _focus_text())
+	await _pad(PAD_UP)
+	check(get_viewport().gui_get_focus_owner() == b["controller:ultra"], "and up again the controller row (got %s)" % _focus_text())
+	await _pad(PAD_RIGHT)
+	await _pad(PAD_A)
+	check(fake.controller == "sinew" and fake.picks == ["controller:sinew"], "right + A picks Sinew (%s)" % [fake.picks])
+	check((b["controller:sinew"] as Button).button_pressed and not (b["controller:ultra"] as Button).button_pressed, "and it shows as the pressed one")
+	await _pad(PAD_DOWN)
+	await _pad(PAD_RIGHT)
+	await _pad(PAD_A)
+	check(fake.model == "zombie" and fake.picks == ["controller:sinew", "model:zombie"], "down, right + A picks the zombie model (%s)" % [fake.picks])
+	await _pad(PAD_DOWN)
+	check(_focus_text() == "Single player", "D-pad down goes back to Play (got %s)" % _focus_text())
+	await _pad(PAD_UP)
+	await _pad(PAD_UP)
+	await _pad(PAD_UP)
+	var levels: Dictionary = m.get("_level_buttons")
+	check(get_viewport().gui_get_focus_owner() == levels["mansion"], "up past the controller row reaches the levels (got %s)" % _focus_text())
+	await _shot("01c_main_menu_character")
+	m.queue_free()
+	fake.queue_free()
+	await _frames(2)
+
+
 ## The real main: pick a level behind the menu, then every way to play starts in it.
 func test_every_way_to_play_starts_in_the_zombie_mansion() -> void:
 	main = (load("res://demo/main.tscn") as PackedScene).instantiate()
@@ -563,3 +601,24 @@ class FakeLevelMain:
 	func set_level(key: String) -> void:
 		set_calls.append(key)
 		level = key
+
+
+class FakeCharacterMain:
+	extends FakeLevelMain
+	var controller := "ultra"
+	var model := "mannequin"
+	var picks: Array = []
+
+	func controller_list() -> Array:
+		return CharacterModels.CONTROLLERS
+
+	func model_list() -> Array:
+		return CharacterModels.MODELS
+
+	func set_controller(key: String) -> void:
+		picks.append("controller:" + key)
+		controller = key
+
+	func set_model(key: String) -> void:
+		picks.append("model:" + key)
+		model = key

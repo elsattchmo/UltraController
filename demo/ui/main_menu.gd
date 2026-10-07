@@ -1,5 +1,6 @@
 extends CanvasLayer
-## Demo main menu: level select, single-player, split-screen, host, join, host + test client,
+## Demo main menu: level select, character select (controller + model), single-player,
+## split-screen, host, join, host + test client,
 ## launcher presets. The level picked here (Playground, Zombie Mansion...) is what every way of
 ## playing starts in, launched windows and joined games included.
 ## Mouse, keyboard or pad: "Single player" has focus on open, D-pad / stick / arrows move it,
@@ -10,6 +11,8 @@ const MenuStyle := preload("res://addons/ultra_controller/ui/menu_style.gd")
 var main: Node
 var _ip: LineEdit
 var _level_buttons := {}                ## level key -> its toggle button
+var _char_rows: Array = []              ## [controller buttons, model buttons]: rows of toggles
+var _char_buttons := {}                 ## "controller:<key>" / "model:<key>" -> its toggle button
 
 
 func _ready() -> void:
@@ -40,6 +43,7 @@ func _ready() -> void:
 	box.add_theme_constant_override("separation", 10)
 	cols.add_child(box)
 	_build_levels(box)
+	_build_characters(box)
 	_header(box, "Play")
 	var single := _button(box, "Single player", func() -> void: main.menu_start("single"))
 	_link_levels(single)
@@ -108,18 +112,61 @@ func _build_levels(box: VBoxContainer) -> void:
 	box.add_child(HSeparator.new())
 
 
-## Pad / arrow steering inside the left column: the levels stack above "Single player" (by position alone
-## the engine's "up" jumped to the other column).
+## The local player's controller (UltraController / Sinew) and model, a row of toggles each, under
+## the levels. Without a main that offers them (the menu tests' stand-ins) there is no section.
+func _build_characters(box: VBoxContainer) -> void:
+	if main == null or not main.has_method("controller_list") or not main.has_method("model_list"):
+		return
+	_header(box, "Character")
+	for kind: String in ["controller", "model"]:
+		var defs: Array = main.call(kind + "_list")
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var group := ButtonGroup.new()
+		var current := String(main.get(kind))
+		var buttons: Array = []
+		for d: Dictionary in defs:
+			var b := Button.new()
+			b.name = "%s_%s" % [kind.capitalize(), d.key]
+			b.toggle_mode = true
+			b.button_group = group
+			b.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			b.custom_minimum_size = Vector2(0, 40)
+			b.text = String(d.title)
+			b.tooltip_text = String(d.blurb)
+			b.button_pressed = String(d.key) == current
+			var key: String = d.key
+			var setter: String = "set_" + kind
+			b.toggled.connect(func(on: bool) -> void:
+				if on and String(main.get(kind)) != key:
+					main.call(setter, key))
+			row.add_child(b)
+			buttons.append(b)
+			_char_buttons["%s:%s" % [kind, key]] = b
+		box.add_child(row)
+		_char_rows.append(buttons)
+	box.add_child(HSeparator.new())
+
+
+## Pad / arrow steering inside the left column: the levels, then the character rows, stack above
+## "Single player" (by position alone the engine's "up" jumped to the other column). Inside a
+## character row left / right move along it; up / down go to the row's first button.
 func _link_levels(below: Control) -> void:
-	var list: Array = _level_buttons.values()
-	for i in list.size():
-		var b: Control = list[i]
-		b.focus_neighbor_left = b.get_path_to(b)
-		b.focus_neighbor_right = b.get_path_to(b)
-		b.focus_neighbor_top = b.get_path_to(list[i - 1] if i > 0 else b)
-		b.focus_neighbor_bottom = b.get_path_to(list[i + 1] if i < list.size() - 1 else below)
-	if not list.is_empty():
-		below.focus_neighbor_top = below.get_path_to(list[list.size() - 1])
+	var rows: Array = []
+	for b in _level_buttons.values():
+		rows.append([b])
+	rows.append_array(_char_rows)
+	for i in rows.size():
+		var row: Array = rows[i]
+		for k in row.size():
+			var b: Control = row[k]
+			b.focus_neighbor_left = b.get_path_to(row[k - 1] if k > 0 else b)
+			b.focus_neighbor_right = b.get_path_to(row[k + 1] if k < row.size() - 1 else b)
+			b.focus_neighbor_top = b.get_path_to(rows[i - 1][0] if i > 0 else b)
+			b.focus_neighbor_bottom = b.get_path_to(rows[i + 1][0] if i < rows.size() - 1 else below)
+	if not rows.is_empty():
+		below.focus_neighbor_top = below.get_path_to(rows[rows.size() - 1][0])
 
 
 ## Launched windows play the level picked here.

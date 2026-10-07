@@ -1,0 +1,110 @@
+# Sinew: test the core, build the Godot extension for Windows + Linux, commit the binaries to
+# addons/sinew/bin/ (so a plain pull runs in Godot with no compiler), then run the Godot suites.
+name: sinew
+
+on:
+  push:
+    paths:
+      - "sinew/**"
+      - "bindings/**"
+      - "addons/sinew/**"
+      - ".github/workflows/sinew.yml"
+      - "demo/characters/**"
+      - "tests/suites/s*_sinew*.gd"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sinew-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Build and test the core
+        run: |
+          cmake -S sinew -B build/sinew -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/sinew -j4
+          ctest --test-dir build/sinew --output-on-failure
+
+  extension:
+    needs: core
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            name: windows
+          - os: ubuntu-22.04          # older glibc: the .so loads on more Linux systems
+            name: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Build template_debug + template_release
+        shell: bash
+        run: |
+          for t in template_debug template_release; do
+            cmake -S bindings/godot -B build/$t -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=$t
+            cmake --build build/$t --config Release -j4
+          done
+          ls -la addons/sinew/bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sinew-${{ matrix.name }}
+          path: |
+            addons/sinew/bin/*.dll
+            addons/sinew/bin/*.so
+
+  commit:
+    needs: extension
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sinew-*
+          path: addons/sinew/bin
+          merge-multiple: true
+      - name: Commit the binaries
+        run: |
+          git config user.name "sinew-ci"
+          git config user.email "sinew-ci@users.noreply.github.com"
+          git add -f addons/sinew/bin/*.dll addons/sinew/bin/*.so
+          if git diff --cached --quiet; then
+            echo "binaries unchanged"
+          else
+            git commit -m "Sinew: CI-built extension binaries for ${GITHUB_SHA::8} [skip ci]"
+            for i in 1 2 3 4; do git pull --rebase && git push && break; sleep $((i * 5)); done
+          fi
+
+  godot:
+    needs: extension
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: sinew-linux
+          path: addons/sinew/bin
+      - name: Godot 4.7.1
+        run: |
+          curl -sSL -o godot.zip https://github.com/godotengine/godot/releases/download/4.7.1-stable/Godot_v4.7.1-stable_linux.x86_64.zip
+          unzip -q godot.zip
+          echo "GODOT=$PWD/Godot_v4.7.1-stable_linux.x86_64" >> $GITHUB_ENV
+      - name: Import
+        run: timeout 1500 $GODOT --headless --path . --import || true
+      - name: Sinew + menu suites
+        run: |
+          timeout 1200 $GODOT --headless --path . --fixed-fps 60 res://tests/test_runner.tscn -- --suite=s0,ui 2>&1 | tee test.log
+          ! grep -q "SCRIPT ERROR" test.log

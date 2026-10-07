@@ -932,3 +932,31 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - Tests: `ui_menus.test_main_menu_level_select_with_pad`, `test_every_way_to_play_starts_in_the_zombie_mansion` (single / split 2 / 4:
   everyone at the gate, zombies in, a HUD each, level kept after Main menu).
 - `--suite=a,b` runs several suites in ONE process (as `all` does): order effects only show that way.
+
+## Sinew (Euphoria-style active-physics bodies; plan: `sinew/PLAN.md`)
+- **Never edits the UltraController.** Sinew is its own module: `sinew/` (engine-agnostic C++17 core on
+  Box3D, no engine types in its headers; `capi/sinew.h` flat C API for other engines), `bindings/godot/`
+  (godot-cpp 4.5 GDExtension -> `addons/sinew/bin/libsinew.<platform>.<target>.<arch>`), `addons/sinew/`
+  (GDScript side: `SinewCharacter extends UltraCharacter`). Nothing under `addons/ultra_controller/` changes
+  for it. `sinew/` and `bindings/` carry `.gdignore` (godot-cpp ships a test project).
+- **Physics = Box3D** (Erin Catto, MIT, alpha), submodule `sinew/extern/box3d` pinned to a known-good commit;
+  every Box3D call is behind `sinew::PhysicsWorld` (src/physics_world.cpp). Defaults: 8 substeps, joint
+  constraint 120 Hz (Box3D clamps a joint's stiffness to a quarter of the substep rate: at its 4 / 60 Hz a
+  flung limb's joint opened 13 mm; now <= 2.6 mm at 20-34 rad/s, cone overshoot 0 / 4 deg).
+- **Builds:** CI (`.github/workflows/sinew.yml`) tests the core, builds Windows (MSVC) + Linux (Ubuntu 22.04)
+  template_debug / template_release and COMMITS the binaries to `addons/sinew/bin/` ([skip ci]); pull to get
+  them. Local: `git submodule update --init`, then core `cmake -S sinew -B build/sinew && cmake --build
+  build/sinew && ctest --test-dir build/sinew`; extension `cmake -S bindings/godot -B build/godot
+  -DGODOTCPP_TARGET=template_debug && cmake --build build/godot --config Release`. Box3D links the MSVC
+  runtime statically, so godot-cpp is added first and the core matches it.
+- **Main menu Character section** (`demo/characters/character_models.gd` = `CharacterModels`): Controller
+  (UltraController | Sinew) and Model (Mannequin | Zombie) toggle rows between the levels and Play
+  (`main.set_controller` / `set_model`, `--controller=` / `--model=`, kept in Engine meta `ultra_controller`
+  / `ultra_model` across Pause > Main menu; refused mid-session). Players only: bots (dummies, companion,
+  zombies) stay plain mannequin UltraCharacters. The zombie MODEL for a player = Romero's mesh, cut set and
+  hit capsules on the mannequin's FULL animation set (same humanoid skeleton); the zombie NPC profile is LITE.
+- Tests: `sinew_tests` (doctest, core), suite `s0` (extension loads + simulates, Single player plays the pick,
+  zombie model walks on the full stack), `ui_menus.test_main_menu_character_select_with_pad`. A GDScript parse
+  error does NOT fail the runner (the test still prints ok): grep the output for `SCRIPT ERROR` (CI does).
+- Stage S0: `SinewCharacter` is a stand-in (plays exactly like the UltraController, holds a live
+  `SinewPhysics` world); S2 swaps its body for the Sinew one.
