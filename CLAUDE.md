@@ -1042,6 +1042,20 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   still physical, then it goes kinematic. SinewPoseModifier writes EVERY part (an animated child under a
   physical parent is set to its animated global pose). Before this the whole upper body was always physics
   AFTER the IK passes: arms trailed at a run and the hands slid off the guns.
+- **Own animation driver (S6a)**: `SinewCharacter._build_visual` is a full override (no super): `SinewAnimDriver
+  extends UltraAnimDriver` (the type `anim` is declared as) plays the referenced clips AS THEY ARE - no
+  InertialBlend / BodyDynamics / FootIK / ArmClear / WeaponPose / HandIK / Look (skeleton passes: Injury,
+  Sinew, Dismember), no TraversalHands. One tree: state machine over the motor states (ground = BlendSpace2D
+  x right / y forward, 1 walk 2 run 3 sprint, rate = speed / authored; crouch / prone / swim idle<->go; air,
+  land, hang, ladder, wall, rope, slide; timed climb_up / vault / rm / get-ups), upper-body item layer (the
+  held item's anim_roles idle / aim clip), swing + hit one-shots. `hand_ik` stays null (the equipment then
+  leaves the hands to the clip); the equipment's prop-carrying path calls hand IK unguarded, so
+  SinewCharacter lends it an INACTIVE `prop_hand_ik` only while `state.held_id != 0`. Member names must
+  not clash with UltraAnimDriver's (`_swing_left`, `_drive_ground`... are taken: parse error).
+  Clip references: `SinewAnimationSet extends AnimationSet` (`overrides` role -> "library/clip" over `base`
+  = the body profile's set; `resolved()` gives each character its own copy - items write roles into it);
+  default `addons/sinew/sinew_animset.tres` (empty = clips as imported), `SinewCharacter.sinew_anim_set`
+  per character; `gait_walk / run / sprint` name the reference cycles for the gait (S6c).
 - **Debug view** (`SinewDebugDraw`, one per SinewRagdoll; action `sinew_debug` = K in project.godot (input as
   data; every F-key is taken), main menu "Show Sinew muscles", `--sinew-debug`): parts as their shapes
   coloured by muscle effort (`Character::muscle_effort` = |Box3D motor torque| / strength; red at 60 %),
@@ -1050,4 +1064,5 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   A new class_name needs `godot --headless --import` before a tour can use it (global class cache).
 - Tests: core `sinew_tests` (34), suites s0 / s2 (kinematic) / s3 (powered: tracking, walking, hit,
   knock-down, death, sever, zombie) / s4 (reach, look, contacts, probes) / s3 also: animated when running / armed, a hit on the gun arm / s5 (stagger recovers, a blow it
-  can't take knocks it down, light hits don't stagger). Tours `sinew_review`, `sinew_debug_review`.
+  can't take knocks it down, light hits don't stagger) / s6 (no IK on the skeleton, clips play, references
+  re-point, a gun still shows). Tours `sinew_review`, `sinew_debug_review`.

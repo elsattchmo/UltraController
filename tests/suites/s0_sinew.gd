@@ -69,8 +69,8 @@ func test_single_player_plays_the_picked_character() -> void:
 	Engine.remove_meta("ultra_level")
 
 
-## The zombie model on the player's full animation stack (the mannequin's clips: both skeletons
-## are the same humanoid) builds and walks.
+## The zombie model on the player's animation set (the mannequin's clips: both skeletons are the
+## same humanoid) builds and walks.
 func test_zombie_model_builds_the_full_body_and_walks() -> void:
 	load_playground()
 	var c := SinewCharacter.new()
@@ -86,7 +86,7 @@ func test_zombie_model_builds_the_full_body_and_walks() -> void:
 	b.body = c
 	chars.append(c)
 	await ticks(5)
-	check(c.skeleton != null and c.anim != null and not (c.anim is UltraLiteAnimDriver), "skeleton + the full AnimDriver")
+	check(c.skeleton != null and c.anim is SinewAnimDriver, "skeleton + Sinew's animation driver (clips, no IK)")
 	# Animated, not standing in its rest (T) pose: the upper arms hang well away from their rest.
 	var arm := c.skeleton.find_bone("LeftUpperArm")
 	var off := c.skeleton.get_bone_pose_rotation(arm).angle_to(c.skeleton.get_bone_rest(arm).basis.get_rotation_quaternion())
