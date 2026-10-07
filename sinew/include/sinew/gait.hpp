@@ -94,6 +94,7 @@ struct GaitSettings {
 	float pivot_rate = 4.0f;                    ///< a planted foot swivels toward the way it should face this fast (rad/s)
 	float pivot_max = 0.6f;                     ///< .. and at most this far from the facing it was put down with (rad)
 	float pivot_slack = 0.12f;                  ///< a pivoted foot may sit this much further off its standing spot (m)
+	float cross_sep = 0.22f;                    ///< a crossover step lands at least this far in front of / behind the other foot (m)
 	float teleport_dist = 0.6f;                 ///< the root moving further than this in one update = a teleport (m)
 	float drop_snap_rate = 1.0f, drop_snap_speed = 3.0f;   ///< the hips' drop never changes faster than rate + speed x this (m/s)
 	float drop_fall_clip = 0.4f;                ///< walking on a clip's legs: the hips come back up this fast (m/s)

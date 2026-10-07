@@ -1069,7 +1069,15 @@ void Gait::step_feet(float dt) {
 			roll(f, pitch);
 			continue;
 		}
-		// The clip this foot lifted with (it keeps it till it lands).
+		// The clip this foot lifted with (it keeps it till it lands) - unless that was a crossover side step and
+		// the travel has turned away from it: then it takes the current clip and lands on its own side (strafing,
+		// then backing, the crossing foot came down across the other: the thighs went through each other).
+		if (_foot_cl[i].ok && std::fabs(std::fabs(_foot_cl[i].angle) - 0.5f * PI) < 0.6f) {
+			const float off = std::fabs(std::remainder((_cl.ok ? _cl.angle : 0.0f) - _foot_cl[i].angle, 2.0f * PI));
+			if (!_cl.ok || off > 0.8f) {
+				_foot_cl[i] = _cl;
+			}
+		}
 		const ClipLegs& C = _foot_cl[i].ok ? _foot_cl[i] : _cl;
 		// Its way of travel turns toward the body's at <= path_turn_rate (rad/s).
 		if (length(f.path_dir) > 0.5f && length(path_dir) > 0.5f) {
@@ -1146,7 +1154,19 @@ void Gait::step_feet(float dt) {
 		// clip's own path (a strafe's feet close and cross). (On every other clip too: braking a sideways
 		// walk to go the other way put the trailing foot 30 cm across behind the leading one.)
 		const bool crossing_clip = on_path && std::fabs(std::fabs(C.angle) - 0.5f * PI) < 0.6f;
-		if (!crossing_clip) {
+		if (crossing_clip) {
+			// A crossover comes down well in front of (or behind) the other foot: a crossed stance with the
+			// feet 15 cm apart put the thighs through each other.
+			const Foot& o = _feet[1 - i];
+			const Vec3 op = o.swinging ? o.target : o.pos;
+			const float side = i == 0 ? 1.0f : -1.0f;
+			if (side * dot(land - op, Lv) < _s.stance_gap) {
+				const float along = dot(land - op, F);
+				if (std::fabs(along) < _s.cross_sep) {
+					land = land + F * ((along >= 0.0f ? 1.0f : -1.0f) * (_s.cross_sep - std::fabs(along)));
+				}
+			}
+		} else {
 			const Foot& o = _feet[1 - i];
 			const float side = i == 0 ? 1.0f : -1.0f;
 			const float gap = side * dot(land - (o.swinging ? o.target : o.pos), Lv);
