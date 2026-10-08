@@ -1475,3 +1475,22 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   bends the rest so the eye ends LEAN_OUT from where it stands at the hip (`_hip_shift`, measured unleaned).
 - Godot's `Quaternion.get_axis()` / `Vector3.slerp` on near-parallel vectors give a non-unit axis ("The axis ... must be
   normalized" floods): normalise the axis / lerp + normalize (MarksmanMMPass._ground_fit).
+- **Hold breath (V4b)**: sprint held while aiming down sights, standing still (Sandstorm's way; no new input) =
+  `MarksmanCharacter.holding_breath`: the free-aim offset (state.sway / sway_v) settles toward the aim (`HOLD_CALM` 16/s,
+  not on a tick with fire_cd running: the kick stays) for `HOLD_TIME` 5 s, drawn from the SWIMMING breath
+  (MotorState.breath: the HUD's breath bar shows it; floor 5 % - at 0 the motor drowns you); run out ->
+  `F_BREATH_OUT` (1 << 12): a tremor off the sway clock until half the breath is back. Sim, so in replays too.
+  g4 test_hold_breath: ADS 0.063 deg -> held 0.017, out of breath 0.63, back after ~2 s.
+- **Empty reloads (V4b)**: a magazine reload begun on an empty magazine sets `F_EMPTY_RELOAD` (1 << 13) and runs slower
+  UP TO the commit only (`empty_stretch` = (commit + EMPTY_RACK 0.6) / commit; UltraActionLayer._reload finds the commit
+  by `action_t - dt < commit` - slowed past it, it fired every tick); on its real clock MarksmanGunPass plays the swap,
+  then `_rack`: the left hand over the ChargingHandle (carbine) / Slide (pistol), pulled back RACK_PULL 7 cm along the
+  gun, let go (slide sound), back on the grip; the round counts after. g4 test_empty_reload_racks (+0.6 s, filled once).
+  Marksman's flag bits: 12, 13 (MotorState flags are a u16: 14, 15 left).
+- **Freelook (V4b)**: `marksman_freelook` (H - Alt is walk) held in first person: `MarksmanFreelook` (made by
+  MarksmanEye, physics priority -100 = before UltraNet samples the input, process 99 = before the rig) holds the input
+  source's live aim still and takes the mouse's turn into `offset` (<= 1.3 / 0.7 rad); MarksmanEye turns the CAMERA by it
+  (fp_view - the gun's - keeps the aim), the gun pass turns the neck (the head's part) last (`_look_about`); let go, it
+  eases back (9/s). Presentation only: shots never move. g4 test_freelook_turns_the_head_not_the_aim. Tour
+  `marksman_gunfeel_review` (empty reloads close up, freelook; tours wait on physics ticks - frame grabs under xvfb are
+  slow and a wall-clock tour shot everything in 30 frames).
