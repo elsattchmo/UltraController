@@ -498,7 +498,7 @@ func test_inventory_with_pad() -> void:
 
 
 func test_split_screen_two_players() -> void:
-	UltraDummyPost.auto_spawn = true                 # the playground's 4 dummies are intended
+	UltraDummyPost.auto_spawn = true                 # the playground's 5 dummies are intended
 	await _start({"players": "2"})
 	main.locals.join_enabled = true                  # as when started from the main menu
 	var players := 0
@@ -509,7 +509,7 @@ func test_split_screen_two_players() -> void:
 		else:
 			players += 1
 	check(players == 2 and UltraNet.local_players.size() == 2, "2 player characters (%s)" % _characters())
-	check(bots == 4, "plus the 4 yard dummies (%d bots)" % bots)
+	check(bots == 5, "plus the 4 yard dummies and the sprint track's sprinter (%d bots)" % bots)
 	var n0 := _characters().size()
 	await _pad(PAD_UP, 0)
 	await ticks(3)

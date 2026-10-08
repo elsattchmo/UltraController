@@ -19,6 +19,10 @@ static var auto_spawn := true
 @export var booth := false
 ## Walk back and forth over this many metres (0 = stand still): shows limps and dangling arms.
 @export var pace := 0.0
+## Sprint round a square of this side (m), corner to corner, from the post forward then right (0 = off): a moving
+## target - balls, shots and shoves on a body at full speed.
+@export var sprint_loop := 0.0
+var _corner := 1
 
 var bot_id := 0
 var _dead_t := 0.0
@@ -80,7 +84,10 @@ func _spawn() -> void:
 	bot_id = p.id
 	var src := p.character.input_source as BotInputSource
 	src.loop = true
-	if pace > 0.0:
+	if sprint_loop > 0.0:
+		src.body = p.character
+		src.driver = _sprint_drive
+	elif pace > 0.0:
 		var n := int(pace / 1.0 * 60.0)
 		src.set_steps([{"ticks": n, "move": Vector2(0, 0.45)}, {"ticks": 40, "yaw_rate": PI / (40.0 / 60.0)}])
 	else:
@@ -88,6 +95,29 @@ func _spawn() -> void:
 	var o := find_child("NetObject", false, false) as NetObject
 	if o:
 		o.mark_dirty()
+
+
+## The sprinter's stick: flat out toward the next corner of the square, turning onto the one after from 3 m out
+## (rounded corners at speed). Steered from where it is, so it never drifts off the loop.
+func _sprint_drive(_tick: int, src: BotInputSource) -> InputFrame:
+	var f := InputFrame.new()
+	var c := src.body as UltraCharacter
+	if c == null:
+		return f
+	var fwd := -global_basis.z
+	var right := global_basis.x
+	var corners := [global_position, global_position + fwd * sprint_loop, global_position + (fwd + right) * sprint_loop,
+			global_position + right * sprint_loop]
+	var to: Vector3 = (corners[_corner] as Vector3) - c.global_position
+	to.y = 0.0
+	if to.length() < 3.0:
+		_corner = (_corner + 1) % corners.size()
+		to = (corners[_corner] as Vector3) - c.global_position
+		to.y = 0.0
+	f.yaw = atan2(-to.x, -to.z)
+	f.move = Vector2(0, 1)
+	f.buttons = InputFrame.B_SPRINT
+	return f
 
 
 func _process(_delta: float) -> void:

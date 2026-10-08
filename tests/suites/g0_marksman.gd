@@ -45,6 +45,41 @@ func test_single_player_plays_marksman() -> void:
 	check(c is MarksmanCharacter, "Single player plays a MarksmanCharacter (got %s)" % [c])
 
 
+
+## The main menu's "Marksman: motion matching" toggle: Single player then plays Marksman on matched clips (the spike,
+## MarksmanMotionMatcher) instead of Sinew's gait; off again, the gait.
+func test_menu_toggles_motion_matching() -> void:
+	var had := MarksmanCharacter.motion_matching_on()
+	for on in [true, false]:
+		main = (load("res://demo/main.tscn") as PackedScene).instantiate()
+		add_child(main)
+		await ticks(3)
+		UltraNet.stop()
+		await ticks(2)
+		if main.get("menu") == null:
+			main.call("_show_menu")         # (headless boots straight into a session: no menu)
+			await ticks(2)
+		var t := main.find_child("MarksmanMM", true, false) as CheckButton
+		if not check(t != null, "the main menu has the motion-matching toggle"):
+			break
+		t.button_pressed = on
+		main.call("set_controller", "marksman")
+		main.call("menu_start", "single")
+		await ticks(30)
+		var c := main.get("player") as MarksmanCharacter
+		check(c != null and c.motion_matching == on,
+				"toggle %s: Single player's Marksman %s motion matching" % ["on" if on else "off", "uses" if on else "doesn't use"])
+		# (Headless the demo's characters have no visuals - no driver; with one, its matcher follows the flag.)
+		var drv := c.anim as MarksmanAnimDriver if c else null
+		if drv:
+			check((drv.mm != null) == on, "its driver %s a matcher" % ["has" if on else "has no"])
+		UltraNet.stop()
+		main.queue_free()
+		main = null
+		await ticks(3)
+	Engine.set_meta(MarksmanCharacter.MM_META, had)
+
+
 func test_marksman_is_a_sinew_body_that_walks() -> void:
 	load_playground()
 	var c := _marksman(marker("spawn").global_position)

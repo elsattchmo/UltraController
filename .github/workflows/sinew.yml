@@ -137,5 +137,5 @@ jobs:
       # stairs, and the reference clips against addons/sinew/clip_audit.json - see sinew/ANIMATION_GUIDE.md.)
       - name: Sinew + Marksman + menu suites
         run: |
-          timeout 2400 $GODOT --headless --path . --fixed-fps 60 res://tests/test_runner.tscn -- --suite=s0,s2,s3,s4,s5,s6,s7,s8,s9,s10,g0,g1,g2,ui 2>&1 | tee test.log
+          timeout 4200 $GODOT --headless --path . --fixed-fps 60 res://tests/test_runner.tscn -- --suite=s0,s2,s3,s4,s5,s6,s7,s8,s9,s10,g0,g1,g2,g3,gm,pg,ui 2>&1 | tee test.log
           ! grep -q "SCRIPT ERROR" test.log

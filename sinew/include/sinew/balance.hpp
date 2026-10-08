@@ -46,6 +46,7 @@ struct BalanceSettings {
 	float upright_assist = 0.3f;
 	float planted_tilt = 0.6f;    ///< a foot stands while its sole faces up at least this much (cos)
 	float planted_lift = 0.06f;   ///< ... and its ankle is no higher than this over its usual height
+	float seed_contact = 0.025f;  ///< taking over: a sole this close over the ground counts as standing before any contact
 	float fall_tilt = 0.9f;       ///< pelvis tipped this far from upright (rad) -> fallen
 	float fall_sink = 0.6f;       ///< COM below this share of standing height -> fallen
 };
@@ -120,6 +121,8 @@ private:
 	LimbId leg(int i) const { return i == 0 ? LimbId::LegL : LimbId::LegR; }
 	Vec3 ankle(int i) const;
 	Vec3 sole_centre(int i) const;
+	/// The weakest tone along a leg (1 = full strength).
+	float leg_tone(int i) const;
 	float ground_at(Vec3 p) const;
 	void start_step(int force_swing = -1);
 	/// After a recovery: bring the feet back side by side (the stance it stands best in).

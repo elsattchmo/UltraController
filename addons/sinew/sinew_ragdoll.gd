@@ -338,6 +338,12 @@ func guard_clip_feet(sk_xf: Transform3D, clip: Array) -> void:
 			return
 
 
+## Stay powered (muscles, a stagger's balancer) while the capsule is in the air - a controller built on Sinew that
+## lets the body itself go over an edge says so (Marksman); Sinew's own bodies go kinematic in the air.
+func _powered_in_air() -> bool:
+	return false
+
+
 ## The motor states the gait walks in (a controller built on Sinew adds crouching).
 func _gait_states() -> Array:
 	return [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TURN_IN_PLACE, MotorState.Id.LAND]
@@ -434,7 +440,7 @@ func sinew_pre_step(dt: float) -> void:
 		if anim.is_empty():
 			_requests.clear()
 			return
-		if not powered or not character.state.is_grounded():
+		if not powered or (not character.state.is_grounded() and not _powered_in_air()):
 			# Kinematic: the parts follow the animated pose exactly (also in the air: the
 			# stand-in root drive is no balance, it would hold a jump's pelvis like a crane).
 			if _stagger_t >= 0.0:
