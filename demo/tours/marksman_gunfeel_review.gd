@@ -32,6 +32,29 @@ func _build() -> void:
 					steps.append({"call": _cam_at.bind(v[1], v[2]), "t": 600.0, "until": _ticks.bind(8), "yaw": 0, "pitch": 0, "buttons": ads,
 							"shot": "arms_%s_%s_%s" % [item, "ads" if ads else "hip", v[0]]})
 		return
+	# Two-handed aims off the body (the user: "we currently clip through our body heavily when turning right and there is
+	# some clipping when aiming up and a little down"): held right / left, turning right, up / down - from outside (the
+	# camera turns with the body: front-left, above, front-right) and in first person.
+	if "--aims" in OS.get_cmdline_user_args():
+		steps = [{"teleport": "spawn", "t": 0.6, "yaw": 0, "pitch": 0, "view_tp": true, "slot": 0}, {"call": _setup, "t": 1.0}]
+		var item := "shotgun" if "--shotgun" in OS.get_cmdline_user_args() else "rifle"
+		var aims := [["ahead", 0.0, 0.0, 0.0], ["right45", -45.0, 0.0, 0.0], ["left45", 45.0, 0.0, 0.0], ["turnright", 0.0, 0.0, -150.0],
+				["turnright_fast", 0.0, 0.0, -300.0], ["up60", 0.0, 60.0, 0.0], ["down60", 0.0, -60.0, 0.0]]
+		for a: Array in aims:
+			for v: Array in [["fl", Vector3(-0.9, 1.6, -1.6), 1.3], ["top", Vector3(0.0, 2.6, -0.5), 1.2], ["fr", Vector3(1.1, 1.5, -1.4), 1.3], ["fp", Vector3.ZERO, 0.0]]:
+				var st := {"t": 600.0, "until": _ticks.bind(70 if float(a[3]) == 0.0 else 40), "yaw": a[1], "pitch": a[2], "view_tp": v[0] != "fp"}
+				steps.append({"call": _aim_reset.bind(item), "t": 600.0, "until": _ticks.bind(80), "yaw": 0, "pitch": 0, "view_tp": v[0] != "fp"})
+				if float(a[3]) != 0.0:
+					st.erase("yaw")
+					st["yaw_rate"] = a[3]
+				st["call"] = _body_cam.bind(v[1], v[2], v[0] == "fp")
+				steps.append(st)
+				var shot := st.duplicate()
+				shot.erase("call")
+				shot["until"] = _ticks.bind(4)
+				shot["shot"] = "aim_%s_%s" % [a[0], v[0]]
+				steps.append(shot)
+		return
 	# Hits with the rifle up (V5): the body flinches, the gun is knocked off its line, the support hand knocked off.
 	steps.append({"call": _arm.bind("rifle"), "t": 600.0, "until": _ticks.bind(100), "yaw": 0, "pitch": 0})
 	for h: Array in [["torso", UltraLimbs.Region.TORSO, 25.0], ["gun_arm", UltraLimbs.Region.FOREARM_R, 25.0], ["support_arm", UltraLimbs.Region.FOREARM_L, 60.0]]:
@@ -92,6 +115,33 @@ func _cam_at(off: Vector3, look_y: float) -> void:
 	_tick0 = Engine.get_physics_frames()
 
 
+var _follow_body := false
+
+
+func _aim_reset(item: String) -> void:
+	if not _slots.has(item):
+		UltraItems.give(_c, StringName(item))
+		UltraItems.give(_c, &"ammo_12g")
+		for i in _c.inventory.size():
+			var it := _c.inventory.get_slot(i)
+			if it:
+				_slots[String(it.def_id)] = i + 1
+	_slot = int(_slots.get(item, 0))
+	_cam.current = true
+	_follow_body = false
+	_view_off = Vector3(-0.9, 1.6, -1.6)
+	_look_y = 1.3
+	_tick0 = Engine.get_physics_frames()
+
+
+func _body_cam(off: Vector3, look_y: float, fp: bool) -> void:
+	_view_off = off
+	_look_y = look_y
+	_follow_body = true
+	_cam.current = not fp
+	_tick0 = Engine.get_physics_frames()
+
+
 func _empty() -> void:
 	_c.state.mag = 0
 	_tick0 = Engine.get_physics_frames()
@@ -114,5 +164,11 @@ func _process(delta: float) -> void:
 	if _cam == null or _c == null or _c.visual_root == null:
 		return
 	var root := _c.visual_root.global_position
+	if _follow_body:
+		# (Turned with the body: the offsets are for a body facing -Z.)
+		var b := Basis(Vector3.UP, _c.state.body_yaw)
+		_cam.global_position = root + b * _view_off
+		_cam.look_at(root + Vector3.UP * _look_y + b * Vector3(0, 0, -0.35), Vector3.UP)
+		return
 	_cam.global_position = root + _view_off
 	_cam.look_at(root + Vector3.UP * _look_y + Vector3(0, 0, -0.35), Vector3.UP)

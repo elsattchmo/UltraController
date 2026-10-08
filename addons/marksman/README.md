@@ -66,7 +66,7 @@ Requirements:
 | `marksman_ragdoll.gd` | simulation policy, stance group switch, reach effectors |
 | `marksman_hands.gd` | gun hand and hand claims, a pure function of MotorState (every machine agrees) |
 | `marksman_gun_pass.gd` | aim, eye, ADS, two-hand support IK, one-hand pose, recoil. An analytic two-bone solver on `anim_pose`, elbow pole from the clip's elbow side |
-| `marksman_equipment.gd` (extends UltraEquipmentVisual) | the camera, HUD and effects look up `Equipment` by type, so it must stay one. `_process` is a documented copy with the hand taken from `MarksmanHands`; `_drive_hands` keeps only the ADS / recoil followers; `_aim_body` does nothing. Attach, holster, slide, pump, smoke, muzzle and eject are reused |
+| `marksman_equipment.gd` (extends UltraEquipmentVisual) | the camera, HUD and effects look up `Equipment` by type, so it must stay one. `_process` is the base's (it already picks the hand from `UltraInjury.weapon_hand`); `_drive_hands` keeps only the ADS / recoil followers (no ADS with a long gun in one hand), `mag_reload` places the magazine for either hand; `_aim_body` does nothing. Attach, holster, slide, pump, smoke, muzzle and eject are reused |
 
 **Simulation policy.** Whatever holds the gun is kinematic: physical arms after IK let the hands slide off the guns, one of Sinew's lessons. Physics switches whole subtrees only.
 
@@ -215,17 +215,21 @@ Marksman makes all of it **visible through the body**: the gun pass drives the a
   - SHB_HitReaction / prone hit;
   - s3 and s5 still pass.
 
-### V6 – One-handed, either hand
-- `MarksmanHands.gun_side()`: the right hand unless the right arm is crippled or lost, or the right hand is claimed. Claims come from the carried prop (`held_id`), door / interact, and an off-hand grenade or melee weapon.
-- Mirrored clips for a left-hand gun, plus the procedural one-hand pose:
-  - pistol: arm extended along the aim;
-  - rifle: stock under the armpit, barrel along the aim.
-- No one-handed reload (blocked).
-- Tests:
-  - crippled left arm: gun in the right hand, left arm physical, barrel within 2°;
-  - crippled right arm: gun on `LeftHandAttach`, mirrored;
-  - claiming a hand switches the gun to one-handed;
-  - server and client agree on the hand.
+### V6 – One-handed, either hand (done)
+- The hand comes from the sim: `UltraInjury.weapon_hand` / `two_hands` (an arm crippled or lost, hand included). Hand
+  claims (props, doors, an off-hand item) were left out: carrying a prop already puts the gun away.
+- The equipment re-attaches the gun to `LeftHandAttach` with a mirrored grip (base behaviour); `MarksmanGunPass` works on
+  `side` (`_gpart`), mirroring its right-side constants. The clips are not mirrored: the hold is procedural.
+  - pistol: out along the aim on the one arm (`PISTOL_ONE` off the eye);
+  - long gun: stock braced under the arm (`ARMPIT`, kept outside the torso), barrel on the aim, no ADS.
+- The other arm hangs: MarksmanRagdoll makes a crippled arm's upper arm / forearm / hand physical at `LIMP_TONE` in every
+  state, and the gun pass poses it hanging at the side (`HANG`) as the soft muscles' target.
+- One-handed reload (slower: `reload_mult` 1.8x): the gun is pinned against the body (`_pin_xf`: a long gun under the
+  arm, barrel down-forward; a pistol tucked at the chest's side; placed on the shown chest after the physics,
+  `_place_pinned`) while the hand swaps the magazine from the pouch on its own hip (racks an empty gun) or ferries shells.
+- Switching hands mid-hold blends the pose from the last one shown over 0.3 s.
+- Suite g7: holds both ways (barrel, limp arm, stock under the arm, nothing in the body), a lost hand, reloads both
+  ways, a mid-hold switch, replication agreement.
 
 ### V7 – Everything else: parity with the other controllers
 

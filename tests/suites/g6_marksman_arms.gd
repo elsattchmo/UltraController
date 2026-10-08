@@ -120,7 +120,10 @@ func _hit(c: UltraCharacter, region: int, amount: float) -> void:
 	d.kind = &"bullet"
 	d.dir = Vector3(1, 0, 0.3).normalized()
 	d.point = c.state.pos + Vector3.UP * 1.3
+	var limb_hp := c.state.limb_hp[region]
 	c.apply_damage(d)
+	# (The knock, not the injury: a crippled arm would put the gun in one hand - V6, suite g7.)
+	c.state.limb_hp[region] = limb_hp
 	c.react_to_hit(region, d.dir, amount, d.kind)
 
 

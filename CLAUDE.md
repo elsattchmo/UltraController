@@ -1518,3 +1518,13 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   Racking an empty long gun, the gun comes out off the shoulder (`RACK_OUT` 14 cm forward, `_rack_w` eased round the
   rack): shouldered, the charging handle sat in front of the chest and the left hand went 7.9 cm into it.
   (`UltraItems.give(c, id, n)` gives n ROUNDS - one by default: give tests a reserve, a lone suite has no infinite ammo.)
+- **One working arm (V6)**: `UltraInjury.weapon_hand` / `two_hands` pick the hand (sim, replicated by limb statuses); the
+  equipment moves the gun to `LeftHandAttach` (mirrored grip) and `MarksmanGunPass` works on `side` (`_gpart`, right-side
+  constants x side). Pistol out on the one arm (`PISTOL_ONE`); a long gun's stock braced under the arm (`ARMPIT`, outside
+  the torso), no ADS (`MarksmanEquipment._drive_hands`). The other arm hangs: MarksmanRagdoll `_limp_arm` = physical at
+  `LIMP_TONE` 0.08 in any state, posed hanging at the side by the gun pass (`HANG`; left on the gun clip it sagged 14 cm
+  into the belly). Reloads one-handed (1.8x): the gun PINNED on the shown chest (`_pin_xf`, `_place_pinned`: top_level
+  while pinned) while the hand swaps the magazine from its own hip pouch / ferries shells; `MarksmanEquipment.mag_reload`
+  places the magazine for either hand (the base only for a right-handed two-handed reload). A hand switch mid-hold blends
+  from the last pose over 0.3 s (`_switch_from`; solved straight onto the new side the body popped 27 cm). Suite g7; g5 / g6
+  heal the limb after their hard hits (a crippling knock now means one hand).
