@@ -250,9 +250,10 @@ func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> vo
 		release_t[side] = maxf(release_t[side] - dt, 0.0)
 		var k := release_t[side] / RELEASE_TIME
 		shown = foot_w + release[side] * smoothstep(0.0, 1.0, k)
-		# (A foot going a step's way is lifted on an arc, not slid along the ground.)
+		# (A foot going a step's way standing / turning is lifted on an arc, not slid along the ground; walking, the
+		# clip's own swing lifts it.)
 		var far := Vector2(release[side].x, release[side].z).length()
-		if far > STEP_LIFT_FROM:
+		if far > STEP_LIFT_FROM and (idle_clip or turning or fading):
 			shown.y += minf(0.07, far * 0.35) * sin(PI * (1.0 - k))
 	if not planted:
 		_wait_lift[side] = false
@@ -393,7 +394,7 @@ func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 		else:
 			var rate := FIT_RISE if want[side] > fit_off[side] else FIT_FALL
 			fit_off[side] = move_toward(fit_off[side], want[side], rate * dt)
-		fit_normal[side] = fit_normal[side].slerp(normals[side], clampf(dt * 12.0, 0.0, 1.0)) if _fit_set else normals[side]
+		fit_normal[side] = fit_normal[side].lerp(normals[side], clampf(dt * 12.0, 0.0, 1.0)).normalized() if _fit_set else normals[side]
 	# The hips only go down as far as a leg needs to reach its foot (straightening takes up the rest).
 	var k := _w
 	var need := 0.0
@@ -427,9 +428,10 @@ func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 		if _planted(side):
 			var n_sk := (to_sk * fit_normal[side]).normalized()
 			var q := _arc(Vector3.UP, n_sk)
-			var ang := q.get_angle()
-			if ang > 1e-4:
-				q = Quaternion(q.get_axis(), minf(ang, TILT_MAX) * k)
+			var ang := q.normalized().get_angle()
+			var axis := q.get_axis()
+			if ang > 1e-4 and axis.length_squared() > 1e-8:
+				q = Quaternion(axis.normalized(), minf(ang, TILT_MAX) * k)
 				b = Basis(q) * b
 		if absf(lift) < 1e-4 and b == pose[ft_i].basis and _edge_pull[side] == Vector3.ZERO:
 			continue

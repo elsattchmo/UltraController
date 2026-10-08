@@ -107,6 +107,7 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	var want := (1.0 if reloading else UltraActionLayer.raised(st) * (1.0 - st.gun_low)) if armed else 0.0
 	weight = move_toward(weight, want, 6.0 * dt)
 	reload_w = move_toward(reload_w, 1.0 if reloading else 0.0, 4.0 * dt)
+	_lean_e0 = Vector3.INF
 	var leaned := _lean(sk, mod.anim_pose, dt)
 	if weight <= 0.001 or not armed:
 		return leaned
@@ -156,6 +157,8 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 		_aim_down_sights(sk, pose, rh, grip, target_sk, def)
 	if kick.length() > 1e-5:
 		_kick(pose, rh, grip, kick)
+	if leaned:
+		_lean_settle(sk, pose)
 	var gun: Transform3D = pose[rh] * grip
 	aim_error = _barrel_turn(gun, target_sk).get_angle()
 	# The support hand onto the gun: under the fore-end at M_SupportGrip where the item says how (support_fingers /
@@ -247,14 +250,49 @@ func _lean(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> bool:
 	var side := fwd.cross(Vector3.UP).normalized()          # (the view's right, skeleton space)
 	var e0 := _eye(sk, pose, neck) if neck >= 0 and _head_bone >= 0 else Vector3.INF
 	_bend(pose, fwd, a)
-	if e0 != Vector3.INF:
+	for _r in (2 if e0 != Vector3.INF else 0):
 		var went := (_eye(sk, pose, neck) - e0).dot(side) * signf(a)
 		var want_out := LEAN_OUT * smoothstep(0.0, 1.0, absf(lean))
 		if went > 0.02:
 			var more := clampf(a * (want_out / went - 1.0), -absf(a) * 0.5, absf(a) * 0.6) if a > 0.0 \
 					else clampf(a * (want_out / went - 1.0), -absf(a) * 0.6, absf(a) * 0.5)
 			_bend(pose, fwd, more)
+			a += more
+	if e0 != Vector3.INF:
+		var went := (_eye(sk, pose, neck) - e0).dot(side)
+		_lean_e0 = e0
+		_lean_fwd = fwd
+		_lean_side = side
+		_lean_gain = absf(went / a) if absf(a) > 1e-3 else 0.0
+		_lean_out = signf(a) * LEAN_OUT * smoothstep(0.0, 1.0, absf(lean))
 	return true
+
+
+var _lean_e0 := Vector3.INF
+var _lean_fwd := Vector3.ZERO
+var _lean_side := Vector3.ZERO
+var _lean_gain := 0.0
+var _lean_out := 0.0
+
+
+## After the gun is placed: the head coming up off the stock at the hip (_head_up_at_hip) moves the eye too, by more or
+## less as the spine leans - bend the rest so the eye is out LEAN_OUT from where it stands at the hip (_hip_shift left of
+## the lean-free eye). About the view's way, so the gun (carried on the chest) only rolls a little round its own line.
+func _lean_settle(sk: Skeleton3D, pose: Array[Transform3D]) -> void:
+	var neck := _part("Neck")
+	if _lean_e0 == Vector3.INF or _lean_gain < 0.05 or neck < 0 or _head_bone < 0:
+		return
+	var eq := _equipment()
+	var held := _hip_shift * weight * (1.0 - (eq.ads if eq else 0.0))
+	var want := _lean_out - held
+	var total := 0.0
+	for _r in 3:
+		var err := want - (_eye(sk, pose, neck) - _lean_e0).dot(_lean_side)
+		var more := clampf(err / _lean_gain, -0.5 - total, 0.5 - total)
+		if absf(err) < 0.005 or absf(more) < 1e-3:
+			break
+		_bend(pose, _lean_fwd, more)
+		total += more
 
 
 func _bend(pose: Array[Transform3D], fwd: Vector3, a: float) -> void:
@@ -564,7 +602,8 @@ func _shoulder(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transfor
 ## comes back down onto the stock (_aim_down_sights bends from here).
 func _head_up_at_hip(sk: Skeleton3D, pose: Array[Transform3D], target_sk: Vector3) -> void:
 	var eq := _equipment()
-	var k := weight * (1.0 - (eq.ads if eq else 0.0))
+	# (Leaning, the head goes over with the spine - held up and left it fought the lean; _lean_settle puts the eye out.)
+	var k := weight * (1.0 - (eq.ads if eq else 0.0)) * (1.0 - smoothstep(0.0, 1.0, absf(lean)))
 	var neck := _part("Neck")
 	if k <= 0.001 or neck < 0:
 		return
@@ -577,6 +616,7 @@ func _head_up_at_hip(sk: Skeleton3D, pose: Array[Transform3D], target_sk: Vector
 	var view_r := view_d.cross(Vector3.UP).normalized()
 	var need := HIP_LONG.x - (stock - eye).dot(view_r)
 	if need <= 0.0:
+		_hip_shift = 0.0
 		return
 	# (Toward an eye that far left, the neck bent straight at it - as ADS bends it to the sights: the clip bows the head
 	# forward over the stock, so a roll about the view hardly moved the eye.)
@@ -585,9 +625,12 @@ func _head_up_at_hip(sk: Skeleton3D, pose: Array[Transform3D], target_sk: Vector
 	var bend := _limit(_arc((eye - j).normalized(), (want - j).normalized()), HIP_ROLL)
 	_turn_subtree(pose, neck, Quaternion.IDENTITY.slerp(bend, k), j)
 	hip_gap = Vector2((stock - eye).dot(view_r), (stock - _eye(sk, pose, neck)).dot(view_r))
+	if absf(lean) < 0.05:
+		_hip_shift = (hip_gap.y - hip_gap.x) / k
 
 
 var hip_gap := Vector2.ZERO        ## (tests) the stock's offset right of the eye before / after the head came up
+var _hip_shift := 0.0              ## how far the head coming up moved the eye left, per unit of its weight (m)
 
 
 ## The right shoulder's pocket (skeleton space): just inside the shoulder joint, a little forward and down - where

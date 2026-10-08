@@ -123,6 +123,22 @@ func test_a_cut_limb_leaves_the_sinew_body() -> void:
 	await ticks(5)
 	check(c.state.severed & (1 << UltraLimbs.Region.ARM_L) != 0, "the shotgun took the left arm")
 	check(not bool(r.world.physics.call("character_attached", r._id, arm)), "Sinew's left arm is off too")
+	# The skeleton keeps the cut bone on the shoulder (hidden; the gore throws its own gib): posed on the falling physics
+	# piece, the stump's rim - skinned partly to it - stretched after it across the body.
+	var sk := c.skeleton
+	var b := sk.find_bone("LeftUpperArm")
+	var pb := sk.get_bone_parent(b)
+	var rest := sk.get_bone_rest(b).origin.length()
+	var worst := [0.0]
+	var probe := func() -> void:
+		var dist := sk.get_bone_global_pose(b).origin.distance_to(sk.get_bone_global_pose(pb).origin)
+		worst[0] = maxf(worst[0], absf(dist - rest))
+	sk.skeleton_updated.connect(probe)
+	c.knock_down(Vector3(2, 0.5, 0))
+	await ticks(90)
+	sk.skeleton_updated.disconnect(probe)
+	info("cut arm: its bone stayed within %.3f m of its length from the shoulder" % worst[0])
+	check(worst[0] < 0.02, "the cut arm's bone stays on the shoulder (%.3f m off)" % worst[0])
 
 
 func test_zombie_model_gets_its_own_sinew_rig() -> void:
