@@ -172,12 +172,56 @@ var _prev_grounded := true
 const SNAP_JUMP := 0.2
 
 
+## Still under water the diver hovers where it is (a slow DIVE_RISE), rather than drifting up to the surface at the
+## UltraController's 0.4 m/s (swim_state: "lungs full") - the user: "underwater we just float around". Pulled at
+## DIVE_HOLD m/s2, more than the motor's swim_accel pushes. Sim (the velocity), so every machine agrees.
+const DIVE_RISE := 0.04
+const DIVE_HOLD := 4.0
+
+
+func _dive_hover(i: InputFrame, dt: float) -> void:
+	if i == null or state.state != MotorState.Id.DIVE or i.move.length() >= 0.1 or i.has(InputFrame.B_JUMP) or i.has(InputFrame.B_CROUCH):
+		return
+	var cur := motor.water.current if motor and motor.water else Vector3.ZERO
+	var v := state.vel - cur
+	v.y = move_toward(v.y, DIVE_RISE, DIVE_HOLD * dt)
+	state.vel = v + cur                    # (the motor starts its next step from it)
+
+
+## The hang's stick made one thing (a pure function of the state and the input: client and server agree): in the hang's
+## own terms (ledge_hang_state._push: x along the wall, y up it, through the camera), sideways wins unless the stick
+## points clearly up (HANG_UP_SHARE) - then it's only up; a shimmy goes at the stick's whole strength.
+const HANG_UP_SHARE := 1.4
+
+
+static func hang_input(s: MotorState, i: InputFrame) -> InputFrame:
+	var wish := i.move_world(i.yaw)
+	var right := Vector3(cos(s.body_yaw), 0, -sin(s.body_yaw))
+	var push := Vector2(wish.dot(right), wish.dot(-s.trav_normal))
+	if push.length() < 0.05:
+		return i
+	var want := Vector2(0.0, signf(push.y) * push.length()) if absf(push.y) > absf(push.x) * HANG_UP_SHARE \
+			else Vector2(signf(push.x) * push.length(), 0.0)
+	if want.is_equal_approx(push):
+		return i
+	var w := right * want.x - s.trav_normal * want.y
+	var out := i.copy()
+	var cam_fwd := Vector3(-sin(i.yaw), 0.0, -cos(i.yaw))
+	var cam_right := Vector3(cos(i.yaw), 0.0, -sin(i.yaw))
+	out.move = Vector2(w.dot(cam_right), w.dot(cam_fwd)).limit_length(1.0)
+	return out
+
+
 func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	# A gun up against a wall can't fire (V4b): the muzzle would be in the wall - the body holds it up out of the way
 	# (MarksmanGunPass) and the trigger does nothing. A query on the state: client and server agree.
 	if input != null and input.has(InputFrame.B_PRIMARY) and tuck_distance(state, input) < INF:
 		input = input.copy()
 		input.buttons &= ~InputFrame.B_PRIMARY
+	# Hanging, the stick is either a shimmy or a climb (the UltraController's hang reads both at once: forward + right
+	# shimmied at 70 % and the clip blended 30 % with the still hang - the hands slid - or climbed half way through).
+	if input != null and state.state == MotorState.Id.LEDGE_HANG:
+		input = hang_input(state, input)
 	# Sprint held going sideways or back runs (the motor sprints only forward - sideways it stayed a walk): the jog gait
 	# for this tick, so the stick's full way is a run (jog_speed x strafe / back share, ~3.4 m/s sideways) - the stance's
 	# run strafe clips show it. Not crouched.
@@ -200,6 +244,7 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 		anim.root_jumped(skeleton.global_basis.inverse() * -(state.pos - pos0))
 		_prev_pos = state.pos          # (no glide across it: the blend's shift is all at once - UltraCharacter's way)
 	# (Sim, so in replays too: from the state and the input only.)
+	_dive_hover(input, delta)
 	_hold_breath(input, delta, breath0)
 	_empty_reload(delta)
 	if replaying:
@@ -217,6 +262,48 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	if was in MOTION_STATES and was_grounded and not state.is_grounded() and state.state in [MotorState.Id.FALL, MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TURN_IN_PLACE] and r != null and r.mm_legs() and offline and is_authority() \
 			and state.stance != MotorState.Stance.CROUCH and not _walking_off(input) and _drop_below() >= ledge_height:
 		r.over_edge(_off_dir())
+	# Landing with momentum (the user: "land and stumble in the direction of momentum for a moment then collect
+	# yourself"): a drop hard enough at speed carries the body on in a few catching steps (the gait's, as a push does).
+	if was in [MotorState.Id.JUMP, MotorState.Id.FALL] and not was_grounded and state.is_grounded() and r != null and offline \
+			and is_authority() and physical_motion and r.mm_legs() and not r.staggering():
+		var impact := -vel0.y
+		var hv := Vector3(vel0.x, 0.0, vel0.z)
+		if impact >= LAND_STUMBLE_IMPACT and hv.length() >= LAND_STUMBLE_SPEED and hv.length() <= LAND_STUMBLE_SPEED_MAX \
+				and impact < r.land_stagger_speed:
+			var lurch := clampf((impact - LAND_STUMBLE_IMPACT) * LAND_STUMBLE_PER_IMPACT + hv.length() * LAND_STUMBLE_PER_SPEED,
+					0.0, LAND_STUMBLE_MAX)
+			_land_lurch = hv.normalized() * lurch
+			_land_lurch_t = LAND_LURCH_WAIT
+			_land_impact = impact
+	# (Sinew takes a push only walking: the motor's LAND comes first - the lurch waits for it to hand back.)
+	if _land_lurch_t > 0.0:
+		_land_lurch_t -= delta
+		if state.state in MOTION_STATES and state.is_grounded():
+			var hard := clampf((_land_impact - LAND_STUMBLE_IMPACT) / maxf(r.land_stagger_speed - LAND_STUMBLE_IMPACT, 0.1), 0.1, 1.0) if r else 0.1
+			if receive_push(_land_lurch):
+				# (The run asked for only sags by how hard it landed - Sinew's rule asks for nothing right after a push,
+				# and a sprinter tripped on every landing: the shot-on-the-move rule, MarksmanRagdoll._stumble_hit.)
+				moving_stumble = hard
+			landed_stumbles += 1
+			_land_lurch_t = 0.0
+
+
+## A landing stumbles on (catching steps the way it was going) from LAND_STUMBLE_IMPACT m/s down with at least
+## LAND_STUMBLE_SPEED m/s along the ground: a lurch of PER_IMPACT x the impact over that + PER_SPEED x the speed, at most
+## MAX (m/s). Above MarksmanRagdoll.land_stagger_speed the balancer has the legs already.
+const LAND_STUMBLE_IMPACT := 6.0
+const LAND_STUMBLE_SPEED := 2.5
+## Faster than this the landing runs on (motion matching): the gait's catching steps can't take a sprinter off a landing
+## - handed over at 6 m/s it tripped whatever the lurch (even 0.1 m/s).
+const LAND_STUMBLE_SPEED_MAX := 4.5
+const LAND_STUMBLE_PER_IMPACT := 0.35
+const LAND_STUMBLE_PER_SPEED := 0.0
+const LAND_STUMBLE_MAX := 2.2
+var landed_stumbles := 0              ## (tests)
+const LAND_LURCH_WAIT := 0.4
+var _land_lurch := Vector3.ZERO
+var _land_lurch_t := 0.0
+var _land_impact := 0.0
 
 
 ## Going over on purpose: the stick pushes the way the body faces (within 90 deg either side) and it moves that way -

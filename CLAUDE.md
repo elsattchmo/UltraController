@@ -1615,3 +1615,37 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   database's contact window: the UAL back walk scuffs its feet 2 cm a frame landing and lifting (6 -> 2.2 mm/frame).
 - The ball launcher is given right after the melee weapons (hotbar slot 6): after the ammo and medkit it was the tenth
   item, in the backpack past Inventory.HOTBAR 9, and no key selected it (g0 checks).
+- **Hits with a gun up, follow-ups**: a stagger sets every Sinew part physical at once - `MarksmanRagdoll.start_stagger`
+  zeroes the armed arms' part_w (eased back by the hook they flailed 0.3 s, the support hand 10 cm off the grip). The
+  arms ride a body hit's jolt (`_carry_arms`) then aim back out: `body_hit()` starts `_ride_t`, the ride's rotation is
+  kept 1 -> 0 over RIDE_TIME 0.12 .. 0.45 s (always above RIDE_TILT: going over), turned back about the stock for a
+  shouldered gun (about the chest the hand went 2.6 cm into a staggered body). g5: back on aim in 0.32 s (riding all of
+  it left 2-8 deg for as long as the body was physical). g6's elbow_out skips an elbow up over the neck line.
+- **Ledge (user round: "we aren't really grabbing the edge ... two directional inputs ... still a shimmy and broken ...
+  hanging to vault animations")**: `MarksmanCharacter.hang_input` (sim, deterministic: a copy of the input in
+  LEDGE_HANG) - in the hang's terms sideways wins unless the stick is clearly up (HANG_UP_SHARE 1.4), a shimmy at the
+  stick's whole strength (forward + right shimmied at 70 % with the clip 30 % still hang, or climbed). `MarksmanLedgePass`
+  (pose pass after the rope pass): palms on top of the lip, fingers over (UltraTraversalVisual's grip), each hand at its
+  clip's sideways place (clamped 0.08 .. 0.45 m), lifted off the lip only while shimmying (by the clip hand's rise over
+  its lowest), the whole body lifted when straight arms can't reach (it hangs FROM the hands), FADE_IN 0.25 (the capsule
+  snaps onto the ledge: in 0.12 fingers whipped 25 m/s). Climb from a hang starts ClimbUp_1m at CLIMB_FROM_HANG 0.22 (the
+  UltraController's; Sinew's driver played the whole waist-high step-up). Brace catch: out of the air onto a ledge the
+  `catch` node plays Braced_Catch CATCH_SEG 0.30 .. 1.30 (refit like the hang hold) before the hang. g13.
+- **Jumps (user: "move away from the current jump animation")**: `MarksmanAnimDriver.JUMPS` - standing `hop`
+  (mixamo/LMM_Jump: push 0.70, apex 1.05, down 1.28, settle 1.70), moving from JUMP_RUN_FROM 1.0 m/s `jump_run`
+  (AXE_UnarmedJumpRunning 0.30 / 0.70 / 1.00 / 1.38), the sprint leap as before; seeked by the vertical speed and only
+  ever forward (`_jump_t`: the touchdown tick reads vy 0 a frame before LAND - read as the apex the legs flew up 0.6 m).
+  Timings: `tools/marksman/measure_jumps.gd`. Falls: AAD_FallingIdle (`mk_fall`, the fall and air nodes). Landings
+  (`_landing` / `_landing_hold`, past the motor's 0.22 s LAND unless moving off > 1.2 m/s): soft (< LAND_SOFT 6.5) on
+  the jump's own clip, hard (>= LAND_HARD 9.5) AAD_HardLanding 0.15 .. 1.75 over 1.2 s, between the squat; on the move
+  (> 1.2 m/s) it runs on. Roles mk_hop / mk_jump_run / mk_fall / mk_land_hard in marksman_animset.tres (and the builder).
+  Clip filmstrips: tour `clip_strip -- --clips=a,b --frames=8`.
+- **Landing stumble**: a landing at LAND_STUMBLE_SPEED 2.5 .. 4.5 m/s from LAND_STUMBLE_IMPACT 6 m/s down lurches on
+  (receive_push along the travel by the impact, after the motor's LAND hands back; `moving_stumble` set so the run sags
+  only by severity) - the gait's catching steps. A sprinter isn't: handed over at 6 m/s the gait tripped on any lurch.
+  From land_stagger_speed 11.5 the balancer has the legs (may go down: a 6 m drop does).
+- **Water**: swim stroke at SWIM_STROKE_SPEED 1.5 (Swim_Fwd has no authored speed: Sinew's driver scaled it by 0.6 -
+  2.5x); `MarksmanCharacter._dive_hover` (sim) holds a still diver near its depth (DIVE_RISE 0.04 m/s pulled at 4 m/s2;
+  the motor drifted it up 0.4 m/s "lungs full"); `MarksmanRagdoll._buoy` floats the limp Sinew body (per part, the
+  UltraRagdoll's numbers) - it sank to the pool's floor while the capsule floated. Tours marksman_swim_review,
+  marksman_ledge_review, marksman_jump_review.

@@ -30,6 +30,10 @@ func _roles() -> Dictionary:
 		# says: sideways is the unarmed side step's legs under the pistol idle's arms.)
 		"p_run_f": "mixamo/PST_PistolRun", "p_walk_b": "mixamo/PST_PistolWalkBackward",
 		"p_strafe_l": "mixamo/Strafe_Walk_L", "p_strafe_r": "mixamo/Strafe_Walk_R", "p_sprint_f": "mixamo/S_Fast",
+		# Jumps, falls, landings (MarksmanAnimDriver: seeked by the vertical speed / played by the impact): a standing
+		# hop (male locomotion pack), a jump on the move (axe pack, unarmed), a fall, a hard landing (action adventure).
+		"mk_hop": "mixamo/LMM_Jump", "mk_jump_run": "mixamo/AXE_UnarmedJumpRunning", "mk_fall": "mixamo/AAD_FallingIdle",
+		"mk_land_hard": "mixamo/AAD_HardLanding",
 	}
 	for d: String in DIRS:
 		r["r_walk_" + d] = "mixamo/RFP_Walk" + DIRS[d]

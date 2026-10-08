@@ -57,6 +57,7 @@ func _build_sinew() -> AnimationNodeBlendTree:
 	land.connect_node("depth", 1, "clip_ts")
 	land.connect_node("output", 0, "depth")
 	_add_parity_nodes(loco)
+	_add_jump_nodes(loco)
 	# --- motion matching (spike, MarksmanCharacter.motion_matching): one clip node the matcher re-points and seeks
 	if _mm_on():
 		var m := AnimationNodeBlendTree.new()
@@ -246,10 +247,17 @@ func _parity_wanted(w: String) -> String:
 	var has_leap := _role_anim(&"leap") != null
 	match state:
 		Id.JUMP:
-			if _cur_loco != "air" and _cur_loco != "air_run":
+			if not _cur_loco in ["air", "air_run", "hop", "jump_run"]:
 				_run_jump = hsp > RUN_JUMP_SPEED and has_leap
 				_jump_vy0 = 0.0
-			return "air_run" if _run_jump else "air"
+				_jump_node = "" if _run_jump else ("jump_run" if hsp > JUMP_RUN_FROM else "hop")
+				if not _jump_nodes.has(_jump_node):
+					_jump_node = ""
+				_land_t = -1.0
+				_jump_t = 0.0
+			if _run_jump:
+				return "air_run"
+			return _jump_node if _jump_node != "" else "air"
 		Id.FALL:
 			var hop := _cur_loco in ["ground", "mm"] and velocity.y > 1.0 and hsp > RUN_JUMP_SPEED and has_leap
 			if hop:
@@ -261,15 +269,29 @@ func _parity_wanted(w: String) -> String:
 				                  # vertical speed, swung the body 9 cm a frame letting go: gm rope test)
 			if _cur_loco == "air_run" and air_time < 1.3:
 				return "air_run"
+			if _cur_loco in ["hop", "jump_run"] and air_time < JUMP_HOLD_AIR:
+				return _cur_loco
 			if w == "air" and _cur_loco != "air":
 				return "fall"
 			return w
 		Id.LAND:
-			return "land_heavy" if hard_landing and _role_anim(&"land_heavy") else w
+			return _landing(w)
+		Id.LEDGE_HANG:
+			# Caught out of the air: the brace catch plays out first (unless the hands are already shimmying / it climbs).
+			if w == "hang" and _cur_loco in ["air", "air_run", "hop", "jump_run", "fall"] and _catch_ok():
+				_catch_t = 0.0
+				tree.set(LOCO + "catch/seek/seek_request", 0.0)
+				return "catch"
+			if _cur_loco == "catch" and _catch_t < CATCH_SEG.y - CATCH_SEG.x and absf(climb_speed) < 0.05:
+				return "catch"
+			return w
 		Id.MANTLE, Id.LEDGE_CLIMB:
 			return "drop_hang" if trav_kind in UltraTraversal.DOWN_MOVES and _role_anim(&"drop_hang") else w
 		Id.DIVE:
 			return "dive"
+	var lw := _landing_hold(w)
+	if lw != "":
+		return lw
 	return _prone_transition(w)
 
 
@@ -291,7 +313,146 @@ func _prone_transition(w: String) -> String:
 	return w
 
 
+# ------------------------------------------------------------------ jumps and landings (the user: "move away from the
+# current jump animation as it looks terrible and unnatural ... different landing animations based off height and
+# momentum")
+## A jump's own clip, its time SEEKED from the vertical speed (take-off at `push`: the legs already driving -> `apex` at the
+## top -> `down`: legs reaching for the ground, held for a longer fall), then played on from `down` through its landing
+## to `settle` when it lands softly. Standing: the male locomotion pack's jump (both knees up, arms forward); on the move
+## (JUMP_RUN_FROM .. the leap's RUN_JUMP_SPEED): the axe pack's unarmed running jump. tools/marksman/measure_jumps.gd.
+const JUMPS := {
+	"hop": {"role": &"mk_hop", "push": 0.70, "apex": 1.05, "down": 1.28, "settle": 1.70},
+	"jump_run": {"role": &"mk_jump_run", "push": 0.30, "apex": 0.70, "down": 1.00, "settle": 1.38},
+}
+const JUMP_RUN_FROM := 1.0
+## A jump's clip carries on through a fall this long (s), then the falling loop takes over.
+const JUMP_HOLD_AIR := 1.6
+## Landing (m/s down at touchdown): softer than LAND_SOFT the jump's own clip lands it; from LAND_HARD the action pack's
+## hard landing (down on a hand, up again over HARD_LAND_TIME); between, the squat by depth (`land`).
+const LAND_SOFT := 6.5
+const LAND_HARD := 9.5
+const HARD_LAND_SEG := Vector2(0.15, 1.75)
+const HARD_LAND_TIME := 1.2
+## A landing shown past the motor's short LAND state is cut short by moving off faster than this (m/s).
+const LAND_MOVE_OFF := 1.2
+var _jump_node := ""
+var _jump_nodes := {}
+var _jump_t := 0.0
+## The brace catch: Braced_Catch from the hands striking the lip to the settled hang (s), and the time into one.
+const CATCH_SEG := Vector2(0.30, 1.30)
+var _catch_t := 9.0
+var _land_t := -1.0                 ## time into a landing that outlasts LAND (-1: none)
+var _land_node := ""
+
+
+func _add_jump_nodes(loco: AnimationNodeStateMachine) -> void:
+	for n: String in JUMPS:
+		var spec: Dictionary = JUMPS[n]
+		if _role_anim(spec.role) == null:
+			continue
+		var tb := AnimationNodeBlendTree.new()
+		tb.add_node("clip", _anim(spec.role, false), Vector2(0, 0))
+		tb.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		tb.add_node("rate", AnimationNodeTimeScale.new(), Vector2(400, 0))
+		tb.connect_node("seek", 0, "clip")
+		tb.connect_node("rate", 0, "seek")
+		tb.connect_node("output", 0, "rate")
+		_add_loco(loco, n, tb, 0.1, 0.25)
+		_jump_nodes[n] = true
+	if _role_anim(&"mk_land_hard"):
+		var hl := AnimationNodeBlendTree.new()
+		var ha := AnimationNodeAnimation.new()
+		ha.animation = _segment(_clip(&"mk_land_hard"), HARD_LAND_SEG.x, HARD_LAND_SEG.y)
+		hl.add_node("clip", ha, Vector2(0, 0))
+		hl.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		hl.add_node("rate", AnimationNodeTimeScale.new(), Vector2(400, 0))
+		hl.connect_node("seek", 0, "clip")
+		hl.connect_node("rate", 0, "seek")
+		hl.connect_node("output", 0, "rate")
+		_add_loco(loco, "land_hard", hl, 0.06, 0.3)
+	# The brace catch: jumping / falling onto a ledge, Braced_Catch from the hands striking the lip - the body swings in
+	# and settles - fitted to the hang as the hang's hold is (UltraAnimDriver._build_hang's refit).
+	var hc := _role_anim(&"hang_idle")
+	if hc:
+		var cb := AnimationNodeBlendTree.new()
+		var ca := AnimationNodeAnimation.new()
+		var hands := Vector3(0.0, UltraTraversal.HANG_DROP + 0.03, UltraTraversal.HANG_BACK + 0.03)
+		ca.animation = _refit(_segment(_clip(&"hang_idle"), CATCH_SEG.x, minf(CATCH_SEG.y, hc.length)), "hang_catch", hands, Vector3.ONE)
+		cb.add_node("clip", ca, Vector2(0, 0))
+		cb.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		cb.connect_node("seek", 0, "clip")
+		cb.connect_node("output", 0, "seek")
+		_add_loco(loco, "catch", cb, 0.08, 0.2)
+	# A fall is a fall (arms up, legs loose), not the UAL jump's held one-knee pose.
+	if _role_anim(&"mk_fall"):
+		loco.replace_node("fall", _anim(&"mk_fall"))
+		var air := loco.get_node("air") as AnimationNodeBlendTree
+		if air and air.has_node("clip"):
+			(air.get_node("clip") as AnimationNodeAnimation).animation = _clip(&"mk_fall")
+
+
+## The landing node for LAND: the jump's own landing when soft, the hard landing from LAND_HARD, else the squat.
+func _landing(w: String) -> String:
+	if _land_t < 0.0:
+		_land_t = 0.0
+		var hsp := Vector2(velocity.x, velocity.z).length()
+		if hsp > LAND_RUN_ON and land_impact < LAND_HARD:
+			_land_node = ""                # (on the move: it runs on - the matcher, or the squat)
+		elif land_impact >= LAND_HARD and _role_anim(&"mk_land_hard"):
+			_land_node = "land_hard"
+			tree.set(LOCO + "land_hard/seek/seek_request", 0.0)
+			tree.set(LOCO + "land_hard/rate/scale", (HARD_LAND_SEG.y - HARD_LAND_SEG.x) / HARD_LAND_TIME)
+		elif land_impact < LAND_SOFT and _cur_loco in _jump_nodes:
+			_land_node = _cur_loco
+			var spec: Dictionary = JUMPS[_cur_loco]
+			tree.set(LOCO + _cur_loco + "/seek/seek_request", float(spec.down))
+			tree.set(LOCO + _cur_loco + "/rate/scale", 1.0)
+		else:
+			_land_node = ""
+	return _land_node if _land_node != "" else w
+
+
+## Past the motor's LAND a landing plays on until it's done - unless the body moves off.
+func _landing_hold(w: String) -> String:
+	if _land_t < 0.0 or _land_node == "" or not state in [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.LAND]:
+		if state != MotorState.Id.LAND:
+			_land_t = -1.0
+		return ""
+	var hsp := Vector2(velocity.x, velocity.z).length()
+	var left := HARD_LAND_TIME if _land_node == "land_hard" else float(JUMPS[_land_node].settle) - float(JUMPS[_land_node].down)
+	if _land_t >= left or (hsp > LAND_MOVE_OFF and state != MotorState.Id.LAND):
+		_land_t = -1.0
+		_land_node = ""
+		return ""
+	return _land_node
+
+
+func _catch_ok() -> bool:
+	return (tree.tree_root as AnimationNodeBlendTree).get_node("loco").has_node("catch")
+
+
+func _drive_jumps(delta: float) -> void:
+	if _land_t >= 0.0:
+		_land_t += delta
+	_catch_t += delta
+	if not _cur_loco in _jump_nodes or _land_t >= 0.0:
+		return
+	# Rising: take-off -> apex; falling: apex -> touchdown pose (held).
+	var spec: Dictionary = JUMPS[_cur_loco]
+	_jump_vy0 = maxf(_jump_vy0, velocity.y)
+	var v0 := maxf(_jump_vy0, 2.5)
+	var t := lerpf(float(spec.push), float(spec.apex), clampf(1.0 - velocity.y / v0, 0.0, 1.0)) if velocity.y > 0.0 \
+		else lerpf(float(spec.apex), float(spec.down), clampf(-velocity.y / v0, 0.0, 1.0))
+	# (Only ever on through the jump: the touchdown tick reads no vertical speed a frame before LAND - that read as the
+	# apex and the legs flew back up 0.6 m.)
+	t = maxf(t, _jump_t)
+	_jump_t = t
+	tree.set(LOCO + _cur_loco + "/seek/seek_request", t)
+	tree.set(LOCO + _cur_loco + "/rate/scale", 0.0)
+
+
 func _drive_parity(delta: float) -> void:
+	_drive_jumps(delta)
 	if _cur_loco == "air_run":
 		# Rising: take-off -> apex; falling: apex -> touchdown pose (held for a longer fall); the falling arms come in last.
 		_jump_vy0 = maxf(_jump_vy0, velocity.y)
@@ -315,6 +476,11 @@ func _drive_parity(delta: float) -> void:
 		tree.set(LOCO + "ladder/rate/scale", climb_speed / _ladder_speed)
 	if _cur_loco == "dive":
 		tree.set(LOCO + "dive/rate/scale", clampf(velocity.length() / 1.8, 0.3, 1.6))
+	if _cur_loco == "swim":
+		# (The surface stroke at its own pace: Sinew's driver scales it by the clip's authored speed, which Swim_Fwd
+		# doesn't have - 0.6 m/s by default - so at 1.5 m/s it stroked at its 2.5x clamp. The UltraController's rule.)
+		var sp := Vector2(velocity.x, velocity.z).length()
+		tree.set(LOCO + "swim/go_ts/scale", clampf(sp / SWIM_STROKE_SPEED, 0.5, 1.8))
 
 
 # ------------------------------------------------------------------ V7: actions (Sinew's driver ignores item events)
@@ -531,7 +697,14 @@ func _go(want: String) -> void:
 		# (The visual root turns round the frame after the motor does, the tree shows the new node the frame after that:
 		# the drop's last pose was drawn turned round for a frame - the body spun 1.1 m. Hold the old turn till then.)
 		hold_visual_until = Engine.get_process_frames() + 1
+	var from := _cur_loco
 	super._go(want)
+	if want == "climb_up" and (from == "hang" or state == MotorState.Id.LEDGE_CLIMB):
+		# Up from a hang: the climb starts with the hands already on top (the UltraController's way: CLIMB_FROM_HANG into
+		# the clip) - from its start Sinew's driver played the whole waist-high step-up, a vault-like move off the wall.
+		var len := _clip_len(&"climb_up_1m", 0.6)
+		tree.set(LOCO + "climb_up/seek/seek_request", CLIMB_FROM_HANG)
+		tree.set(LOCO + "climb_up/speed/scale", maxf(len - CLIMB_FROM_HANG, 0.1) / maxf(climb_duration, 0.2))
 	if want == "drop_hang":
 		tree.set(LOCO + "drop_hang/seek/seek_request", 0.0)
 		tree.set(LOCO + "drop_hang/speed/scale", (DROP_SEG.y - DROP_SEG.x) / maxf(climb_duration, 0.2))
@@ -868,6 +1041,10 @@ func _drive_air(delta: float) -> void:
 
 
 const ROPE_LET_GO_XFADE := 0.5
+## A ledge climb-up (LEDGE_CLIMB) starts this far into the climb clip: the hands already on top (s).
+const CLIMB_FROM_HANG := 0.22
+## The surface stroke clip's own speed (m/s).
+const SWIM_STROKE_SPEED := 1.5
 ## Seconds before touchdown the legs are fully down .. start coming down.
 const LEGS_READY := Vector2(0.08, 0.4)
 ## Landing speed (m/s) for no squat .. the clip's full squat.

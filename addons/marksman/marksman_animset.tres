@@ -74,6 +74,10 @@ groups = Array[Dictionary]([{
 }])
 overrides = {
 "jog_f": "mixamo/U_Run_F",
+"mk_fall": "mixamo/AAD_FallingIdle",
+"mk_hop": "mixamo/LMM_Jump",
+"mk_jump_run": "mixamo/AXE_UnarmedJumpRunning",
+"mk_land_hard": "mixamo/AAD_HardLanding",
 "p_idle": "mixamo/PST_PistolIdle",
 "p_run_f": "mixamo/PST_PistolRun",
 "p_sprint_f": "mixamo/S_Fast",

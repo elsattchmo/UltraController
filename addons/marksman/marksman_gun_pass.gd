@@ -453,6 +453,7 @@ func _post_hands(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 		post_off = 0.0
 		return
 	var parts: Array = ragdoll.parts
+	_ride_t += dt
 	_carry_arms(mod, sk)
 	if not two:
 		grip_w = 1.0
@@ -553,6 +554,19 @@ func _apply_gun_kick(pose: Array[Transform3D], rh: int, grip: Transform3D) -> vo
 
 ## Animated (kinematic) arms on a chest the physics moved: placed on it as they are on the animated chest - the gun
 ## rocks with the body instead of the arms staying where the chest was (a stretched shoulder).
+## The arms ride a body hit's jolt, then bring the gun back onto the aim whatever the trunk still does: held for
+## RIDE_TIME.x after the hit, aimed back out by RIDE_TIME.y (s). A tilt past RIDE_TILT (rad: the body going over) is
+## always ridden.
+const RIDE_TIME := Vector2(0.12, 0.45)
+const RIDE_TILT := Vector2(0.25, 0.5)
+var _ride_t := 9.0
+
+
+## A hit to the body (MarksmanRagdoll.hit): the arms ride the jolt it gives the chest.
+func body_hit() -> void:
+	_ride_t = 0.0
+
+
 func _carry_arms(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 	var uc := _part("UpperChest")
 	if uc < 0 or mod.anim_pose.size() <= uc:
@@ -563,6 +577,20 @@ func _carry_arms(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 	if shown.is_equal_approx(anim):
 		return
 	var delta := shown * anim.affine_inverse()
+	# (The jolt is ridden; what the trunk keeps after it - a settling chest, a stagger's steps - the arms aim back out:
+	# riding all of it left the gun 2-8 deg off the aim for as long as the body was physical.)
+	var q := delta.basis.get_rotation_quaternion()
+	var ang := q.get_angle()
+	if ang > 1e-5:
+		var keep := maxf(1.0 - smoothstep(RIDE_TIME.x, RIDE_TIME.y, _ride_t), smoothstep(RIDE_TILT.x, RIDE_TILT.y, ang))
+		var rot := Basis(Quaternion.IDENTITY.slerp(q, keep))
+		# (Turned back about the chest - a shouldered gun about its stock, which stays in the riding shoulder's pocket:
+		# about the chest the hand went 2.6 cm into a staggered body.)
+		var piv := anim.origin
+		var gh := _gpart("Hand")
+		if _has_stock and gh >= 0 and gh < mod.anim_pose.size():
+			piv = (mod.anim_pose[gh] * _grip_grip * _stock_local).origin
+		delta = Transform3D(rot, delta * piv - rot * piv)
 	var pw := ragdoll.part_w
 	for n: String in MarksmanRagdoll.ARM_PARTS:
 		var i := _part(n)
@@ -1806,10 +1834,15 @@ func _turn_subtree(pose: Array[Transform3D], top: int, q: Quaternion, about: Vec
 const ELBOW_KEEP := 0.1
 const ELBOW_OUT_GUN := 1.3
 const ELBOW_OUT_SUPPORT := 0.7
+## The arm IK keeps the arm's own elbow side (MarksmanDraw: an arm going to / back from a holster - forced out, a
+## hanging arm's elbow stuck out like a wing).
+var keep_elbow := false
 
 
 ## Down and out from the shoulder (skeleton space) for an upper arm, else ZERO.
 func _elbow_hint(pose: Array[Transform3D], up: int) -> Vector3:
+	if keep_elbow:
+		return Vector3.ZERO
 	var arm_side := 0.0
 	if up == _part("LeftUpperArm"):
 		arm_side = 1.0

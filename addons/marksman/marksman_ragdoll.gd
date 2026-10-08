@@ -15,6 +15,8 @@ var group := -1
 var gun_pass: MarksmanGunPass
 ## The legs on a swing rope (MarksmanRopePass).
 var rope_pass: MarksmanRopePass
+## The hands on a ledge while hanging (MarksmanLedgePass).
+var ledge_pass: MarksmanLedgePass
 
 
 func setup(c: UltraCharacter) -> void:
@@ -25,6 +27,8 @@ func setup(c: UltraCharacter) -> void:
 		modifier.post_passes.append(gun_pass)
 		rope_pass = MarksmanRopePass.new(c, self)
 		modifier.passes.append(rope_pass)
+		ledge_pass = MarksmanLedgePass.new(c, self)
+		modifier.passes.append(ledge_pass)
 
 
 func _setup_gait() -> void:
@@ -65,7 +69,9 @@ func wanted_group() -> int:
 	var posture := MarksmanStance.posture(character)
 	if posture == "prone":
 		posture = "crouch"           # (the gait isn't walking; keep the nearest stance's legs ready)
-	var gi := aset.group_index(MarksmanStance.of(character), posture)
+	# (The held item's stance, not the shown one (MarksmanDraw): switched mid-stride as the hand took the gun, the gait's
+	# group moved the hips 3.3 cm in a tick - at the draw's start it's where it always was, 1.9.)
+	var gi := aset.group_index(MarksmanStance.of_item(character.held_def()), posture)
 	if gi < 0:
 		gi = aset.group_index("unarmed", posture)
 	return maxi(gi, 0)
@@ -157,7 +163,8 @@ func _update_gait(dt: float) -> void:
 func _gait_upper_weight(busy: bool, speed: float) -> float:
 	var st := character.state
 	var drv := character.anim as SinewAnimDriver
-	var item_busy := st.held_uid != 0 and MarksmanStance.of(character) == "unarmed"
+	# (The held item's own stance, not the shown one: drawing a gun shows unarmed until the hand has it.)
+	var item_busy := st.held_uid != 0 and MarksmanStance.of_item(character.held_def()) == "unarmed"
 	var really := item_busy or st.held_id != 0 or (drv != null and drv.upper_busy())
 	return super._gait_upper_weight(really, speed)
 
@@ -240,6 +247,7 @@ func sinew_pre_step(dt: float) -> void:
 	_track_hips(dt)
 	var bracing := _land_brace and not active
 	super.sinew_pre_step(dt)
+	_buoy(dt)
 	if not bracing:
 		_land_brace = false
 		return
@@ -303,6 +311,8 @@ func hit(region: int, dir: Vector3, amount: float) -> void:
 	# before its muscles take it, 23 cm in 0.18 s whatever the push, and keeps a wrist error while physical.)
 	if armed_hold() and region in ARM_REGIONS:
 		gun_pass.arm_hit(region, dir, amount)
+	elif armed_hold():
+		gun_pass.body_hit()
 	var imp := minf(amount * hit_impulse_per_damage, hit_impulse_max)
 	var c := character as SinewCharacter
 	var hv := Vector3(character.state.vel.x, 0.0, character.state.vel.z)
@@ -432,6 +442,17 @@ func armed_hold() -> bool:
 	return gun_pass != null and gun_pass.weight > 0.5
 
 
+## A stagger takes the whole body at once (Sinew sets every part physical); the arms holding a gun stay the animation's
+## from the first tick - eased back by the hook they flailed for 0.3 s and the support hand flew 10 cm off the grip.
+func start_stagger() -> void:
+	super.start_stagger()
+	if not armed_hold():
+		return
+	for i in parts.size():
+		if String(parts[i].name) in ARM_PARTS and not _limp_arm(i):
+			part_w[i] = 0.0
+
+
 func _part_wants_physics(i: int, want: bool) -> bool:
 	if _limp_arm(i):
 		return true
@@ -558,6 +579,34 @@ func _decide_getup() -> void:
 	getup_variant = {"clip": pick[0], "from": pick[1], "to": pick[2]}
 	if not is_nan(getup_yaw):
 		getup_yaw += deg_to_rad(float(list[0][3]) - float(pick[3]))
+
+
+## Water holds a body up (the UltraController's UltraRagdoll._buoy, per Sinew part): a part under the surface is pushed
+## up by how deep it is (<= BUOY_MAX m/s2 - more than gravity from BUOY_DEPTH 0.35 m down) and slowed by the water. A
+## plunge leaves the body limp at the surface instead of on the pool's floor while the capsule floats (Sinew had none).
+const BUOY_PER_M := 28.0
+const BUOY_MAX := 15.0
+const WATER_DRAG := 2.2
+const WATER_SPIN_DRAG := 1.8
+
+
+func _buoy(dt: float) -> void:
+	if UltraWater.all.is_empty() or _id == 0 or not active:
+		return
+	var tick := TickPlatform.current_tick
+	for i in parts.size():
+		if not bool(world.physics.call("character_attached", _id, i)):
+			continue
+		var body: int = world.physics.call("character_body", _id, i)
+		var at: Vector3 = (world.physics.call("body_transform", body) as Transform3D).origin
+		var d := UltraWater.depth_at(at, tick)
+		if d <= 0.0:
+			continue
+		var v: Vector3 = world.physics.call("linear_velocity", body)
+		v += Vector3.UP * minf(d * BUOY_PER_M, BUOY_MAX) * dt
+		world.physics.call("set_linear_velocity", body, v * exp(-WATER_DRAG * dt))
+		var w: Vector3 = world.physics.call("angular_velocity", body)
+		world.physics.call("set_angular_velocity", body, w * exp(-WATER_SPIN_DRAG * dt))
 
 
 ## Getting up the character takes the clip's facing - the way the body lies - rather than turning the body round on the

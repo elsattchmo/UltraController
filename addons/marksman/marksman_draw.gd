@@ -144,12 +144,14 @@ func apply(gp: MarksmanGunPass, sk: Skeleton3D, pose: Array[Transform3D]) -> boo
 	var supports := _def.two_handed and gp.two and lh >= 0 and gp._clip_pose.size() == pose.size() and not rel.is_equal_approx(Transform3D.IDENTITY)
 	if supports:
 		support_w = smoothstep(SUPPORT_FROM, 1.0, bring) if not at_place else 0.0
+	gp.keep_elbow = true
 	gp._two_bone(pose, ua, la, h, target, 1.0)
 	if supports:
 		var clip_hand: Transform3D = gp._clip_pose[lh]
 		var on_gun: Transform3D = pose[h] * grip * rel
 		var s_target := clip_hand.interpolate_with(on_gun, support_w) if support_w > 0.0 else clip_hand
 		gp._two_bone(pose, gp._part("LeftUpperArm"), gp._part("LeftLowerArm"), lh, s_target, 1.0)
+	gp.keep_elbow = false
 	return true
 
 

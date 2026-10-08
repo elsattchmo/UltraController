@@ -253,6 +253,13 @@ Marksman makes all of it **visible through the body**: the gun pass drives the a
 ### V8 – Docs and wrap-up
 - CLAUDE.md section (kept up per change), ANIMATION_GUIDE updates, known issues (below).
 
+### V9 – Jumps, ledges, landings, water (the user's round after V8)
+- Jumps on their own clips (standing hop, moving jump, sprint leap), falls, landings by impact (soft on the jump's clip,
+  squat, hard landing) and momentum (a stumble on at jogging pace); the brace catch onto a ledge; hands on the lip; a
+  diagonal stick shimmies; climb up from a hang; water: stroke pace, hovering under water, a floating limp plunge. g13.
+- Still open: a hang-to-top climb clip (procedural / authored: none in the packs), mantle vs vault vs step-up by height
+  (ClimbUp_1m everywhere), Sinew reacting physically on a catch, an underwater stroke (no clip: the surface crawl pitched).
+
 ## Known issues
 - The unarmed back walk (UAL Walk_Backwards) scuffs its feet as they land and lift: 2.1-2.4 mm a frame under motion
   matching after the foot lock holds a foot while the clip has it flat (`GROUND_KEEP`; it was 6).

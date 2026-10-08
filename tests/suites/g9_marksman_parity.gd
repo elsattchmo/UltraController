@@ -122,7 +122,7 @@ func test_every_state_shows_its_node() -> void:
 			var up := ch.state.is_grounded() and ch.state.pos.y > top - 0.2
 			return frame(Vector2(0, 1) if not up else Vector2.ZERO, InputFrame.B_JUMP if ch.state.pos.z < -27.3 else 0),
 			func(ch: MarksmanCharacter) -> bool: return ch.state.is_grounded() and ch.state.pos.y > top - 0.15 and ch.state.state in [Id.IDLE, Id.MOVE] and ch.state.state_time > 0.3)
-		bad += _report("ledge %.1f m" % top, r, ["climb_up"] if h == 100 else ["hang", "climb_up"])
+		bad += _report("ledge %.1f m" % top, r, ["climb_up"] if h == 100 else ["catch", "climb_up"])
 		await _done(c)
 	# Vault at a sprint.
 	var av := _at("parkour_start")
@@ -177,7 +177,7 @@ func test_every_state_shows_its_node() -> void:
 	bad += _report("running leap", rg, ["air_run"])
 	var rj: Dictionary = await _course(cg, 90, func(k: int, _ch: MarksmanCharacter) -> InputFrame:
 		return frame(Vector2.ZERO, InputFrame.B_JUMP if k == 30 else 0), never)
-	bad += _report("standing jump", rj, ["air"])
+	bad += _report("standing jump", rj, ["hop"])
 	var rs: Dictionary = await _course(cg, 150, func(k: int, _ch: MarksmanCharacter) -> InputFrame:
 		return frame(Vector2(0, 1), InputFrame.B_SPRINT | (InputFrame.B_CROUCH if k >= 70 and k < 74 else 0)), never)
 	bad += _report("slide", rs, ["slide"])
