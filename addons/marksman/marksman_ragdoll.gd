@@ -445,3 +445,68 @@ func _relax_hit_limbs(dt: float) -> void:
 	super._relax_hit_limbs(dt)
 	for part: int in held:
 		_hit_relax[part] = held[part]
+
+
+# ------------------------------------------------------------------ getting up: the clip for how the body lies
+
+## Get-up clips by how the body lies: [clip, rise segment from .. to (s), the head's heading in the clip at `from`
+## (deg, model space)]. Only clips that rise from the pose they start in and end facing ahead: GetUp_Back / GetUp_Stomach
+## end turned 50-57 deg (a snap at the end), ZN_ZombieStandUp rolls over from its back onto its front on the way up.
+const GETUPS := {
+	"up": [["LayToIdle", 0.0, 1.5, -180.0]],
+	"down": [["mixamo/GetUp_Prone", 1.4, 5.3, -13.0], ["mixamo/StandUp_Stomach", 3.0, 8.2, 1.0]],
+}
+## The get-up picked for this knock-down: {clip, from, to} (MarksmanAnimDriver plays that segment).
+var getup_variant := {}
+var _getups := 0
+
+
+## Face up or down by where the BELLY points (the pelvis and the chest together; a body on its side goes the way it's
+## nearer to - the chest alone at -0.2 sent a body lying on its side face down into the face-up clip, and it rolled
+## over onto its back to get up). Then one of that way's clips, the yaw set by its own lying heading.
+func _decide_getup() -> void:
+	super._decide_getup()
+	var chest := _part("Chest")
+	var head := _part("Neck")
+	if chest < 0 or head < 0 or pose_now.is_empty():
+		getup_variant = {}
+		return
+	var belly := Vector3.ZERO
+	for i: int in [0, chest]:
+		var rest: Transform3D = parts[i].rest
+		belly += pose_now[i].basis * (rest.basis.orthonormalized().inverse() * Vector3(0, 0, 1))
+	var front := belly.y < 0.0
+	if front != getup_front:
+		getup_front = front
+		var h := pose_now[head].origin - pose_now[0].origin
+		h.y = 0.0
+		getup_yaw = (atan2(-h.x, -h.z) if front else atan2(h.x, h.z)) if h.length() > 0.05 else NAN
+	var list: Array = GETUPS["down" if front else "up"]
+	_getups += 1
+	var pick: Array = list[posmod(hash(Vector2i(character.net_id, _getups)), list.size())]
+	getup_variant = {"clip": pick[0], "from": pick[1], "to": pick[2]}
+	if not is_nan(getup_yaw):
+		getup_yaw += deg_to_rad(float(list[0][3]) - float(pick[3]))
+
+
+## Getting up the character takes the clip's facing - the way the body lies - rather than turning the body round on the
+## ground to its old facing (the get-up yaw eased back to the capsule's over the clip: the body pivoted while lying).
+## Single player (the capsule is the truth in a session); the aim follows it round (MarksmanCharacter._process).
+func _physics_process(delta: float) -> void:
+	var was := _getting_up
+	super._physics_process(delta)
+	if _getting_up and not was:
+		_face_getup()
+
+
+func _face_getup() -> void:
+	var c := character as MarksmanCharacter
+	var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
+	if c == null or is_nan(getup_yaw) or not offline or not c.is_authority():
+		return
+	var from := c.state.body_yaw
+	c.state.body_yaw = wrapf(getup_yaw, -PI, PI)
+	c._prev_yaw = c.state.body_yaw
+	c.ragdoll_yaw = 0.0
+	c.aim_turn_left = angle_difference(c.input_source.live_yaw if c.input_source else from, c.state.body_yaw)
+

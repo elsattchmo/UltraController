@@ -117,21 +117,29 @@ func test_hip_gun_clears_the_view() -> void:
 			await ticks(90)
 			var blocked := 0
 			var top := -90.0
+			var across := 0.0
 			for k in 20:
 				await get_tree().process_frame
 				var cam := rig.camera.global_transform
 				var fwd := -cam.basis.z
 				var hit := _ray_hits_gun(eq.held_node, cam.origin, fwd)
 				blocked += 1 if hit else 0
+				# How far right of the centre the gun's middle sits (deg).
+				var mid := Vector3.ZERO
+				var corners := _gun_corners(eq.held_node)
+				for p: Vector3 in corners:
+					mid += p / corners.size()
+				var dm := mid - cam.origin
+				across = rad_to_deg(atan2(dm.dot(cam.basis.x), maxf(dm.dot(fwd), 0.01)))
 				# The gun's highest point in the view (deg above the centre; negative = below it).
-				for p: Vector3 in _gun_corners(eq.held_node):
+				for p: Vector3 in corners:
 					var d := (p - cam.origin)
 					var up := rad_to_deg(atan2(d.dot(cam.basis.y), maxf(d.dot(fwd), 0.01)))
 					var side := rad_to_deg(atan2(absf(d.dot(cam.basis.x)), maxf(d.dot(fwd), 0.01)))
 					if side < 12.0:
 						top = maxf(top, up)
 			var label := "%s %s" % [item, spec[0]]
-			info("%-18s line of sight through the gun %d of 20 frames; gun's top near the centre %.1f deg" % [label, blocked, top])
+			info("%-18s line of sight through the gun %d of 20 frames; gun's top near the centre %.1f deg, its middle %.1f deg right" % [label, blocked, top, across])
 			# (A held-out pistol sits well below the centre; a shouldered long gun's receiver just under the line of sight.)
 			var most := -4.0 if item == &"pistol" else 2.0
 			check(blocked == 0 and top < most, "%s: the gun clears the line of sight (blocked %d frames, top %.1f deg)" % [label, blocked, top])

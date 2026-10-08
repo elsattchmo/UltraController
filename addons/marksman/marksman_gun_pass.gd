@@ -23,6 +23,8 @@ const NECK_MAX := 0.35
 const HEAD_SHARE := 0.6
 ## The shoulder pocket off the right shoulder joint, in the chest's frame (x = left / inward, y = up, z = forward), m.
 const POCKET := Vector3(0.06, -0.04, 0.05)
+## A shouldered gun at the hip: its stock at least this far to the view's right of the eye and below it (m).
+const HIP_LONG := Vector2(0.10, 0.07)
 ## Where a held-out gun's hand sits off the eye (m along the view's right, up, forward): low and right, out in front.
 const PISTOL_HIP := Vector3(0.13, -0.22, 0.45)
 
@@ -317,7 +319,7 @@ func _reload_pose(pose: Array[Transform3D], rh: int, grip: Transform3D, def: Ite
 ## The left hand (skeleton space) on the reload's path now, or an empty transform.
 func _reload_hand(sk: Skeleton3D, gun: Transform3D, sup: Transform3D, def: ItemDefinition, st: MotorState) -> Transform3D:
 	var eq := _equipment()
-	if eq == null or eq.held_node == null:
+	if eq == null or eq.held_node == null or not _learn_palm(sk):
 		return Transform3D()
 	if String(def.stat("reload_mode", "")) == "shell":
 		return _shell_hand(sk, gun, sup, def, st, eq)
@@ -549,6 +551,25 @@ func _shoulder(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transfor
 		gun.origin = pocket - gun.basis * _stock_local.origin
 		var muzzle := gun * _muzzle_local.origin
 		d = (target_sk - muzzle).normalized()
+	# At the hip the gun rides out to the right of the face (as the UltraController held it) - the sights come back onto
+	# the eye in ADS (_aim_down_sights works from wherever the gun is). Turned back onto the aim from there.
+	# (Off the EYE: standing, the rifle clip leans the head over the stock - off the pocket the gun stayed mid-view.)
+	var neck := _part("Neck")
+	if neck >= 0 and _eye_local == Vector3.INF:
+		_eye_setup(sk)
+	if weight > 0.001 and neck >= 0 and _head_bone >= 0:
+		var eye := _eye(sk, pose, neck)
+		var view_d := (target_sk - eye).normalized()
+		var view_r := view_d.cross(Vector3.UP).normalized()
+		var st := gun * _stock_local.origin
+		var right := (st - eye).dot(view_r)
+		var below := (eye - st).y
+		var move := view_r * maxf(HIP_LONG.x - right, 0.0) + Vector3.DOWN * maxf(HIP_LONG.y - below, 0.0)
+		if move.length() > 1e-4:
+			gun.origin += move * weight
+			var turn := _barrel_turn(gun, target_sk)
+			var s0 := gun * _stock_local.origin
+			gun = Transform3D(Basis(turn) * gun.basis, s0 + Basis(turn) * (gun.origin - s0))
 	stock = gun * _stock_local.origin
 	_two_bone(pose, sh, _part("RightLowerArm"), rh, gun * grip.affine_inverse(), weight)
 
@@ -632,21 +653,29 @@ func _eye_setup(sk: Skeleton3D) -> void:
 ## The support hand under the fore-end (skeleton space): its fingers along `support_fingers`, palm toward
 ## `support_palm` (item frame), the palm on M_SupportGrip - as UltraEquipmentVisual._support_under does it.
 func _support_under(sk: Skeleton3D, gun: Transform3D, def: ItemDefinition) -> Transform3D:
-	if _palm_local == Vector3.ZERO:
-		var hb := sk.get_bone_global_rest(sk.find_bone("LeftHand"))
-		var tip := Vector3.ZERO
-		for f in ["LeftMiddleDistal", "LeftRingDistal", "LeftIndexDistal"]:
-			tip += sk.get_bone_global_rest(sk.find_bone(f)).origin / 3.0
-		var v := hb.basis.orthonormalized().inverse() * (tip - hb.origin)
-		v.y = 0.0
-		if v.length() < 0.005:
-			return Transform3D()
-		_palm_local = v.normalized()
+	if not _learn_palm(sk):
+		return Transform3D()
 	if _grip_for != _muzzle_for:
 		_grip_for = _muzzle_for
 		_grip_contact = UltraPoseSampler.marker(_muzzle_for, "M_SupportGrip").origin
 	var gb := gun.basis.orthonormalized()
 	return _left_hand(gb * def.support_fingers, gb * def.support_palm, gun * _grip_contact, 0.03)
+
+
+## The left hand's own palm axis (its rest pose, toward the curled fingertips): learnt once. False when it can't be.
+func _learn_palm(sk: Skeleton3D) -> bool:
+	if _palm_local != Vector3.ZERO:
+		return true
+	var hb := sk.get_bone_global_rest(sk.find_bone("LeftHand"))
+	var tip := Vector3.ZERO
+	for f in ["LeftMiddleDistal", "LeftRingDistal", "LeftIndexDistal"]:
+		tip += sk.get_bone_global_rest(sk.find_bone(f)).origin / 3.0
+	var v := hb.basis.orthonormalized().inverse() * (tip - hb.origin)
+	v.y = 0.0
+	if v.length() < 0.005:
+		return false
+	_palm_local = v.normalized()
+	return true
 
 
 ## The left hand bone (skeleton space) with its fingers along `fingers`, palm toward `palm`, the palm on `contact`.

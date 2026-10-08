@@ -38,12 +38,16 @@ const SETS := {
 	# swung the support hand 12 cm off the gun.)
 	"pistol": ["mixamo/PST_PistolIdle", "mixamo/PST_PistolWalk", "mixamo/PST_PistolWalkBackward",
 		"mixamo/PST_PistolStrafe", "mirror:mixamo/PST_PistolStrafe", "mixamo/PST_PistolStrafe2", "mirror:mixamo/PST_PistolStrafe2",
-		"mixamo/PST_PistolRun", "mixamo/PST_PistolRunBackward", "mixamo/S_Fast"],
+		"mixamo/PST_PistolRun", "mixamo/PST_PistolRunBackward", "mixamo/S_Fast", "mixamo/U_Run_L", "mixamo/U_Run_R"],
 	# Limping (a second matcher, in step with the first: see `follow`, MarksmanAnimDriver._drive_limp), by the bad leg:
 	# Injured_Walk favours the left (UltraController's measure), Injured_Walk_Back the right, the INJ pack's hurting
 	# idle stands on the right (129 of 181 frames) - mirrored for the other leg.
-	"limp_l": ["mixamo/INJ_InjuredHurtingIdle", "mixamo/Injured_Walk", "mirror:mixamo/Injured_Walk_Back", "mixamo/INJ_InjuredRun"],
-	"limp_r": ["mirror:mixamo/INJ_InjuredHurtingIdle", "mirror:mixamo/Injured_Walk", "mixamo/Injured_Walk_Back", "mirror:mixamo/INJ_InjuredRun"],
+	# (The injured pack hurts the LEFT leg - its back clips the right; INJ_InjuredWalk / WalkBackwards are the same clips
+	# as Injured_Walk / _Back. No injured strafes exist: sideways the procedural limp shows it, MarksmanMMPass._limp.)
+	"limp_l": ["mixamo/INJ_InjuredHurtingIdle", "mixamo/Injured_Walk", "mirror:mixamo/Injured_Walk_Back", "mixamo/INJ_InjuredRun",
+		"mirror:mixamo/INJ_InjuredRunBackwards"],
+	"limp_r": ["mirror:mixamo/INJ_InjuredHurtingIdle", "mirror:mixamo/Injured_Walk", "mixamo/Injured_Walk_Back", "mirror:mixamo/INJ_InjuredRun",
+		"mixamo/INJ_InjuredRunBackwards"],
 	"unarmed_crouch": RFP_CROUCH,
 	"rifle_crouch": RFP_CROUCH,
 	"pistol_crouch": RFP_CROUCH,
@@ -235,7 +239,14 @@ func _wish() -> Vector2:
 func _target_speed() -> float:
 	if character.motor == null or character.last_input == null:
 		return 0.0
-	return character.motor.target_ground_speed(character.state.copy(), character.last_input)
+	# (A sideways run is the jog gait for that tick - MarksmanCharacter.simulate: predicted the same way.)
+	var p := character.profile
+	var gait := p.default_gait
+	if MarksmanCharacter.side_run_wanted(character.state, character.last_input):
+		p.default_gait = MovementProfile.Gait.JOG
+	var v := character.motor.target_ground_speed(character.state.copy(), character.last_input)
+	p.default_gait = gait
+	return v
 
 
 ## The motor's ground acceleration (UltraMotor.accelerate_ground, without friction / slopes) run forward from the

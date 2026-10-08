@@ -112,7 +112,24 @@ func _build_sinew() -> AnimationNodeBlendTree:
 		m.add_node("carms", carms, Vector2(800, 0))
 		m.connect_node("carms", 0, "arms")
 		m.connect_node("carms", 1, "carms_seek")
-		m.connect_node("output", 0, "carms")
+		# (Turning on the spot: the stance's turn clip, in place, seeked by how far the body has turned - _drive_mk_turn.)
+		_mk_turn_setup()
+		for k in 2:
+			var tc := AnimationNodeAnimation.new()
+			tc.animation = _clip(&"idle")
+			m.add_node("turn_clip%d" % k, tc, Vector2(600, 600 + k * 120))
+			m.add_node("turn_seek%d" % k, AnimationNodeTimeSeek.new(), Vector2(800, 600 + k * 120))
+			m.connect_node("turn_seek%d" % k, 0, "turn_clip%d" % k)
+		var tb := AnimationNodeBlend3.new()
+		tb.filter_enabled = true
+		for b in _leg_bones():
+			tb.set_filter_path(NodePath("%" + String(skeleton.name) + ":" + b), true)
+		tb.set_filter_path(NodePath("%" + String(skeleton.name) + ":Hips"), true)
+		m.add_node("turn", tb, Vector2(1000, 0))
+		m.connect_node("turn", 0, "turn_seek0")
+		m.connect_node("turn", 1, "carms")
+		m.connect_node("turn", 2, "turn_seek1")
+		m.connect_node("output", 0, "turn")
 		loco.add_node("mm", m, Vector2(0, 200))
 		for n in loco.get_node_list():
 			if n == &"mm" or n == &"Start" or n == &"End":
@@ -123,6 +140,145 @@ func _build_sinew() -> AnimationNodeBlendTree:
 				t.xfade_curve = _ease_curve()
 				loco.add_transition(pair[0], pair[1], t)
 	return root
+
+
+# ------------------------------------------------------------------ turning on the spot
+
+## Turn clips per stance [left, right] (registered as roles at build): each weapon type its own - the RFP pack's for the
+## rifle stance (rifle, shotgun), the Mixamo axe pack's for a one-handed melee weapon, the plain standing / crouching
+## turns unarmed and for the pistol (the pistol pack has none; its arms are the gun pass's).
+const MK_TURNS := {
+	"unarmed": ["mixamo/T_StandL90", "mixamo/T_StandR90"],
+	"unarmed_crouch": ["mixamo/T_CrouchB_L", "mixamo/T_CrouchB_R"],
+	"rifle": ["mixamo/RFP_Turn90Left", "mixamo/RFP_Turn90Right"],
+	"rifle_crouch": ["mixamo/RFP_CrouchingTurn90Left", "mixamo/RFP_CrouchingTurn90Right"],
+	"pistol": ["mixamo/T_StandL90", "mixamo/T_StandR90"],
+	"pistol_crouch": ["mixamo/T_CrouchB_L", "mixamo/T_CrouchB_R"],
+	"melee": ["mixamo/AXE_StandingTurnLeft90", "mixamo/AXE_StandingTurnRight90"],
+	# Limping (the limp layer most of the picture): the injured pack's turns, the hurt leg the left - mirrored for the
+	# right (a mirrored left turn is a right turn).
+	"limp_l": ["mixamo/INJ_InjuredTurnLeft", "mixamo/INJ_InjuredTurnRight"],
+	"limp_r": ["mirror:mixamo/INJ_InjuredTurnRight", "mirror:mixamo/INJ_InjuredTurnLeft"],
+}
+## Turned this far from where the feet were left (rad) and a turn clip starts; below it the planted feet pivot.
+const MK_TURN_START := 0.35
+var _mk_turns := {}              ## key -> [left in-place clip, right in-place clip]
+var _mk_feet_yaw := NAN
+var _mk_turn_dir := 0            ## -1 left, 1 right, 0 none
+var _mk_turn_from := 0.0
+var _mk_turn_p := 0.0
+var _mk_turn_key := ""
+var _mk_still := 0.0
+var _mk_last_yaw := NAN
+## How much a turn clip has the legs (0 .. 1).
+var turn_w := 0.0
+
+
+## A turn is stepping the feet now (the matched pass's foot locks stand aside; as it fades out they hold the feet where
+## the turn left them - fading to the idle's stance slid them 25 cm).
+func turn_stepping() -> bool:
+	return _mk_turn_dir != 0
+
+
+func _mk_turn_setup() -> void:
+	_mk_turns.clear()
+	for key: String in MK_TURNS:
+		var pair := []
+		for k in 2:
+			var role := StringName("mk_turn_%s_%d" % [key, k])
+			var src := String(MK_TURNS[key][k])
+			anim_set.roles[role] = _mirrored(StringName(src.trim_prefix("mirror:"))) if src.begins_with("mirror:") else StringName(src)
+			pair.append(_turn_clip(role) if _role_anim(role) != null else &"")
+		if pair[0] != &"" and pair[1] != &"":
+			_mk_turns[key] = pair
+
+
+func _mk_turn_key_now() -> String:
+	var c := get_parent() as UltraCharacter
+	var d := c.held_def() if c else null
+	if limp_w > 0.4 and c.state.stance != MotorState.Stance.CROUCH:
+		return "limp_l" if UltraInjury.leg_damage(c.state, true) >= UltraInjury.leg_damage(c.state, false) else "limp_r"
+	if d and d.kind == ItemDefinition.Kind.MELEE and not d.two_handed and c.state.stance != MotorState.Stance.CROUCH:
+		return "melee"
+	return MarksmanMotionMatcher.key_for(c)
+
+
+func _drive_mk_turn(delta: float) -> void:
+	var c := get_parent() as UltraCharacter
+	var st := c.state
+	var yaw := st.body_yaw
+	var sp := Vector2(st.vel.x, st.vel.z).length()
+	var key := _mk_turn_key_now()
+	var standing := sp < 0.25 and st.is_grounded() and _mk_turns.has(key)
+	var rate := absf(angle_difference(_mk_last_yaw, yaw)) / maxf(delta, 1e-3) if not is_nan(_mk_last_yaw) else 0.0
+	_mk_last_yaw = yaw
+	if not standing or is_nan(_mk_feet_yaw):
+		_mk_feet_yaw = yaw
+		_mk_turn_dir = 0
+	elif _mk_turn_dir == 0:
+		var off := angle_difference(_mk_feet_yaw, yaw)           # (+ = turned left: yaw grows anticlockwise)
+		if absf(off) > MK_TURN_START:
+			_mk_turn_dir = -1 if off > 0.0 else 1
+			_mk_turn_from = _mk_feet_yaw
+			_mk_turn_key = key
+			_mk_turn_p = 0.0
+			_mk_still = 0.0
+			var node := ((tree.tree_root as AnimationNodeBlendTree).get_node("loco") as AnimationNodeStateMachine).get_node("mm") as AnimationNodeBlendTree
+			for k in 2:
+				(node.get_node("turn_clip%d" % k) as AnimationNodeAnimation).animation = _mk_turns[key][k]
+	if _mk_turn_dir != 0:
+		var clip: StringName = _mk_turns[_mk_turn_key][0 if _mk_turn_dir < 0 else 1]
+		var tab: PackedFloat32Array = _turn_tabs.get(clip, PackedFloat32Array())
+		var total := tab[tab.size() - 1] if tab.size() > 1 else PI * 0.5
+		var signed := angle_difference(_mk_turn_from, yaw) * (-1.0 if _mk_turn_dir > 0 else 1.0)    # (+ = along the turn)
+		if signed < -0.15:
+			# Turned back the other way past where the feet are: a new turn that way.
+			inertial.trigger(MM_BLEND)
+			_mk_feet_yaw = yaw
+			_mk_turn_dir = 0
+		else:
+			_mk_still = _mk_still + delta if rate < 0.3 else 0.0
+			var want := clampf(signed / total, 0.0, 1.0)
+			if _mk_still > 0.12:
+				want = 1.0                                  # (stopped: the clip plays on - the feet catch up)
+			_mk_turn_p = maxf(_mk_turn_p, move_toward(_mk_turn_p, want, delta * (2.2 if _mk_still > 0.12 else 30.0)))
+			if _mk_turn_p >= 0.999:
+				# A whole step done: the feet are under the body again. Still turning, the next step starts at once (waiting
+				# for MK_TURN_START again left the feet gliding round on the idle in between); stopped, the turn's over.
+				if _mk_still > 0.12:
+					_mk_feet_yaw = yaw
+					_mk_turn_dir = 0
+				else:
+					_mk_feet_yaw = _mk_turn_from + total * (-1.0 if _mk_turn_dir > 0 else 1.0)
+					_mk_turn_from = _mk_feet_yaw
+					_mk_turn_p = 0.0
+	var side_w := 1.0 if _mk_turn_dir != 0 else 0.0
+	turn_w = move_toward(turn_w, side_w, delta * (8.0 if side_w > 0.0 else 3.5))
+	var amt := smoothstep(0.0, 1.0, turn_w) * float(_mk_turn_dir if _mk_turn_dir != 0 else signf(tree.get(LOCO + "mm/turn/blend_amount")))
+	tree.set(LOCO + "mm/turn/blend_amount", amt)
+	if _mk_turn_dir != 0:
+		var k := 0 if _mk_turn_dir < 0 else 1
+		var clip2: StringName = _mk_turns[_mk_turn_key][k]
+		tree.set(LOCO + "mm/turn_seek%d/seek_request" % k, _turn_time(clip2, _mk_turn_p))
+
+
+## Getting up: the clip MarksmanRagdoll picked for how the body lies, only its rising segment, over the get-up time.
+func _go(want: String) -> void:
+	super._go(want)
+	if not want.begins_with("getup"):
+		return
+	var r := (get_parent() as UltraCharacter).ragdoll as MarksmanRagdoll if get_parent() is UltraCharacter else null
+	var v: Dictionary = r.getup_variant if r else {}
+	if v.is_empty():
+		return
+	var pn := String(v.clip)
+	var full := StringName(pn if pn.contains("/") or library_name == &"" else "%s/%s" % [library_name, pn])
+	if not player.has_animation(full):
+		return
+	var node := ((tree.tree_root as AnimationNodeBlendTree).get_node("loco") as AnimationNodeStateMachine).get_node(want) as AnimationNodeBlendTree
+	(node.get_node("clip") as AnimationNodeAnimation).animation = full
+	tree.set(LOCO + want + "/seek/seek_request", float(v.from))
+	tree.set(LOCO + want + "/speed/scale", (float(v.to) - float(v.from)) / maxf(get_up_time, 0.2))
 
 
 ## Both legs: thighs down (not the hips).
@@ -367,6 +523,7 @@ func _drive_mm(delta: float) -> void:
 		tree.set(LOCO + "mm/seek/seek_request", mm.time)
 		inertial.trigger(MM_BLEND)
 	tree.set(LOCO + "mm/rate/scale", mm.rate)
+	_drive_mk_turn(delta)
 	_drive_clip_arms(delta)
 	_drive_limp(key, delta)
 	if OS.get_environment("MM_DUMP") != "":

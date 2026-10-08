@@ -1441,3 +1441,29 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   stat "tuck_length", long 0.75 / else 0.45 m) - `simulate` strips B_PRIMARY from a COPY of the input when tucked
   (deterministic, the UltraController has no fire hook); the pass raises the muzzle 55 / 40 deg round the hand and draws
   it in by how far the gun would go into the wall (full at 25 cm), ADS off meanwhile.
+- **Turning on the spot (MM)**: per-stance turn clips (`MarksmanAnimDriver.MK_TURNS`: unarmed / pistol T_StandL90 / R90,
+  crouched T_CrouchB, rifle stance RFP_Turn90 / CrouchingTurn90, one-handed melee AXE_StandingTurn, limping the INJ
+  turns mirrored per bad leg), registered as roles, in place (UltraAnimDriver._turn_clip) on the mm node's filtered
+  (legs + hips) Blend3 `turn`, SEEKED by how far the body has turned since the feet were left (`_mk_feet_yaw`, start at
+  0.35 rad; chained at once past a clip's 90; stopped, the clip plays on so the feet catch up). Foot locks
+  (MarksmanMMPass._foot): off while a turn steps (a turn clip's foot is "down" by its ankle height), on at the shown
+  feet as it fades (release 0.45 m), an idle's feet always planted, and a foot waiting for a lift re-locks once its
+  release glide is done on an idle (the pistol idle never lifts: its feet stayed unlocked and turned with the body).
+  Released feet going > 6 cm are stepped on an arc, not slid. gm test_turning_on_the_spot_steps (skating 0-2 cm, was
+  0.75-1 m). A gait handover for turns was tried first (Sinew's turn steps): 0.13-0.31 m of skating, dropped for clips.
+- **Side run**: sprint held with the stick sideways / back (standing) = the jog gait that tick (`MarksmanCharacter.
+  side_run_wanted` - simulate sets `profile.default_gait` around super.simulate, the matcher's prediction too): ~3.4 m/s
+  on the run strafes (pistol set + U_Run_L / R). gm test_side_run.
+- **Long guns at the hip**: the stock >= `HIP_LONG` (0.10 m right, 0.07 below) off the EYE along the view (the user:
+  "on the right a bit more"; standing the rifle clip leaned the head over the stock: off the pocket it sat mid-view);
+  ADS works from there. g3: rifle / shotgun middle 16-25 deg right.
+- **Get-ups** (MarksmanRagdoll._decide_getup / MarksmanAnimDriver._go): face up / down by the BELLY (pelvis + chest; the
+  chest alone at -0.2 sent side-lying bodies into the face-up clip: they rolled over); `GETUPS` up = LayToIdle, down =
+  GetUp_Prone 1.4-5.3 / StandUp_Stomach 3.0-8.2 (only the rise, over get_up_time), picked by hash; yaw corrected by each
+  clip's lying head heading. GetUp_Back / GetUp_Stomach end turned 50-57 deg, ZN_ZombieStandUp rolls over: unused.
+  Single player the character TAKES the clip's facing at the get-up (`_face_getup`: body_yaw = getup_yaw, ragdoll_yaw
+  0 - it eased back to the old facing over the clip: the body pivoted on the ground) and the aim eases round by the same
+  angle (`MarksmanCharacter.aim_turn_left`, 2.8 rad/s; mouse input on top). gm test_get_up_the_way_it_lies.
+- **Limp clips**: + INJ_InjuredRunBackwards (mirrored like the walk back); INJ_InjuredWalk / WalkBackwards are the same as
+  Injured_Walk / _Back; no injured strafes exist (sideways = the procedural limp).
+- Ball launcher from a Marksman: gm test_ball_launcher_works (fires, knocks the target, not the shooter).
