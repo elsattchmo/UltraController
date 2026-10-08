@@ -127,7 +127,12 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	return changed
 
 
+var _step_dt := 0.0
+
+
 func _apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
+	_clip_pose = mod.clip_pose
+	_step_dt = clampf(mod.get_process_delta_time(), 0.0, 0.1)
 	var eq := _equipment()
 	var def: ItemDefinition = eq.held_def if eq else null
 	var gun_node: Node3D = eq.held_node if eq else null
@@ -1232,18 +1237,45 @@ func _shoulder(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transfor
 	if uc < 0 or sh < 0:
 		_hold_out(sk, pose, rh, grip, target_sk, PISTOL_HIP)
 		return
-	# Lean into the pitch (half of it, up the spine).
+	_chest_to_aim(pose, uc, sh, target_sk)
+	# Lean into the pitch (half of it up the spine; aiming down, more - the body folds over the gun).
 	var p0 := _pocket(pose, uc, sh)
 	var d0 := (target_sk - p0).normalized()
 	var pitch := asin(clampf(d0.y, -1.0, 1.0))
-	var lean := Quaternion(_chest_axes(pose, uc).x, pitch * 0.5)
+	var lean := Quaternion(_chest_axes(pose, uc).x, -pitch * (PITCH_UP_SHARE if pitch > 0.0 else PITCH_DOWN_SHARE))
 	for n: String in SPINE_SHARE:
 		var i := _part(n)
 		if i >= 0:
 			_turn_subtree(pose, i, Quaternion.IDENTITY.slerp(lean, float(SPINE_SHARE[n]) * weight), pose[i].origin)
+	var gun := _place_stock(pose, uc, sh, target_sk)
+	# (The support hand must still reach the fore-end: squared up by the chest's turn, the off shoulder can end up too far
+	# back - crouched walking, 2-5 cm short. Blade the chest back just enough, at most what the turn squared it up by: the
+	# off shoulder comes forward. Further - aiming steeply down the grip is low whatever - bladed the gun into the chest.)
+	var allow := maxf(chest_turn * side, 0.0)
+	if two and allow > 0.0:
+		for k in 3:
+			var short := _support_short(pose, gun)
+			if short <= 0.0 or allow <= 0.0:
+				break
+			var a := minf(minf(short / REACH_LEVER, 0.35), allow)
+			allow -= a
+			var q := Quaternion(Vector3.UP, -side * a)
+			for n: String in SPINE_SHARE:
+				var i := _part(n)
+				if i >= 0:
+					_turn_subtree(pose, i, Quaternion.IDENTITY.slerp(q, float(SPINE_SHARE[n]) * weight), pose[i].origin)
+			var neck := _part("Neck")
+			if neck >= 0:
+				_turn_subtree(pose, neck, Quaternion.IDENTITY.slerp(q.inverse(), weight), pose[neck].origin)
+			gun = _place_stock(pose, uc, sh, target_sk)
+	_two_bone(pose, sh, _gpart("LowerArm"), rh, gun * grip.affine_inverse(), weight)
+	_head_up_at_hip(sk, pose, target_sk)
+
+
+## The gun with its stock in the pocket, the barrel (-Z) onto the aim point from the muzzle (two rounds: the muzzle sits
+## off the line from the pocket). Sets `pocket` / `stock`.
+func _place_stock(pose: Array[Transform3D], uc: int, sh: int, target_sk: Vector3) -> Transform3D:
 	pocket = _pocket(pose, uc, sh)
-	# The gun: stock in the pocket, barrel (-Z) onto the aim point from the muzzle (two rounds: the muzzle sits off
-	# the line from the pocket).
 	var gun := Transform3D(Basis(), pocket)
 	var d := (target_sk - pocket).normalized()
 	for k in 2:
@@ -1255,8 +1287,73 @@ func _shoulder(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transfor
 		var muzzle := gun * _muzzle_local.origin
 		d = (target_sk - muzzle).normalized()
 	stock = gun * _stock_local.origin
-	_two_bone(pose, sh, _gpart("LowerArm"), rh, gun * grip.affine_inverse(), weight)
-	_head_up_at_hip(sk, pose, target_sk)
+	return gun
+
+
+## How far the support grip (M_SupportGrip) is beyond the off arm's reach (m; <= 0 = within it).
+const REACH_LEVER := 0.25          # (the off shoulder's distance from the spine: a turn of a rad moves it this far)
+var _support_local_for: Node3D = null
+var _support_local := Vector3.ZERO
+
+
+func _support_short(pose: Array[Transform3D], gun: Transform3D) -> float:
+	var ua := _part("LeftUpperArm")
+	var la := _part("LeftLowerArm")
+	var hd := _part("LeftHand")
+	if ua < 0 or la < 0 or hd < 0 or _muzzle_for == null:
+		return 0.0
+	if _support_local_for != _muzzle_for:
+		_support_local_for = _muzzle_for
+		_support_local = UltraPoseSampler.marker(_muzzle_for, "M_SupportGrip").origin if _muzzle_for.find_child("M_SupportGrip", true, false) else Vector3.INF
+	if _support_local == Vector3.INF:
+		return 0.0
+	var reach := (pose[ua].origin.distance_to(pose[la].origin) + pose[la].origin.distance_to(pose[hd].origin)) * 0.97 + 0.06
+	return pose[ua].origin.distance_to(gun * _support_local) - reach
+
+
+## The chest turns with the aim (a shouldered gun): it keeps the relation to the gun the stance clip has standing at its
+## aim (`_clip_pose`'s chest off its facing - the rifle stance blades it ~50 deg), so the gun stays where the clip holds
+## it whichever way it points - Sinew's torso twist gives the chest only half the aim's turn off the hips, on a lagging
+## spring: aimed across (left of the body for a right-handed stance) or turning at speed, the gun swung across the chest
+## and the arms went into it (rifle 45 deg left: gun 9 cm, right hand 7.6 cm in). Spread up the spine by SPINE_SHARE,
+## the neck turned back by the same (the head - the first-person eye - stays on the view). The aim heading is FOLLOWED
+## (CHEST_SPEED / CHEST_ACCEL, reset while the pass is off) and the turn solved afresh from it every frame, <= CHEST_MAX.
+const CHEST_MAX := 1.3
+const CHEST_SPEED := 14.0
+const CHEST_ACCEL := 160.0
+## How much of the aim's pitch the spine leans into (the rest is the gun pivoting in the shoulder).
+const PITCH_UP_SHARE := 0.5
+const PITCH_DOWN_SHARE := 0.5
+var chest_turn := 0.0                 ## (tests) the turn the chest got on top of the clip's + the twist (rad)
+var _aim_h_st := Vector2(INF, 0.0)    ## followed aim heading (skeleton space, unwrapped) + its speed
+var _clip_pose: Array[Transform3D] = []
+
+
+func _chest_to_aim(pose: Array[Transform3D], uc: int, sh: int, target_sk: Vector3) -> void:
+	var d := target_sk - pose[sh].origin
+	var ha := atan2(d.x, d.z)
+	if _aim_h_st.x == INF or weight < 0.05:
+		_aim_h_st = Vector2(ha, 0.0)
+	else:
+		_aim_h_st = UltraFollow.scalar(_aim_h_st, _aim_h_st.x + angle_difference(_aim_h_st.x, ha), _step_dt, CHEST_SPEED, CHEST_ACCEL)
+		if absf(_aim_h_st.x) > TAU:
+			_aim_h_st.x = wrapf(_aim_h_st.x, -PI, PI)
+	var ref := 0.0
+	if _clip_pose.size() == pose.size():
+		var cz := _chest_axes(_clip_pose, uc).z
+		ref = atan2(cz.x, cz.z)
+	var cz2 := _chest_axes(pose, uc).z
+	var r := clampf(angle_difference(atan2(cz2.x, cz2.z), _aim_h_st.x + ref), -CHEST_MAX, CHEST_MAX)
+	chest_turn = r
+	if absf(r) < 1e-4:
+		return
+	for n: String in SPINE_SHARE:
+		var i := _part(n)
+		if i >= 0:
+			_turn_subtree(pose, i, Quaternion(Vector3.UP, r * float(SPINE_SHARE[n]) * weight), pose[i].origin)
+	var neck := _part("Neck")
+	if neck >= 0:
+		_turn_subtree(pose, neck, Quaternion(Vector3.UP, -r * weight), pose[neck].origin)
 
 
 ## At the hip the head is up, off the stock: the rifle clips cant it over the gun (a cheek weld) and the gun sat in the

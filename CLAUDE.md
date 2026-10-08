@@ -1528,3 +1528,16 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   places the magazine for either hand (the base only for a right-handed two-handed reload). A hand switch mid-hold blends
   from the last pose over 0.3 s (`_switch_from`; solved straight onto the new side the body popped 27 cm). Suite g7; g5 / g6
   heal the limb after their hard hits (a crippling knock now means one hand).
+- **Shouldered guns aim without clipping** (user: "clip through our body heavily when turning right ... when aiming up
+  and a little down"; suite g8: aims held 30 / 45 deg either side, turns at 120 / 300 deg/s, pitch +-40 / 70, ADS, from a
+  shouldered rifle / shotgun and a two-handed pistol - arm depth as g6, the gun's (stock end excluded) and the head's):
+  (1) the pitch lean up the spine was INVERTED (`Quaternion(chest x, pitch)`: chest x is the character's left, so a
+  positive angle tips the chest DOWN): aiming up 70 the chest bent forward 47 deg, aiming down it rose. Now `-pitch x
+  PITCH_UP/DOWN_SHARE`. (2) `_chest_to_aim`: the chest keeps the stance clip's own relation to the aim (`mod.clip_pose`'s
+  chest off its facing: the rifle blades it ~52 deg) - Sinew's torso twist gives it half the aim's turn, on a lagging
+  spring; aimed across (left) or turning at speed the gun swung across the chest (gun 9-12 cm in). The aim heading is
+  followed (14 rad/s, 160 rad/s2), the turn solved afresh, spread by SPINE_SHARE, the neck turned back (the eye stays).
+  (3) a reach guard (`_support_short`): if that turn left the support grip out of the off arm's reach (crouched walking
+  2-5 cm, g2), the chest blades back at most by what the turn squared it up. The two-handed pistol (placed off the eye)
+  keeps its old hold: chest-follow made its static aims worse; its fast-turn / 70-down off-arm depths are g8 KNOWN.
+
