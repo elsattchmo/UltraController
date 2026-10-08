@@ -40,6 +40,7 @@ func _process_modification_with_delta(_delta: float) -> void:
 		# arm holding an item) stays attached to the gait's pelvis / spine instead of floating where
 		# the clip's own pelvis had it.
 		var clip := anim_pose.duplicate()
+		ragdoll.guard_clip_feet(sk.global_transform, clip)
 		var g: Array[Transform3D] = []
 		g.resize(n)
 		for i in n:

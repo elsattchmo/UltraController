@@ -230,6 +230,9 @@ func _update_gait(dt: float) -> void:
 		# (Not before the tree has posed the skeleton: the gait puts its feet down on the first stance it's given.)
 		var home: Variant = _clip_feet() if _powered_t >= 0.25 and _home_hold <= 0 else null
 		_home_hold -= 1
+		if _gait_reset_pending:
+			world.physics.call("character_gait_reset", _id, _gait_root())
+			_gait_reset_pending = false
 		pose.assign(world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt, cmd, home))
 		gait_prev = gait_now if gait_now.size() == pose.size() else pose
 		gait_now = pose
@@ -253,11 +256,79 @@ func _update_gait(dt: float) -> void:
 		var gs: Dictionary = world.physics.call("character_gait_state", _id)
 		off_home = bool(gs.get("pivoting", false)) or not bool(gs.get("feet_home", true))
 	var legs := 1.0 if stepping or off_home or not _clip_feet_on_ground() else 0.0
+	# The gait taking the legs back from the clip: at once - its feet are where the clip's stood (re-seated on
+	# them, or within the hand-over's tolerance). A fade mixed a clip foot standing turned out with the gait's
+	# lifting it, joint by joint down the leg: the foot spun 30 deg a frame in the air.
+	if legs == 1.0 and not _clip_anchor.is_empty():
+		for i in parts.size():
+			if _walks(i):
+				gait_part_w[i] = 1.0
+		_clip_anchor = []
+		_reseated = false
 	for i in parts.size():
 		if _walks(i):
 			gait_part_w[i] = move_toward(gait_part_w[i], legs, dt / (0.12 if stepping else 0.3))
 		else:
 			gait_part_w[i] = move_toward(gait_part_w[i], upper, dt / 0.25)
+	# While the clip has (or is taking) the legs its feet are watched from where they stood when the hand-over
+	# began (guard_clip_feet); once the clip has them all, the gait is re-seated exactly on them - they are its
+	# planted feet from then on, so taking the legs back shows no jump.
+	# (Not while the clip's feet aren't trusted - just powered on, or a teleport the skeleton hasn't caught up
+	# with: seated on the old spots, the body was left 12 cm behind.)
+	if _gait_running and legs == 0.0 and _legs_w() < 1.0 and _powered_t >= 0.25 and _home_hold <= 0:
+		var feet: Variant = _clip_feet()
+		if feet != null and _clip_anchor.is_empty():
+			_clip_anchor = feet
+		if feet != null and _legs_w() <= 0.0 and not _reseated and world.physics.has_method("character_gait_reseat_feet"):
+			# (Only the feet: a whole reset started the phase, the pelvis drop and the lean again at every pause.)
+			world.physics.call("character_gait_reseat_feet", _id)
+			world.physics.call("character_gait_update", _id, _gait_root(), st.vel, dt, character.get("motion_command"), feet)
+			_clip_anchor = feet
+			_reseated = true
+	elif _legs_w() >= 1.0:
+		_clip_anchor = []
+		_reseated = false
+
+
+## The clip's feet (world) as they stood when the clip began taking the legs (re-set when it has them all and
+## the gait is re-seated on them); empty while the gait has the legs.
+var _clip_anchor: Array = []
+var _reseated := false
+var _gait_reset_pending := false
+## Taking the legs back moves a foot past these (m, rad).
+const CLIP_FEET_SLIP := 0.015
+const CLIP_FEET_TURN := 0.05
+
+
+func _legs_w() -> float:
+	return gait_part_w[_feet_parts[0]] if _feet_parts.size() == 2 and _feet_parts[0] < gait_part_w.size() else 1.0
+
+
+## Called by the pose modifier each frame, with the clip's pose (skeleton space) before the gait goes over it.
+## While the clip has the legs, its feet are the feet on the ground: if they move or turn (the body's facing
+## snapped round to the aim, a change of stance cross-fading two idles' feet) a real foot would pivot on its
+## ball or step - so the gait takes the legs back at once, from the very spots they stood on, and steps or
+## pivots to the new ones. (Left to the clip, the feet turned 35-110 deg in a frame, flat on the ground.)
+func guard_clip_feet(sk_xf: Transform3D, clip: Array) -> void:
+	if _clip_anchor.size() != 2 or _feet_parts.size() != 2:
+		return
+	# (Moved somewhere else - a teleport the character didn't report through moved(): the gait starts again
+	# there. Further than any turn on the spot swings a foot.)
+	if (sk_xf * (clip[_feet_parts[0]] as Transform3D)).origin.distance_to((_clip_anchor[0] as Transform3D).origin) > 1.5:
+		_clip_anchor = []
+		_reseated = false
+		return
+	for k in 2:
+		var now: Transform3D = sk_xf * (clip[_feet_parts[k]] as Transform3D)
+		var was: Transform3D = _clip_anchor[k]
+		var turn := (was.basis.orthonormalized().get_rotation_quaternion().inverse() * now.basis.orthonormalized().get_rotation_quaternion()).get_angle()
+		if now.origin.distance_to(was.origin) > CLIP_FEET_SLIP or turn > CLIP_FEET_TURN:
+			for i in parts.size():
+				if _walks(i):
+					gait_part_w[i] = 1.0
+			_clip_anchor = []
+			_reseated = false
+			return
 
 
 ## The motor states the gait walks in (a controller built on Sinew adds crouching).
@@ -301,6 +372,12 @@ var _home_hold := 0
 ## The character was moved (teleport / respawn): the gait starts again on the next pose's stance.
 func moved() -> void:
 	_home_hold = 3
+	_clip_anchor = []
+	_reseated = false
+	# (Whatever the distance: the gait only resets itself on a jump of its root, and a teleport onto the same
+	# spot facing another way kept the old footholds - the feet stood backwards and turned round in the air.
+	# On the next gait update, where its own reset for a jump would happen.)
+	_gait_reset_pending = true
 
 
 ## Is the ground level under the clip's feet (where they stand on flat ground)? On a stair or a slope

@@ -264,7 +264,8 @@ func _track_feet(c: MarksmanCharacter, frames: int) -> Dictionary:
 	var feet := [sk.find_bone("LeftFoot"), sk.find_bone("RightFoot")]
 	var toes := [sk.find_bone("LeftToes"), sk.find_bone("RightToes")]
 	var hips := sk.find_bone("Hips")
-	var rec := {"pos": [[], []], "toe": [[], []], "heel": [[], []], "ball": [[], []], "planted": [[], []], "hips": [], "body": []}
+	var rec := {"pos": [[], []], "toe": [[], []], "heel": [[], []], "ball": [[], []], "planted": [[], []], "hips": [], "body": [],
+			"xf": [[], []], "lat": []}
 	# (The heel: on the sole under the ankle, 6 cm back; the ball: on the sole under the toe joint - the Toes bone
 	# sits ~2.6 cm over the sole and swings round the ball as the heel rises. In the foot bone's frame, from rest.)
 	var heel_local := []
@@ -274,9 +275,17 @@ func _track_feet(c: MarksmanCharacter, frames: int) -> Dictionary:
 		var toe_rest := sk.get_bone_global_rest(toes[i])
 		heel_local.append(rest.affine_inverse() * Vector3(rest.origin.x, 0.0, rest.origin.z - 0.06))
 		ball_local.append(rest.affine_inverse() * Vector3(toe_rest.origin.x, 0.0, toe_rest.origin.z))
+		rec.lat.append(rest.basis.inverse() * Vector3.RIGHT)
 	var cb := func() -> void:
 		var st: Dictionary = r.world.physics.call("character_gait_state", r._id)
 		rec.hips.append((sk.global_transform * sk.get_bone_global_pose(hips)).origin)
+		if OS.get_environment("G1_FEET") != "":
+			var lat: Vector3 = (sk.global_transform * sk.get_bone_global_pose(feet[0])).basis * (rec.lat[0] as Vector3)
+			var lat_r: Vector3 = (sk.global_transform * sk.get_bone_global_pose(feet[1])).basis * (rec.lat[1] as Vector3)
+			print("FEET t%d %s yaw %.0f aim %.0f gait_w %.2f legs %.2f footyaw L %.0f R %.0f planted %s%s anchor %d" % [Engine.get_physics_frames(),
+					MotorState.Id.keys()[c.state.state], rad_to_deg(c.state.body_yaw), rad_to_deg(c.last_input.yaw), r.gait_w, r._legs_w(),
+					rad_to_deg(atan2(lat.z, lat.x)), rad_to_deg(atan2(lat_r.z, lat_r.x)), "L" if st.get("planted_l", false) else "-",
+					"R" if st.get("planted_r", false) else "-", r._clip_anchor.size()])
 		rec.body.append(c.visual_root.global_position)
 		for i in 2:
 			var ft := sk.global_transform * sk.get_bone_global_pose(feet[i])
@@ -284,6 +293,7 @@ func _track_feet(c: MarksmanCharacter, frames: int) -> Dictionary:
 			rec.toe[i].append((sk.global_transform * sk.get_bone_global_pose(toes[i])).origin)
 			rec.heel[i].append(ft * (heel_local[i] as Vector3))
 			rec.ball[i].append(ft * (ball_local[i] as Vector3))
+			rec.xf[i].append(ft)
 			rec.planted[i].append(bool(st.get("planted_" + ("l" if i == 0 else "r"), false)))
 	sk.skeleton_updated.connect(cb)
 	for k in frames:
@@ -315,3 +325,96 @@ func _worst_slide(rec: Dictionary) -> float:
 							(h[k] as Vector3).distance_to(h[k - 1]) * 1000.0, (b[k] as Vector3).distance_to(b[k - 1]) * 1000.0, (p[k] as Vector3).y, (t[k] as Vector3).y, (h[k] as Vector3).y])
 				worst = maxf(worst, d)
 	return worst * 1000.0
+
+
+## Feet pivot, never twist: a planted foot that turns must turn on its ball or its heel (that point stays put, as a
+## real foot does), never round its middle; a swinging foot turns at a natural rate. Per move and stance:
+## twist = the yaw a planted foot turned on frames where neither the ball nor the heel held (deg), spin = the
+## fastest a swinging foot turned (deg a frame).
+func test_feet_pivot_not_twist() -> void:
+	load_playground()
+	var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+	await ticks(40)
+	var rows := []
+	for item: StringName in [&"", &"rifle", &"pistol"]:
+		await _arm(c, item)
+		var sl := _slot(c, item)
+		var name := "unarmed" if item == &"" else String(item)
+		var moves := [["start f", [{"ticks": 60, "move": Vector2(0, 1)}]],
+				["turn 90 r + back", [{"ticks": 50, "yaw": -PI / 2.0}, {"ticks": 50, "yaw": 0.0}]],
+				["turn 180", [{"ticks": 70, "yaw": PI}]],
+				["step r", [{"ticks": 40, "move": Vector2(1, 0)}]],
+				["step bl", [{"ticks": 40, "move": Vector2(-D, -D)}]],
+				["stop", [{"ticks": 30, "move": Vector2(0, 1)}, {"ticks": 40}]],
+				["crouch", [{"ticks": 50, "buttons": InputFrame.B_CROUCH}]],
+				["crouch step r", [{"ticks": 40, "move": Vector2(1, 0), "buttons": InputFrame.B_CROUCH}]],
+				["crouch turn 90 l", [{"ticks": 60, "yaw": PI / 2.0, "buttons": InputFrame.B_CROUCH}]]]
+		if item != &"":
+			moves.append(["draw on the spot", [{"ticks": 20, "slot": 0}, {"ticks": 50, "slot": sl}]])
+		for mv: Array in moves:
+			# (Debugging: G1_MOVE=<substring> runs just those moves; G1_FEET=1 traces each frame.)
+			if OS.get_environment("G1_MOVE") != "" and not (name + " " + mv[0]).contains(OS.get_environment("G1_MOVE")):
+				continue
+			c.teleport(marker("spawn").global_position + Vector3(-16, 0, -3), 0.0)
+			bot(c).live_yaw = 0.0
+			bot(c).set_steps([{"ticks": 40, "slot": sl, "yaw": 0.0}])
+			await ticks(40)
+			var steps: Array = []
+			var n := 0
+			for s: Dictionary in mv[1]:
+				var st := s.duplicate()
+				if not st.has("slot"):
+					st["slot"] = sl
+				if not st.has("yaw"):
+					st["yaw"] = float(steps.back().get("yaw", 0.0)) if not steps.is_empty() else 0.0
+				steps.append(st)
+				n += int(st.ticks)
+			bot(c).set_steps(steps)
+			if OS.get_environment("G1_FEET") != "":
+				print("MOVE %s %s" % [name, mv[0]])
+			var r := _twist(await _track_feet(c, n))
+			rows.append([name + " " + mv[0], r])
+	# (Limits: a planted foot turning with neither ball nor heel held is the measuring noise of a pivot point a
+	# centimetre off - a few degrees; a swinging foot turns at most Gait's swing_turn_rate, 12 rad/s = 11.5 deg a
+	# frame. Before: armed turns snapped the planted feet 35-111 deg in a frame, crouching twisted them 25-90 deg in
+	# place, starts / side steps / stops spun a swinging foot 37-79 deg a frame. The pelvis column is information:
+	# known pops of 6-9 cm a frame at hand-overs between the clip and the gait.)
+	for row: Array in rows:
+		var r: Dictionary = row[1]
+		info("%-28s twist %5.1f deg (worst %4.1f/frame)  pivot %5.1f deg  spin %4.1f deg/frame  pelvis %.1f cm/frame" % [row[0], r.twist,
+				r.twist_max, r.pivot, r.spin, r.pelvis * 100.0])
+		check(r.twist_max <= 4.0 and r.twist <= 15.0, "%s: planted feet pivot, not twist (%.1f deg, %.1f a frame)" % [row[0], r.twist, r.twist_max])
+		check(r.spin <= 12.0, "%s: a swinging foot turns at a foot's pace (%.1f deg a frame)" % [row[0], r.spin])
+
+
+## From a _track_feet record: yaw of each foot from its sideways axis (pitch doesn't move it).
+func _twist(rec: Dictionary) -> Dictionary:
+	var out := {"twist": 0.0, "twist_max": 0.0, "pivot": 0.0, "spin": 0.0, "pelvis": 0.0}
+	var hips: Array = rec.hips
+	var body: Array = rec.body
+	for k in range(1, hips.size()):
+		out.pelvis = maxf(out.pelvis, ((hips[k] as Vector3) - (hips[k - 1] as Vector3) - ((body[k] as Vector3) - (body[k - 1] as Vector3))).length())
+	for i in 2:
+		var xf: Array = rec.xf[i]
+		var pl: Array = rec.planted[i]
+		var h: Array = rec.heel[i]
+		var b: Array = rec.ball[i]
+		for k in range(1, xf.size()):
+			var lat_a := ((xf[k - 1] as Transform3D).basis * (rec.lat[i] as Vector3))
+			var lat_b := ((xf[k] as Transform3D).basis * (rec.lat[i] as Vector3))
+			var dy := absf(rad_to_deg(angle_difference(atan2(lat_a.z, lat_a.x), atan2(lat_b.z, lat_b.x))))
+			if pl[k] and pl[k - 1]:
+				if dy < 0.2:
+					continue
+				# (Pivoting on the ball or the heel by dy, that point stays put; round the middle both move ~ dy x 6 cm.)
+				var held := minf((b[k] as Vector3).distance_to(b[k - 1]), (h[k] as Vector3).distance_to(h[k - 1]))
+				if held > deg_to_rad(dy) * 0.05:
+					out.twist += dy
+					out.twist_max = maxf(out.twist_max, dy)
+				else:
+					out.pivot += dy
+			elif not pl[k] and not pl[k - 1]:
+				if dy > 15.0 and OS.get_environment("G1_FEET") != "":
+					print("SPIN frame %d foot %d %.0f deg" % [k, i, dy])
+				out.spin = maxf(out.spin, dy)
+	return out

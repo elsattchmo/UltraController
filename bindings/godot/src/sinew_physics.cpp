@@ -748,6 +748,13 @@ void SinewPhysics::character_gait_reset(int character, const Transform3D& root) 
 	}
 }
 
+void SinewPhysics::character_gait_reseat_feet(int character) {
+	auto it = _gaits.find(character);
+	if (it != _gaits.end()) {
+		it->second->reseat_feet();
+	}
+}
+
 Array SinewPhysics::character_gait_update(int character, const Transform3D& root, const Vector3& velocity, double dt,
 		const Variant& command, const Variant& home_feet) {
 	Array out;
@@ -997,6 +1004,7 @@ void SinewPhysics::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("character_gait_set_idle", "character", "locals", "pelvis_height", "group"), &SinewPhysics::character_gait_set_idle, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("character_gait_set_group", "character", "group", "blend_s"), &SinewPhysics::character_gait_set_group, DEFVAL(0.35));
 	ClassDB::bind_method(D_METHOD("character_gait_reset", "character", "root"), &SinewPhysics::character_gait_reset);
+	ClassDB::bind_method(D_METHOD("character_gait_reseat_feet", "character"), &SinewPhysics::character_gait_reseat_feet);
 	ClassDB::bind_method(D_METHOD("character_gait_update", "character", "root", "velocity", "dt", "command", "home_feet"),
 			&SinewPhysics::character_gait_update, DEFVAL(Variant()), DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("character_gait_stepping", "character"), &SinewPhysics::character_gait_stepping);

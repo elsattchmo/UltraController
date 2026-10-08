@@ -1328,3 +1328,13 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   unconnected outputs nothing (crouched still showed the standing pose).
 - g1 planted slide = s7's measure plus the BALL (sole under the toe joint): the Toes bone is ~2.6 cm over the sole
   and swings round the ball at push-off (read as 8-10 mm "slides").
+- **Feet pivot, never twist** (user: "we can pivot on the spot on the foot if needed, like real life"; read
+  `sinew/ANIMATION_GUIDE.md` "Feet pivot, never twist"): g1 `test_feet_pivot_not_twist` (planted foot turning with
+  neither ball nor heel held = twist <= 4 deg/frame; swinging foot <= 12 deg/frame; yaw off the foot's SIDEWAYS axis).
+  Sinew: `SinewRagdoll.guard_clip_feet` (pose modifier, every frame) - the clip's legs are watched from where they
+  stood, the gait re-seated on them (`character_gait_reseat_feet`, feet only), and takes the legs back at once if
+  they move (an armed body snapping to the aim, a stance cross-fade); `moved()` resets the gait on the next update.
+  Core: `yaw_quat` off the sideways axis, a start at the first foot's own duty, no fresh lift past phase 0.9
+  (`LATE_LIFT`), swing phase offset latched (`Foot::off`), swing yaw rate-limited (`swing_turn_rate` 12 / 30 at a
+  run, lands facing the way it faces), foothold kept `land_clear` 11 cm off the standing foot. s10 KNOWN: sprint
+  flick 180 (legs cross in the air, -3..-11 cm).

@@ -13,6 +13,7 @@ namespace {
 
 constexpr int MIN_STANCE_TICKS = 6;   // a foot just put down stays down this long before an early lift
 constexpr int MIN_SWING_TICKS = 4;    // and a foot just lifted stays up this long
+constexpr float LATE_LIFT = 0.9f;     // no fresh lift past this phase (no swing left before the wrap)
 constexpr int UNCROSS_HOLD_TICKS = 8; // a crossed touchdown waits this long at most for its foothold to uncross
 
 float frac(float x) { return x - std::floor(x); }
@@ -844,12 +845,16 @@ float Gait::turn_step_yaw(int i) const {
 
 Quat Gait::yaw_quat(const Quat& q) const {
 	const Vec3 U = up();
-	const Vec3 f = flat(rotate(q, _rig.forward), U);
+	// Read off the sideways axis, not the forward one: a foot's big rotation is its pitch (up on the ball, toes
+	// up on the heel), about the sideways axis, which it leaves level. A bladed stance's back foot stands nearly
+	// on point: its forward axis, flattened, was mostly noise - read 150 deg off, the gait put the foot down
+	// facing backwards and turned it 174 deg through the next swing.
+	const Vec3 m = normalized(cross(U, flat(_rig.forward, U)));
+	const Vec3 f = flat(rotate(q, m), U);
 	if (length(f) < 1e-5f) {
 		return legs_q();
 	}
-	const Vec3 m = flat(_rig.forward, U);
-	const Vec3 a = normalized(m), b = normalized(f);
+	const Vec3 a = m, b = normalized(f);
 	return axis_angle(U, std::atan2(dot(cross(a, b), U), dot(a, b)));
 }
 
@@ -875,7 +880,7 @@ void Gait::reset(const Transform& root) {
 		Foot& f = _feet[i];
 		f.pos = f.eff = f.lift = f.target = home(i);
 		f.pitch = f.lift_pitch = 0.0f;
-		f.yaw = f.lift_yaw = f.land_yaw = f.plant_yaw = root.q;
+		f.yaw = f.lift_yaw = f.land_yaw = f.plant_yaw = f.swing_yaw = root.q;
 		f.ground = f.lift_ground = f.land_ground = Quat{};
 		f.yaw_rel = 0.0f;
 		f.swinging = false;
@@ -886,6 +891,12 @@ void Gait::reset(const Transform& root) {
 	float ph;
 	base_pose(local, pm, ph);
 	solve(local, pm, ph);
+}
+
+void Gait::reseat_feet() {
+	if (!_stepping && !_feet[0].swinging && !_feet[1].swinging) {
+		_fresh = true;
+	}
 }
 
 void Gait::update(const GaitInput& in) {
@@ -914,7 +925,7 @@ void Gait::update(const GaitInput& in) {
 			for (int i = 0; i < 2; ++i) {
 				Foot& f = _feet[i];
 				f.pos = f.eff = f.lift = f.target = home(i);
-				f.yaw = f.lift_yaw = f.land_yaw = f.plant_yaw = _home_yaw[i];
+				f.yaw = f.lift_yaw = f.land_yaw = f.plant_yaw = f.swing_yaw = _home_yaw[i];
 				f.ground = f.lift_ground = f.land_ground = Quat{};
 			}
 			_fresh = false;
@@ -1147,7 +1158,11 @@ void Gait::step_feet(float dt) {
 				}
 			}
 		}
-		_phase = frac(_duty + (first == 0 ? 0.0f : (_cl.ok && moving ? _cl.foot_off : 0.5f)));
+		// (The first foot at its own lift point: on a clip each foot has its own duty. Started at the shared one,
+		// the other foot stood past its lift point at phase 0.98 and went up with no swing left - drawn landed
+		// the next frame, its yaw spun 75 deg.)
+		const bool own_start = _cl.ok && moving;
+		_phase = frac((own_start ? _cl.duty_f[first] : _duty) + (first == 0 ? 0.0f : (own_start ? _cl.foot_off : 0.5f)));
 	}
 	// A standing foot stretched out behind the motion hurries the cycle (so it gets its turn to
 	// lift sooner) - continuous, unlike a jump in phase, so a swinging foot never skips.
@@ -1234,7 +1249,12 @@ void Gait::step_feet(float dt) {
 		Foot& f = _feet[i];
 		// (The right foot's touchdown and stance share are the clip's own: a side step isn't symmetric.)
 		const bool own = _cl.ok && moving;
-		const float p = frac(_phase - (i == 0 ? 0.0f : (own ? _cl.foot_off : 0.5f)));
+		// (A swinging foot keeps the phase offset it lifted with: the right foot's offset is the clip's own once
+		// moving and 0.5 standing, and a start switched it mid-swing - the phase stepped back under where the
+		// foot lifted, the swing read as wrapped, and the foot was drawn at its landing yaw at once: a 75 deg
+		// spin in a frame.)
+		const float off_now = i == 0 ? 0.0f : (own ? _cl.foot_off : 0.5f);
+		const float p = frac(_phase - (f.swinging ? f.off : off_now));
 		const float duty_i = own ? _cl.duty_f[i] : _duty;
 		// Up when the foot's stance share is over; down only when its swing is through (the cycle
 		// wraps) - a duty that changes mid-swing (braking from a run) never drops a foot early.
@@ -1260,6 +1280,12 @@ void Gait::step_feet(float dt) {
 		if (!f.swinging && f.overreach && moving && p > 0.3f * duty_i && (_speed > 2.0f || !_feet[size_t(1 - i)].swinging)) {
 			swing = true;
 		}
+		// (Never a fresh lift with the cycle all but over: the swing runs from the lift to the wrap, so a foot
+		// lifting at 0.98 was through at once - put down at its foothold, turned to its landing yaw, in a frame.
+		// It waits for the next cycle.)
+		if (!f.swinging && swing && p > LATE_LIFT) {
+			swing = false;
+		}
 		f.overreach = false;
 		const float m = moving ? std::clamp(_speed / std::max(_s.walk_speed, 0.1f), 0.0f, 1.0f) : 0.0f;
 		// Heel strike and roll only walking forward (backing / side-stepping: flat-footed).
@@ -1270,7 +1296,7 @@ void Gait::step_feet(float dt) {
 		if (swing && !f.swinging) {
 			f.swinging = true;
 			f.lift = f.eff;
-			f.lift_yaw = f.yaw;
+			f.lift_yaw = f.swing_yaw = f.yaw;
 			f.lift_ground = f.ground;
 			f.lift_pitch = f.pitch;
 			f.lift_t = 0;
@@ -1279,6 +1305,7 @@ void Gait::step_feet(float dt) {
 			f.wrapped = false;
 			f.side_lift = _cl.ok && std::fabs(std::fabs(_cl.angle) - 0.5f * PI) < 0.6f;
 			f.lift_p = std::min(p, 0.98f);
+			f.off = off_now;
 			_foot_cl[i] = _cl;
 			f.path_dir = path_dir;
 			f.lift_off = on_path ? flat(f.lift, U) - path_at(_cl, i, f.lift_p) : Vec3{};
@@ -1307,6 +1334,9 @@ void Gait::step_feet(float dt) {
 				f.land_ground = g;
 			}
 			f.pos = f.target;
+			// (Down facing the way it faces: a landing facing that changed late in the swing - stopping, the
+			// stance's turned-out foot - is reached by pivoting on the ground, not by a spin in the last frames.)
+			f.land_yaw = f.swing_yaw;
 			f.yaw = f.plant_yaw = f.land_yaw;
 			f.ground = f.land_ground;
 			f.yaw_rel = yaw_off(f.yaw);
@@ -1446,6 +1476,23 @@ void Gait::step_feet(float dt) {
 			f.target = length(d) > lim ? f.target + d * (lim / length(d)) : land;
 		}
 		f.lift_t++;
+		// The foothold itself clear of the standing foot (heel to ball): retargeted late onto it, the swing - kept
+		// round the foot - snapped 15 cm onto it at touchdown and the feet stood through each other.
+		{
+			const Foot& o = _feet[1 - i];
+			if (!o.swinging) {
+				Vec3 of = flat(rotate(o.yaw, _rig.forward), U);
+				of = length(of) > 1e-4f ? normalized(of) : Vec3{ 0, 0, 1 };
+				const Vec3 a = flat(o.pos, U) - of * (_heel_d * 0.5f), b = flat(o.pos, U) + of * _ball_d;
+				const Vec3 tf = flat(f.target, U);
+				const float t = std::clamp(dot(tf - a, b - a) / std::max(dot(b - a, b - a), 1e-6f), 0.0f, 1.0f);
+				const Vec3 d = tf - (a + (b - a) * t);
+				const float dl = length(d);
+				if (dl < _s.land_clear && dl > 1e-4f) {
+					f.target = f.target + d * ((_s.land_clear - dl) / dl);
+				}
+			}
+		}
 		land = f.target;
 		// Put down facing as the clip's foot does at its contact (a side step's toes point off the travel).
 		if (on_path) {
@@ -1486,8 +1533,9 @@ void Gait::step_feet(float dt) {
 				const float t = std::clamp(dot(hf - a, b - a) / std::max(dot(b - a, b - a), 1e-6f), 0.0f, 1.0f);
 				const Vec3 d = hf - (a + (b - a) * t);
 				const float dl = length(d);
-				if (dl < _s.foot_clear && dl > 1e-4f) {
-					h = h + d * ((_s.foot_clear - dl) / dl);
+				const float clear = _s.foot_clear + (_s.land_clear - _s.foot_clear) * smoothstep(0.7f, 1.0f, s);
+				if (dl < clear && dl > 1e-4f) {
+					h = h + d * ((clear - dl) / dl);
 				}
 			}
 		}
@@ -1504,6 +1552,17 @@ void Gait::step_feet(float dt) {
 		// In the air the foot turns from its push-off roll to toes up for the landing.
 		const float land_pitch = -toe_up * (1.0f - run) + fore * run;    // heel first walking, forefoot running
 		f.pitch = f.lift_pitch + (land_pitch - f.lift_pitch) * smooth(s);
+		// The foot turns toward its landing facing over the swing, never faster than a foot turns: a landing
+		// facing that changes late (stopping, the travel turning) would otherwise spin it 80 deg in two frames.
+		{
+			const Quat want = normalized(slerp(f.lift_yaw, f.land_yaw, smooth(s)));
+			const Vec3 a = flat(rotate(f.swing_yaw, _rig.forward), U), b = flat(rotate(want, _rig.forward), U);
+			if (length(a) > 1e-5f && length(b) > 1e-5f) {
+				const float d = std::atan2(dot(cross(a, b), U), dot(a, b));
+				const float lim = (_s.swing_turn_rate + (_s.swing_turn_rate_run - _s.swing_turn_rate) * run) * dt;
+				f.swing_yaw = normalized(axis_angle(U, std::clamp(d, -lim, lim)) * f.swing_yaw);
+			}
+		}
 		if (_cl.ok && moving) {
 			// The clip's foot through the swing (from where it actually lifted, joined smoothly).
 			const float m1 = std::clamp(_speed / std::max(_s.walk_speed, 0.1f), 0.0f, 1.0f);
@@ -1531,7 +1590,7 @@ void Gait::step_feet(float dt) {
 		// The drawn sole (toe tip, heel) out of the ground: the ankle alone cleared it, but a foot just off the
 		// ground behind, pitched toes down, dragged its toes through a downhill ramp (9-11 cm in).
 		{
-			const Quat yq = normalized(slerp(f.lift_yaw, f.land_yaw, smooth(s)));
+			const Quat yq = f.swing_yaw;
 			const Quat tq = normalized(slerp(f.lift_ground, f.land_ground, smooth(s)));
 			Vec3 ff = flat(rotate(yq, _rig.forward), U);
 			ff = length(ff) > 1e-4f ? normalized(ff) : path_dir;
@@ -2008,7 +2067,7 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		Quat tilt = f.ground;
 		if (f.swinging) {
 			const float s = swing_s(f, f.p);
-			yaw = normalized(slerp(f.lift_yaw, f.land_yaw, smooth(s)));
+			yaw = f.swing_yaw;
 			tilt = normalized(slerp(f.lift_ground, f.land_ground, smooth(s)));
 		}
 		Vec3 ffwd = flat(rotate(yaw, rig.forward), U);

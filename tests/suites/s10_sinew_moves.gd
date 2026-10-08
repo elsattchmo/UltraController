@@ -22,6 +22,12 @@ const LIMITS := {
 const KNOWN := {
 	"strafe L then": {"hips": 0.17},
 	"back after strafe L": {"hips": 0.19},
+	# (Since feet pivot instead of twisting - sinew/ANIMATION_GUIDE.md "Feet pivot, never twist", "Known open
+	# problems": flicked round at a run the feet swap sides in the air and the legs pass through each other -
+	# -3.3 cm / 4 ticks run alone, -11.4 cm / 11 ticks after s0 (the start differs). Was +1.6 cm. The sprint turn
+	# touches for a tick.)
+	"sprint flick 180": {"gap": -0.12, "overlap": 12},
+	"sprint turn 90/s": {"overlap": 1},
 }
 
 

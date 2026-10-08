@@ -73,6 +73,7 @@ struct GaitSettings {
 	/// the hips sit `pelvis_follow` of the way from the feet's facing to the body's.
 	float step_turn = 1.3f, turn_cadence = 1.5f, cadence_turn_max = 3.4f, pelvis_follow = 0.5f;
 	float foot_clear = 0.16f;                   ///< a swinging ankle keeps this far from the standing one, m
+	float land_clear = 0.11f;                   ///< .. and its foothold this far (the swing narrows to it as it lands), m
 	float pick_hysteresis = 0.1f;
 	float side_bias = 0.18f;                    ///< rad a side clip counts as further off (diagonals: forward / back clips)
 	float path_turn_rate = 5.0f;                ///< rad/s a swinging foot's way of travel turns toward the body's
@@ -104,6 +105,8 @@ struct GaitSettings {
 	float tread_fit = 0.25f;                    ///< a foothold straddling a step edge moves up to this onto one tread (m)
 	float pivot_rate = 4.0f;                    ///< a planted foot swivels toward the way it should face this fast (rad/s)
 	float pivot_max = 0.6f;                     ///< .. and at most this far from the facing it was put down with (rad)
+	float swing_turn_rate = 12.0f;              ///< a swinging foot turns toward its landing facing at most this fast (rad/s)
+	float swing_turn_rate_run = 30.0f;          ///< .. at a run (a short swing: a sprint's 180 flick needs the feet round)
 	float pivot_slack = 0.12f;                  ///< a pivoted foot may sit this much further off its standing spot (m)
 	float leg_push_max = 0.25f;                 ///< a swinging leg is pushed clear of the other by at most this a tick (m)
 	float side_reach_strafe = 0.2f;             ///< the same on a side-step clip (its trailing foot)
@@ -192,6 +195,9 @@ public:
 	int cycle_group(size_t i) const { return i < _cycles.size() ? _cycles[i].group : -1; }
 	/// Feet planted at their home spots under `root`, standing still.
 	void reset(const Transform& root);
+	/// Standing, both feet down: the next update puts them exactly on the standing feet it's given (nothing else
+	/// starts again - phase, pelvis, lean carry on). For handing the legs to a clip and back without a jump.
+	void reseat_feet();
 	void update(const GaitInput& in);
 
 	/// World transform of every part (rig order).
@@ -296,8 +302,10 @@ private:
 		int down_t = 100;    ///< ticks since it was put down
 		float lift_p = 0.62f; ///< the foot's phase when it lifted (the swing runs from there to 1)
 		float p = 0.0f;      ///< foot phase last tick
+		float off = 0.0f;    ///< the foot's phase offset from the cycle's, latched while it swings
 		Vec3 lift_off;       ///< swing on the clip's path: where it lifted, off that path (flat, world)
 		Quat land_yaw;       ///< the facing it will be put down with (the clip's foot angle on its path)
+		Quat swing_yaw;      ///< the facing a swinging foot has now (turning toward land_yaw, rate-limited)
 		Vec3 path_dir;       ///< swinging: its own way of travel (turns toward the body's at a foot's pace)
 		bool overreach = false; ///< planted beyond the leg's reach at a run: it lifts next tick
 		bool held_back = false; ///< this swing's drawn foot was slowed by the speed cap (it lands where it is)

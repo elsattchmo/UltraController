@@ -140,6 +140,7 @@ public:
 	/// Walk on another group of reference cycles (a stance change; Gait::set_group).
 	void character_gait_set_group(int character, int group, double blend_s = 0.35);
 	void character_gait_reset(int character, const Transform3D& root);
+	void character_gait_reseat_feet(int character);
 	/// Advance by dt with the character's ground point / facing and velocity; the world pose per part.
 	/// `command` (a Vector3, optional): the motion wanted - footholds brake / catch toward it.
 	Array character_gait_update(int character, const Transform3D& root, const Vector3& velocity, double dt,
