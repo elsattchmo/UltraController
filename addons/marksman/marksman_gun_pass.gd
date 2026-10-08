@@ -23,6 +23,8 @@ const NECK_MAX := 0.35
 const HEAD_SHARE := 0.6
 ## The shoulder pocket off the right shoulder joint, in the chest's frame (x = left / inward, y = up, z = forward), m.
 const POCKET := Vector3(0.06, -0.04, 0.05)
+## Where a held-out gun's hand sits off the eye (m along the view's right, up, forward): low and right, out in front.
+const PISTOL_HIP := Vector3(0.13, -0.22, 0.45)
 
 var character: UltraCharacter
 var ragdoll: SinewRagdoll
@@ -132,9 +134,9 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 		_stock_local = UltraPoseSampler.marker(gun_node, "M_Stock")
 		_has_stock = gun_node.find_child("M_Stock", true, false) != null
 	if def.two_handed and _has_stock:
-		_shoulder(pose, rh, grip, target_sk)
+		_shoulder(sk, pose, rh, grip, target_sk)
 	else:
-		_hold_out(pose, rh, grip, target_sk)
+		_hold_out(sk, pose, rh, grip, target_sk)
 	ads = eq.ads * weight
 	if ads > 0.001:
 		_aim_down_sights(sk, pose, rh, grip, target_sk, def)
@@ -152,17 +154,43 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	return true
 
 
-## A gun held out (a pistol): the barrel turned onto the aim point by the spine, then the gun arm, then the wrist
-## until it's on (each turn moves the muzzle - aiming down at the floor 2 m off, two rounds left 4 deg).
-func _hold_out(pose: Array[Transform3D], rh: int, grip: Transform3D, target_sk: Vector3) -> void:
+## A gun held out (a pistol): the spine turns toward the aim, then the gun is placed gun-first like a shouldered one -
+## the gun hand at `PISTOL_HIP` off the eye along the view (right, up, forward: low and to the right, out in front), the
+## barrel from there onto the aim point, level - and the arm brought to it by two-bone IK. (Turning the clip's own
+## hold onto the aim kept the pistol where the PST clips have it: up in front of the face - in first person it covered
+## the top half of the view, 17-19 deg above the centre.) Without an eye: the arm, then the wrist, turned onto the aim.
+func _hold_out(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transform3D, target_sk: Vector3) -> void:
 	var turn := _barrel_turn(pose[rh] * grip, target_sk)
 	var spine_turn := _limit(turn, SPINE_MAX)
 	for n: String in SPINE_SHARE:
 		var i := _part(n)
 		if i >= 0:
 			_turn_subtree(pose, i, Quaternion.IDENTITY.slerp(spine_turn, float(SPINE_SHARE[n]) * weight), pose[i].origin)
-	turn = _barrel_turn(pose[rh] * grip, target_sk)
+	var neck := _part("Neck")
+	if neck >= 0 and _eye_local == Vector3.INF:
+		_eye_setup(sk)
 	var ua := _part("RightUpperArm")
+	var la := _part("RightLowerArm")
+	if neck >= 0 and _head_bone >= 0 and ua >= 0 and la >= 0:
+		var eye := _eye(sk, pose, neck)
+		var d := (target_sk - eye).normalized()
+		var right := d.cross(Vector3.UP)
+		right = right.normalized() if right.length() > 1e-3 else -_chest_axes(pose, _part("UpperChest")).x
+		var up := right.cross(d).normalized()
+		var hand_at := eye + right * PISTOL_HIP.x + up * PISTOL_HIP.y + d * PISTOL_HIP.z
+		var hand_in_gun := grip.affine_inverse().origin
+		var gun := Transform3D(Basis(), hand_at)
+		var aim := (target_sk - hand_at).normalized()
+		for k in 2:
+			var z := -aim
+			var x := Vector3.UP.cross(z)
+			x = x.normalized() if x.length() > 1e-4 else right
+			gun.basis = Basis(x, z.cross(x).normalized(), z)
+			gun.origin = hand_at - gun.basis * hand_in_gun
+			aim = (target_sk - gun * _muzzle_local.origin).normalized()
+		_two_bone(pose, ua, la, rh, gun * grip.affine_inverse(), weight)
+		return
+	turn = _barrel_turn(pose[rh] * grip, target_sk)
 	if ua >= 0:
 		_turn_subtree(pose, ua, Quaternion.IDENTITY.slerp(turn, weight), pose[ua].origin)
 	for k in 4:
@@ -176,11 +204,11 @@ func _hold_out(pose: Array[Transform3D], rh: int, grip: Transform3D, target_sk: 
 ## barrel from there onto the aim point, level (no cant) - and the gun hand brought onto its grip by two-bone IK.
 ## The spine leans into the aim's pitch (its yaw is the torso twist's); the clip's own hands held ITS rifle across
 ## the chest, the stock out past the left shoulder.
-func _shoulder(pose: Array[Transform3D], rh: int, grip: Transform3D, target_sk: Vector3) -> void:
+func _shoulder(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transform3D, target_sk: Vector3) -> void:
 	var uc := _part("UpperChest")
 	var sh := _part("RightUpperArm")
 	if uc < 0 or sh < 0:
-		_hold_out(pose, rh, grip, target_sk)
+		_hold_out(sk, pose, rh, grip, target_sk)
 		return
 	# Lean into the pitch (half of it, up the spine).
 	var p0 := _pocket(pose, uc, sh)
