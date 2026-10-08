@@ -1423,3 +1423,21 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   lands planted feet on the nearer edge. Playground: GAP WALK (0.4 / 0.7 / 1.0 / 1.4 m, marker `gap_walk`), SPRINT TRACK
   (a `Sprinter` dummy: `UltraDummyPost.sprint_loop`, steered corner to corner), animation gallery square grid + floor sized
   to every clip at load (suite `pg`).
+- **Firing / reloading (V4, MarksmanGunPass)**: the shot through the body - the base `_recoil` spring (the fire event's
+  kick, gun frame, m) rocks the spine back (`ROCK` 2.4 rad/m, <= 0.25) BEFORE the gun is placed, then pushes the gun back
+  and flips the muzzle up round the hand (`FLIP` 1.8 rad/m, <= 0.22), arms by IK (rifle 2.6 cm / 1.7 deg / chest 0.7 cm,
+  shotgun 13 cm / 8.8 / 3.4). Reloads keep the gun in the hands (`raised()` is 0 while RELOADING: it used to drop to the
+  stance clip and the magazine just blinked): `_reload_pose` brings it in and rolls it to the left hand (long 22 deg,
+  pistol 32 + to the middle), `_reload_hand` = UltraEquipmentVisual's magazine / shell paths on the sim clock (action_t,
+  reload_commit, shell_time) for the LEFT ARM'S IK in the pass (Marksman has no hand IK: the base paths never ran);
+  the magazine node is placed through the base's `_mag_hand` / `_mag_hidden`; `_left_hand(fingers, palm, contact)`
+  builds any left-hand grip. Suite g4 (CI): kick + recovery, reloads by hand (magazine 56-74 cm off the gun in the
+  hand, support back on after), lean, wall tuck. Tests give reserve ammo (no playground infinite ammo without main).
+- **Lean (V4b)**: `MarksmanGunPass._lean` bends Spine / Chest / UpperChest about the VIEW's way (a bladed rifle stance
+  turns the chest 35 deg: about the body's forward it was lopsided) until the eye is `LEAN_OUT` 0.28 m out (bend, measure,
+  correct once); unarmed too. MarksmanEye zeroes the camera rig's own lean offset (it came on top). Shots follow through
+  aim_from (with a rifle up the head - the camera - sits 24 cm right of the capsule, over the stock).
+- **Wall tuck (V4b)**: `MarksmanCharacter.tuck_distance` (sim: a ray from the shoulder along gun_dir for `gun_reach` -
+  stat "tuck_length", long 0.75 / else 0.45 m) - `simulate` strips B_PRIMARY from a COPY of the input when tucked
+  (deterministic, the UltraController has no fire hook); the pass raises the muzzle 55 / 40 deg round the hand and draws
+  it in by how far the gun would go into the wall (full at 25 cm), ADS off meanwhile.

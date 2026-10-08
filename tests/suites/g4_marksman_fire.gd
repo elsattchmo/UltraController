@@ -139,3 +139,72 @@ func test_reloads_are_done_by_hand() -> void:
 		chars.erase(c)
 		c.queue_free()
 		await ticks(3)
+
+
+func _rig(c: MarksmanCharacter) -> UltraCameraRig:
+	var rig := UltraCameraRig.new()
+	add_child(rig)
+	rig.attach(c)
+	return rig
+
+
+## V4b lean: the spine bends sideways - the first-person eye (the camera) goes out 25-35 cm and the shot starts there.
+func test_lean_moves_the_eye_and_the_shot() -> void:
+	load_playground()
+	var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+	var rig := _rig(c)
+	await ticks(40)
+	var sl := _slot(c, &"rifle")
+	bot(c).view_tp = false
+	bot(c).live_yaw = 0.0
+	bot(c).set_steps([{"ticks": 120, "slot": sl, "yaw": 0.0}])
+	await ticks(110)
+	var eye0: Vector3 = c.eye.eye
+	var right := Vector3(cos(0.0), 0.0, -sin(0.0))       # (yaw 0 faces -Z: right is +X)
+	var origin0: Vector3 = UltraActionLayer.aim_ray(c, c.state, c.last_input, c.held_def()).origin
+	for side: Array in [["right", InputFrame.B_LEAN_R, 1.0], ["left", InputFrame.B_LEAN_L, -1.0]]:
+		bot(c).set_steps([{"ticks": 90, "slot": sl, "yaw": 0.0, "buttons": side[1]}])
+		await ticks(80)
+		var out := (c.eye.eye - eye0).dot(right) * float(side[2])
+		var shot := UltraActionLayer.aim_ray(c, c.state, c.last_input, c.held_def())
+		var origin_out := ((shot.origin as Vector3) - origin0).dot(right) * float(side[2])
+		info("lean %s: eye out %.1f cm, shot origin out %.1f cm (camera %.1f, aim_from %s)" % [side[0], out * 100.0, origin_out * 100.0,
+				(rig.camera.global_position - eye0).dot(right) * float(side[2]) * 100.0, c.last_input.aim_from])
+		check(out > 0.22 and out < 0.4, "lean %s: the eye goes out round the corner (%.1f cm)" % [side[0], out * 100.0])
+		check(absf(origin_out - out) < 0.05, "lean %s: the shot starts where the eye is (%.1f vs %.1f cm)" % [side[0], origin_out * 100.0, out * 100.0])
+		bot(c).set_steps([{"ticks": 60, "slot": sl, "yaw": 0.0}])
+		await ticks(60)
+	rig.queue_free()
+
+
+## V4b: up against a wall the gun comes up out of its way and won't fire; a step back and it's down and firing again.
+func test_gun_tucks_at_a_wall() -> void:
+	load_playground()
+	var wall := marker("ledge_250").global_position          # (a 2.5 m block: its face at z - 4)
+	var c := _marksman(Vector3(wall.x, 0.05, wall.z - 3.55))
+	await ticks(40)
+	var sl := _slot(c, &"rifle")
+	var gp := (c.ragdoll as MarksmanRagdoll).gun_pass
+	bot(c).set_steps([{"ticks": 100, "slot": sl, "yaw": 0.0}])
+	await ticks(100)
+	var t_up := -1
+	for i in 30:
+		await ticks(1)
+		if gp.tuck_w > 0.9 and t_up < 0:
+			t_up = i
+	var mag0 := c.state.mag
+	bot(c).set_steps([{"ticks": 40, "slot": sl, "yaw": 0.0, "buttons": InputFrame.B_PRIMARY}, {"ticks": 100, "slot": sl, "yaw": 0.0}])
+	await ticks(45)
+	var fired_at_wall := mag0 - c.state.mag
+	info("at the wall: tucked %.2f (in %d ticks), rounds fired holding the trigger: %d" % [gp.tuck_w, t_up, fired_at_wall])
+	check(t_up >= 0 and t_up <= 18, "the gun comes up out of the wall's way within 0.3 s (%d ticks)" % t_up)
+	check(fired_at_wall == 0, "and it won't fire into the wall (%d rounds)" % fired_at_wall)
+	# A step back.
+	bot(c).set_steps([{"ticks": 40, "slot": sl, "yaw": 0.0, "move": Vector2(0, -1)}, {"ticks": 30, "slot": sl, "yaw": 0.0},
+			{"ticks": 20, "slot": sl, "yaw": 0.0, "buttons": InputFrame.B_PRIMARY}, {"ticks": 60, "slot": sl, "yaw": 0.0}])
+	await ticks(70)
+	var tuck_back := gp.tuck_w
+	mag0 = c.state.mag
+	await ticks(25)
+	info("stepped back: tuck %.2f, rounds fired %d" % [tuck_back, mag0 - c.state.mag])
+	check(tuck_back < 0.1 and mag0 - c.state.mag > 0, "a step back: the gun's down and fires (tuck %.2f, %d rounds)" % [tuck_back, mag0 - c.state.mag])

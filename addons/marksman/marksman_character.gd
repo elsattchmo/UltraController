@@ -42,6 +42,30 @@ func _traversal_hook(m: UltraMotor, s: MotorState, inp: InputFrame) -> int:
 	return r
 
 
+# ------------------------------------------------------------------ the gun against a wall (V4b)
+
+## How far a held firearm reaches in front of the shoulder (m; item stat "tuck_length", else long guns 0.75, others 0.45).
+static func gun_reach(def: ItemDefinition) -> float:
+	return float(def.stat("tuck_length", 0.75 if def.two_handed else 0.45))
+
+
+## The distance to a wall in the gun's way (m, from the shoulder along where the gun points), or INF when it's clear or
+## no firearm is up. Pure: the simulated eye, the aim + free-aim offset, a ray against the static / dynamic world.
+func tuck_distance(s: MotorState, i: InputFrame) -> float:
+	var def := ItemDB.by_index(s.equipped) if s.held_uid != 0 else null
+	if def == null or def.kind != ItemDefinition.Kind.FIREARM or not is_inside_tree():
+		return INF
+	var dir := UltraActionLayer.gun_dir(i.yaw, i.pitch, s.sway)
+	var right := dir.cross(Vector3.UP)
+	right = right.normalized() if right.length() > 1e-3 else Vector3.RIGHT
+	var shoulder := s.pos + Vector3.UP * (s.height - 0.3) + right * 0.17
+	var reach := gun_reach(def)
+	var q := PhysicsRayQueryParameters3D.create(shoulder, shoulder + dir * reach, UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC)
+	q.exclude = [get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	return shoulder.distance_to(hit.position) if not hit.is_empty() else INF
+
+
 # ------------------------------------------------------------------ going over an edge
 
 ## Walking off an edge standing (motion matching, single player): Sinew has the body from the moment the capsule
@@ -57,6 +81,11 @@ var _prev_grounded := true
 
 
 func simulate(input: InputFrame, delta: float, replaying := false) -> void:
+	# A gun up against a wall can't fire (V4b): the muzzle would be in the wall - the body holds it up out of the way
+	# (MarksmanGunPass) and the trigger does nothing. A query on the state: client and server agree.
+	if input != null and input.has(InputFrame.B_PRIMARY) and tuck_distance(state, input) < INF:
+		input = input.copy()
+		input.buttons &= ~InputFrame.B_PRIMARY
 	super.simulate(input, delta, replaying)
 	if replaying:
 		return

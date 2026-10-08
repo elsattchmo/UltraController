@@ -103,8 +103,9 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	var want := (1.0 if reloading else UltraActionLayer.raised(st) * (1.0 - st.gun_low)) if armed else 0.0
 	weight = move_toward(weight, want, 6.0 * dt)
 	reload_w = move_toward(reload_w, 1.0 if reloading else 0.0, 4.0 * dt)
+	var leaned := _lean(sk, mod.anim_pose, dt)
 	if weight <= 0.001 or not armed:
-		return false
+		return leaned
 	var rh := _part("RightHand")
 	var lh := _part("LeftHand")
 	if rh < 0 or lh < 0:
@@ -145,7 +146,8 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 		_hold_out(sk, pose, rh, grip, target_sk)
 	if reload_w > 0.001:
 		_reload_pose(pose, rh, grip, def)
-	ads = eq.ads * weight
+	_tuck(pose, rh, grip, def, dt)
+	ads = eq.ads * weight * (1.0 - tuck_w)
 	if ads > 0.001:
 		_aim_down_sights(sk, pose, rh, grip, target_sk, def)
 	if kick.length() > 1e-5:
@@ -201,6 +203,83 @@ func _kick(pose: Array[Transform3D], rh: int, grip: Transform3D, kick: Vector3) 
 	var g := Transform3D(flip * b, hand + flip * (gun.origin - hand))
 	g.origin += g.basis * kick
 	_two_bone(pose, _part("RightUpperArm"), _part("RightLowerArm"), rh, g * grip.affine_inverse(), 1.0)
+
+
+# ------------------------------------------------------------------ leaning and the wall (V4b)
+
+## Leaning (uc_lean_left / right, InputFrame.B_LEAN_L / R): the spine bends sideways, so the eye - the first-person
+## camera - and the gun go out round a corner together, and shots follow (the camera rig's aim_from is the eye).
+## Not sprinting, prone or in the air. (rad at full lean; shared up the spine.)
+const LEAN_MAX := 0.62
+const LEAN_OUT := 0.28        ## m the eye goes out at full lean
+const LEAN_SHARE := {"Spine": 0.3, "Chest": 0.3, "UpperChest": 0.4}
+var lean := 0.0                ## -1 left .. 1 right, eased
+## The gun held up out of a wall's way (0 .. 1, eased) - MarksmanCharacter.tuck_distance.
+var tuck_w := 0.0
+
+
+func _lean(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> bool:
+	var st := character.state
+	var i := character.last_input
+	var want := 0.0
+	var can := character.profile.enable_lean and st.is_grounded() and not st.has(MotorState.F_SPRINTING) \
+			and st.stance != MotorState.Stance.CRAWL and st.state in [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.CROUCH, MotorState.Id.TURN_IN_PLACE]
+	if i and can:
+		want = (1.0 if i.has(InputFrame.B_LEAN_R) else 0.0) - (1.0 if i.has(InputFrame.B_LEAN_L) else 0.0)
+	lean = move_toward(lean, want, 3.5 * dt)
+	var a := smoothstep(0.0, 1.0, absf(lean)) * signf(lean) * LEAN_MAX
+	if absf(a) < 1e-4:
+		return false
+	# About the VIEW's way (skeleton space; a bladed rifle stance turns the chest 35 deg off the body: about the body's
+	# own forward the eye went out 18 cm one way and 27 the other): + tips the top to the view's right.
+	var yaw := i.yaw if i else character.state.body_yaw
+	var fwd := sk.global_transform.basis.orthonormalized().inverse() * (Basis(Vector3.UP, yaw) * Vector3.FORWARD)
+	fwd = Vector3(fwd.x, 0.0, fwd.z).normalized()
+	# The eye goes out LEAN_OUT at full lean: bend, see how far it went, bend the rest (a shouldered rifle's head is
+	# already over the stock - a fixed angle took the eye 20 cm right and 31 left).
+	var neck := _part("Neck")
+	if neck >= 0 and _eye_local == Vector3.INF:
+		_eye_setup(sk)
+	var side := fwd.cross(Vector3.UP).normalized()          # (the view's right, skeleton space)
+	var e0 := _eye(sk, pose, neck) if neck >= 0 and _head_bone >= 0 else Vector3.INF
+	_bend(pose, fwd, a)
+	if e0 != Vector3.INF:
+		var went := (_eye(sk, pose, neck) - e0).dot(side) * signf(a)
+		var want_out := LEAN_OUT * smoothstep(0.0, 1.0, absf(lean))
+		if went > 0.02:
+			var more := clampf(a * (want_out / went - 1.0), -absf(a) * 0.5, absf(a) * 0.6) if a > 0.0 \
+					else clampf(a * (want_out / went - 1.0), -absf(a) * 0.6, absf(a) * 0.5)
+			_bend(pose, fwd, more)
+	return true
+
+
+func _bend(pose: Array[Transform3D], fwd: Vector3, a: float) -> void:
+	for n: String in LEAN_SHARE:
+		var k := _part(n)
+		if k >= 0:
+			_turn_subtree(pose, k, Quaternion(fwd, a * float(LEAN_SHARE[n])), pose[k].origin)
+
+
+## Up against a wall the gun comes up out of its way - muzzle raised round the hand, drawn in - and won't fire
+## (MarksmanCharacter.simulate strips the trigger on the same test).
+func _tuck(pose: Array[Transform3D], rh: int, grip: Transform3D, def: ItemDefinition, dt: float) -> void:
+	var c := character as MarksmanCharacter
+	var near := c.tuck_distance(c.state, c.last_input) if c and c.last_input else INF
+	var want := 0.0
+	if near < INF:
+		# (By how far the gun would go into the wall: all the way up once 25 cm of it would.)
+		want = clampf((MarksmanCharacter.gun_reach(def) - near) / 0.25, 0.0, 1.0)
+	tuck_w = move_toward(tuck_w, want, 5.0 * dt)
+	if tuck_w <= 0.001:
+		return
+	var e := smoothstep(0.0, 1.0, tuck_w)
+	var gun := pose[rh] * grip
+	var b := gun.basis.orthonormalized()
+	var hand := gun * grip.affine_inverse().origin
+	var up := Basis(b.x.normalized(), deg_to_rad(55.0 if def.two_handed else 40.0) * e)
+	var g := Transform3D(up * b, hand + up * (gun.origin - hand))
+	g.origin += b.z * (0.12 if def.two_handed else 0.16) * e + Vector3.DOWN * 0.03 * e
+	_two_bone(pose, _part("RightUpperArm"), _part("RightLowerArm"), rh, g * grip.affine_inverse(), weight)
 
 
 # ------------------------------------------------------------------ reloads (V4): loaded by the body
