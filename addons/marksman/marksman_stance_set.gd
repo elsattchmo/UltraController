@@ -10,7 +10,8 @@ extends SinewAnimationSet
 ## the clip feet), "aim": role (standing, gun up; optional), "cycles": [role, ...] (any directions and speeds -
 ## the core finds each clip's way of travel and blends by speed), "upper_from": {role: [roles]} (that cycle's
 ## spine and arms are the average of these roles' at the same phase - a clip with good legs and the wrong
-## arms), "turn_l" / "turn_r": roles (turning on the spot)}.
+## arms), "arms_from": {role: [roles]} (the same for the shoulders, arms and hands only - the cycle keeps its own
+## spine and head), "turn_l" / "turn_r": roles (turning on the spot)}.
 
 @export var groups: Array[Dictionary] = []
 

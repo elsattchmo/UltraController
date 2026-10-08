@@ -57,15 +57,16 @@ func _groups(roles: Dictionary) -> Array[Dictionary]:
 	var crouch_arms := {}
 	var pistol_crouch_arms := {}
 	for k: String in rc:
-		crouch_arms[k] = ["crouch_f"]
+		crouch_arms[k] = ["walk_f"]
 		pistol_crouch_arms[k] = ["p_idle"]
 	var out: Array[Dictionary] = [
 		{"name": "unarmed_stand", "stance": "unarmed", "posture": "stand", "idle": "idle",
 			"cycles": ["walk_f", "jog_f", "sprint_f", "walk_b", "strafe_l", "strafe_r"],
 			"upper_from": {"jog_f": ["walk_f", "sprint_f", "sprint_f"]}},
-		# (Crouched: the rifle pack's crouch-walk legs - 8 ways at the motor's crouch speed - with the plain crouch's arms.)
+		# (Crouched: the rifle pack's crouch-walk legs and lean - 8 ways at the motor's crouch speed - with the plain
+		# walk's arm swing. The UAL Crouch_Walk's whole upper body hunched it over, arms hanging wide: ape-like.)
 		{"name": "unarmed_crouch", "stance": "unarmed", "posture": "crouch", "idle": "crouch_idle",
-			"cycles": rc, "upper_from": crouch_arms},
+			"cycles": rc, "upper_from": {}, "arms_from": crouch_arms},
 		{"name": "rifle_stand", "stance": "rifle", "posture": "stand", "idle": "r_idle", "aim": "r_aim",
 			"cycles": r, "upper_from": {}, "turn_l": "r_turn_l", "turn_r": "r_turn_r"},
 		{"name": "rifle_crouch", "stance": "rifle", "posture": "crouch", "idle": "rc_idle", "aim": "rc_aim",

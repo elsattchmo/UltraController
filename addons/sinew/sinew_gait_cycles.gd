@@ -39,9 +39,10 @@ static func build(drv: UltraAnimDriver, parts: Array) -> Array:
 	return out
 
 
-## Cycles for one group of roles (a stance): `upper_from` role -> [roles] borrows that cycle's upper body (see
-## _borrow_upper); every cycle carries `group`. Clips are sampled once per skeleton and clip (cached).
-static func build_group(drv: UltraAnimDriver, parts: Array, roles: Array, upper_from: Dictionary, group: int) -> Array:
+## Cycles for one group of roles (a stance): `upper_from` role -> [roles] borrows that cycle's upper body,
+## `arms_from` only its arms (clavicles down; the cycle keeps its own spine and head) - see _borrow_upper;
+## every cycle carries `group`. Clips are sampled once per skeleton and clip (cached).
+static func build_group(drv: UltraAnimDriver, parts: Array, roles: Array, upper_from: Dictionary, group: int, arms_from := {}) -> Array:
 	var out := []
 	var seen := {}
 	for r in roles:
@@ -57,12 +58,14 @@ static func build_group(drv: UltraAnimDriver, parts: Array, roles: Array, upper_
 		c["speed"] = drv.anim_set.speed_of(role, 1.3)
 		c["clip"] = clip
 		c["group"] = group
-		var borrow: Array = upper_from.get(String(role), upper_from.get(role, []))
-		if not borrow.is_empty():
-			var typed: Array[StringName] = []
-			for b in borrow:
-				typed.append(StringName(b))
-			_borrow_upper(c, drv, parts, typed)
+		for spec: Array in [[upper_from, false], [arms_from, true]]:
+			var from: Dictionary = spec[0]
+			var borrow: Array = from.get(String(role), from.get(role, []))
+			if not borrow.is_empty():
+				var typed: Array[StringName] = []
+				for b in borrow:
+					typed.append(StringName(b))
+				_borrow_upper(c, drv, parts, typed, spec[1])
 		out.append(c)
 	return out
 
@@ -77,9 +80,9 @@ static func _cached_cycle(a: Animation, sk: Skeleton3D, parts: Array, plant_phas
 	return _cache[key]
 
 
-## Replaces a cycle's upper-body locals (everything but the pelvis and legs) with the average of other
-## roles' cycles at the same phase (all sampled from the left heel strike).
-static func _borrow_upper(c: Dictionary, drv: UltraAnimDriver, parts: Array, roles: Array[StringName]) -> void:
+## Replaces a cycle's upper-body locals (everything but the pelvis and legs; `arms_only`: the shoulders, arms
+## and hands) with the average of other roles' cycles at the same phase (all sampled from the left heel strike).
+static func _borrow_upper(c: Dictionary, drv: UltraAnimDriver, parts: Array, roles: Array[StringName], arms_only := false) -> void:
 	var others := []
 	for r in roles:
 		var a := drv._role_anim(r)
@@ -91,7 +94,10 @@ static func _borrow_upper(c: Dictionary, drv: UltraAnimDriver, parts: Array, rol
 	var upper: Array[int] = []
 	for i in parts.size():
 		var bone := drv.skeleton.get_bone_name(parts[i].bone)
-		if i != 0 and not (bone.contains("UpperLeg") or bone.contains("LowerLeg") or bone.contains("Foot") or bone.contains("Toes")):
+		if arms_only:
+			if bone.contains("Shoulder") or bone.contains("Arm") or bone.contains("Hand"):
+				upper.append(i)
+		elif i != 0 and not (bone.contains("UpperLeg") or bone.contains("LowerLeg") or bone.contains("Foot") or bone.contains("Toes")):
 			upper.append(i)
 	var samples: Array = c.samples
 	for k in samples.size():
@@ -101,7 +107,7 @@ static func _borrow_upper(c: Dictionary, drv: UltraAnimDriver, parts: Array, rol
 			for j in range(1, others.size()):
 				q = q.slerp(others[j][k][i], 1.0 / float(j + 1))
 			loc[i] = q
-	c["upper_from"] = roles
+	c["arms_from" if arms_only else "upper_from"] = roles
 
 
 ## The idle pose (the clip's first frame) as gait locals: {locals, pelvis_height}.

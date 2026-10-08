@@ -15,17 +15,18 @@ groups = Array[Dictionary]([{
 "jog_f": ["walk_f", "sprint_f", "sprint_f"]
 }
 }, {
+"arms_from": {
+"rc_walk_b": ["walk_f"],
+"rc_walk_f": ["walk_f"],
+"rc_walk_l": ["walk_f"],
+"rc_walk_r": ["walk_f"]
+},
 "cycles": ["rc_walk_b", "rc_walk_f", "rc_walk_l", "rc_walk_r"],
 "idle": "crouch_idle",
 "name": "unarmed_crouch",
 "posture": "crouch",
 "stance": "unarmed",
-"upper_from": {
-"rc_walk_b": ["crouch_f"],
-"rc_walk_f": ["crouch_f"],
-"rc_walk_l": ["crouch_f"],
-"rc_walk_r": ["crouch_f"]
-}
+"upper_from": {}
 }, {
 "aim": "r_aim",
 "cycles": ["r_run_b", "r_run_bl", "r_run_br", "r_run_f", "r_run_fl", "r_run_fr", "r_run_l", "r_run_r", "r_sprint_f", "r_sprint_fl", "r_sprint_fr", "r_sprint_l", "r_sprint_r", "r_walk_b", "r_walk_bl", "r_walk_br", "r_walk_f", "r_walk_fl", "r_walk_fr", "r_walk_l", "r_walk_r"],

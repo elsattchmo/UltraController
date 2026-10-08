@@ -26,7 +26,7 @@ func _setup_gait() -> void:
 	var cycles := []
 	for gi in aset.groups.size():
 		var g: Dictionary = aset.groups[gi]
-		var built := SinewGaitCycles.build_group(character.anim, parts, g.get("cycles", []), g.get("upper_from", {}), gi)
+		var built := SinewGaitCycles.build_group(character.anim, parts, g.get("cycles", []), g.get("upper_from", {}), gi, g.get("arms_from", {}))
 		for c in built:
 			# (Crouched, the feet roll onto their balls through the stance.)
 			c["rolling_stance"] = g.get("posture", "") == "crouch"
