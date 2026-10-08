@@ -126,5 +126,6 @@ func test_back_diagonals_pick_a_clip() -> void:
 
 ## Mean slide of a planted foot (m a frame) the matched clips may show.
 const SLIDE_MAX := 0.003
-## Clips whose own planted feet drift (m a frame, measured): the UAL Walk_Backwards' feet slide sideways in the source.
-const KNOWN_SLIDE := {"Walk_Backwards": 0.008}
+## Clips whose own planted feet drift (m a frame, measured). (The UAL Walk_Backwards scuffs its feet along the floor as
+## they land and lift - 6 mm a frame; MarksmanMMPass locks a foot while the clip has it flat on the ground: 2.1-2.4.)
+const KNOWN_SLIDE := {}
