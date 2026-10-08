@@ -391,10 +391,17 @@ var _rope_off := Vector3.INF          ## the rope pose's offset from the upright
 var _rope_ease := -1.0
 
 
+var _vis_prev := Basis()
+
+
 func _sync_visual(alpha: float) -> void:
 	super._sync_visual(alpha)
 	if visual_root == null:
 		return
+	var drv := anim as MarksmanAnimDriver
+	if drv and Engine.get_process_frames() <= drv.hold_visual_until:
+		visual_root.global_basis = _vis_prev
+	_vis_prev = visual_root.global_basis
 	if state.state == MotorState.Id.ROPE:
 		_rope_vis = visual_root.global_transform
 		_rope_ease = 0.0
