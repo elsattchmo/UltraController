@@ -1538,6 +1538,9 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   spring; aimed across (left) or turning at speed the gun swung across the chest (gun 9-12 cm in). The aim heading is
   followed (14 rad/s, 160 rad/s2), the turn solved afresh, spread by SPINE_SHARE, the neck turned back (the eye stays).
   (3) a reach guard (`_support_short`): if that turn left the support grip out of the off arm's reach (crouched walking
-  2-5 cm, g2), the chest blades back at most by what the turn squared it up. The two-handed pistol (placed off the eye)
-  keeps its old hold: chest-follow made its static aims worse; its fast-turn / 70-down off-arm depths are g8 KNOWN.
+  2-5 cm, g2), the chest blades back at most by what the turn squared it up. The two-handed pistol (placed off the eye):
+  the chest follows only beyond `HOLD_CHEST_BAND` 0.6 rad off (fully followed its static aims put the gun arm 2-5 cm in;
+  turning at 300 deg/s the aim leads ~55 deg while the matcher's turn clip squares the chest - support arm 4.5 cm in), and
+  the hold's frame takes `HOLD_DOWN_SHARE` 0.7 of a downward pitch (at 70 down "below the view" pointed back at the body:
+  the hand sat behind the eye, the off arm 4-5 cm in).
 

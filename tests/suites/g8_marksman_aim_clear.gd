@@ -104,10 +104,8 @@ func _fmt(w: Dictionary) -> String:
 
 
 const LIMIT := 0.02
-## Open problems, held at today's numbers (cm): the two-handed pistol's off arm at a 300 deg/s turn and aiming 70 deg down
-## (its hold is placed off the eye - the shouldered guns' chest-follow made its static aims worse: right upper arm 2-5 cm).
-const KNOWN := {"pistol turn right 300/s L upper": 5.0, "pistol turn left 300/s L upper": 3.0, "pistol down 70 L upper": 4.5,
-		"pistol down 70 L elbow": 2.5}
+## Open problems, held at today's numbers (cm), by "<item> <case> <point>".
+const KNOWN := {}
 
 
 func test_two_handed_aims_stay_clear() -> void:

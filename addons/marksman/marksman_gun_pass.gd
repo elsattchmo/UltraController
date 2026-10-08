@@ -1186,7 +1186,19 @@ func _pin_release(eq: UltraEquipmentVisual) -> void:
 ## barrel from there onto the aim point, level - and the arm brought to it by two-bone IK. (Turning the clip's own
 ## hold onto the aim kept the pistol where the PST clips have it: up in front of the face - in first person it covered
 ## the top half of the view, 17-19 deg above the centre.) Without an eye: the arm, then the wrist, turned onto the aim.
+## How much of a downward view's pitch the held-out gun's frame takes (_hold_out).
+const HOLD_DOWN_SHARE := 0.7
+## Two-handed, the chest only follows a held-out gun's aim past this far off the clip's relation (rad): its own hold is
+## clean to 45 deg off (fully followed, the gun arm's upper arm went 2-5 cm in), but turning at speed the aim leads the
+## body ~55 deg while the matcher's turn clip squares the chest: the support arm went across it (4.5 cm).
+const HOLD_CHEST_BAND := 0.6
+
+
 func _hold_out(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transform3D, target_sk: Vector3, at: Vector3) -> void:
+	var uc0 := _part("UpperChest")
+	var sh0 := _gpart("UpperArm")
+	if two and uc0 >= 0 and sh0 >= 0:
+		_chest_to_aim(pose, uc0, sh0, target_sk, HOLD_CHEST_BAND)
 	var turn := _barrel_turn(pose[rh] * grip, target_sk)
 	var spine_turn := _limit(turn, SPINE_MAX)
 	for n: String in SPINE_SHARE:
@@ -1201,10 +1213,18 @@ func _hold_out(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transfor
 	if neck >= 0 and _head_bone >= 0 and ua >= 0 and la >= 0:
 		var eye := _eye(sk, pose, neck)
 		var d := (target_sk - eye).normalized()
-		var right := d.cross(Vector3.UP)
+		# (The hold's frame pitches only HOLD_DOWN_SHARE of a downward view: at the view's own 70 deg down, "below the view"
+		# pointed back at the body and the hand sat behind the eye, the arms folded into the chest.)
+		var pitch := asin(clampf(d.y, -1.0, 1.0))
+		var flat := Vector3(d.x, 0.0, d.z)
+		var df := d
+		if pitch < 0.0 and flat.length() > 1e-3:
+			var p2 := pitch * HOLD_DOWN_SHARE
+			df = flat.normalized() * cos(p2) + Vector3.UP * sin(p2)
+		var right := df.cross(Vector3.UP)
 		right = right.normalized() if right.length() > 1e-3 else -_chest_axes(pose, _part("UpperChest")).x
-		var up := right.cross(d).normalized()
-		var hand_at := eye + right * at.x * side + up * at.y + d * at.z
+		var up := right.cross(df).normalized()
+		var hand_at := eye + right * at.x * side + up * at.y + df * at.z
 		var hand_in_gun := grip.affine_inverse().origin
 		var gun := Transform3D(Basis(), hand_at)
 		var aim := (target_sk - hand_at).normalized()
@@ -1329,7 +1349,7 @@ var _aim_h_st := Vector2(INF, 0.0)    ## followed aim heading (skeleton space, u
 var _clip_pose: Array[Transform3D] = []
 
 
-func _chest_to_aim(pose: Array[Transform3D], uc: int, sh: int, target_sk: Vector3) -> void:
+func _chest_to_aim(pose: Array[Transform3D], uc: int, sh: int, target_sk: Vector3, band := 0.0) -> void:
 	var d := target_sk - pose[sh].origin
 	var ha := atan2(d.x, d.z)
 	if _aim_h_st.x == INF or weight < 0.05:
@@ -1343,7 +1363,8 @@ func _chest_to_aim(pose: Array[Transform3D], uc: int, sh: int, target_sk: Vector
 		var cz := _chest_axes(_clip_pose, uc).z
 		ref = atan2(cz.x, cz.z)
 	var cz2 := _chest_axes(pose, uc).z
-	var r := clampf(angle_difference(atan2(cz2.x, cz2.z), _aim_h_st.x + ref), -CHEST_MAX, CHEST_MAX)
+	var r := angle_difference(atan2(cz2.x, cz2.z), _aim_h_st.x + ref)
+	r = clampf(signf(r) * maxf(absf(r) - band, 0.0), -CHEST_MAX, CHEST_MAX)
 	chest_turn = r
 	if absf(r) < 1e-4:
 		return
