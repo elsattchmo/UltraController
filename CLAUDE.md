@@ -1593,4 +1593,11 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   enough (iterated, <= CARRY_LEAN_MAX 0.35 rad). `MarksmanEquipment._drive_held_prop`: Sinew lends a hand IK only while
   holding - the base's release on letting go called a null one every frame. Suite g11 (OFFLINE session, 5 kg crate:
   hands 0.6 cm off standing, 0.2 walking; drop lets go).
+- **Pistol stands up** (user: "the pistol holding is off, we are leaning backwards"; g8 test_torso_upright_with_a_gun:
+  trunk tilt hips -> neck, + = back): `_hold_out` turned the spine so the CLIP's gun pointed at the aim; under a clip with
+  the hand hanging (the back walk, the turn clips) that "gun" pointed at the floor and the spine bent back up to 34 deg
+  (walking back +14 deg, a fast turn +30). The turn is now weighted by how level the clip holds the gun (`level`, its
+  barrel's horizontal share 0.4 .. 0.8): full for the pistol clips (it stands their idle's 11 deg hunch up - the sights
+  need it), none for a hanging hand; then the chest-follow's band narrows to HOLD_CHEST_BAND_LOOSE 0.25 (else a fast
+  turn put the support arm 2.2 cm in). Pistol trunk now -4 .. +1 deg every way (unarmed -15 .. -1).
 

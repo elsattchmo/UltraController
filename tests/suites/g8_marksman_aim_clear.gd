@@ -163,3 +163,54 @@ func test_two_handed_aims_stay_clear() -> void:
 	for r: String in rows:
 		info(r)
 	check(bad.is_empty(), "two-handed aims keep the arms and the gun out of the body (%s)" % "; ".join(bad.slice(0, 16)))
+
+
+## The torso stands up with a gun held (the user: "it does look like the pistol holding is off, we are leaning
+## backwards"): the trunk's tilt (hips -> neck against vertical, + = leaning back, deg) standing and walking each way,
+## pistol and rifle against unarmed.
+func test_torso_upright_with_a_gun() -> void:
+	load_playground()
+	var rows := []
+	var bad := []
+	var base := {}
+	for item: StringName in [&"", &"pistol", &"rifle"]:
+		var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+		await ticks(40)
+		var sl := _slot(c, item) if item != &"" else 0
+		var sk := c.skeleton
+		for mv: Array in [["stand", Vector2.ZERO], ["walk f", Vector2(0, 1)], ["walk b", Vector2(0, -1)], ["back-left", Vector2(-0.7, -0.7)], ["strafe r", Vector2(1, 0)]]:
+			c.teleport(marker("spawn").global_position + Vector3(-16, 0, -3), 0.0)
+			bot(c).set_steps([{"ticks": 300, "slot": sl, "yaw": 0.0, "move": mv[1]}])
+			await ticks(70)
+			var acc := [0.0, 0, -99.0]
+			var probe := func() -> void:
+				var hips := sk.get_bone_global_pose(sk.find_bone("Hips")).origin
+				var neck := sk.get_bone_global_pose(sk.find_bone("Neck")).origin
+				var head := sk.get_bone_global_pose(sk.find_bone("Head")).origin
+				var d := neck - hips
+				# (Skeleton space: the model faces +Z; + = the neck behind the hips = leaning back.)
+				var back := rad_to_deg(atan2(-d.z, d.y))
+				acc[0] = float(acc[0]) + back
+				acc[1] = int(acc[1]) + 1
+				acc[2] = maxf(float(acc[2]), rad_to_deg(atan2(-(head - neck).z, (head - neck).y)))
+			sk.skeleton_updated.connect(probe)
+			await ticks(60)
+			sk.skeleton_updated.disconnect(probe)
+			var lean := float(acc[0]) / maxf(float(acc[1]), 1.0)
+			var label := "%-8s %-9s" % [String(item) if item != &"" else "unarmed", mv[0]]
+			if item == &"":
+				base[mv[0]] = lean
+			rows.append("%s trunk %+.1f deg (+ = back), head over the neck %+.1f" % [label, lean, float(acc[2])])
+			if item != &"" and lean > TRUNK_BACK_MAX:
+				bad.append("%s leans back %.1f deg" % [label, lean])
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+	for r: String in rows:
+		info(r)
+	check(bad.is_empty(), "the trunk stays up with a gun (%s)" % "; ".join(bad))
+
+
+## How far back the trunk may lean with a gun held (deg; unarmed it's -15 .. -1, forward).
+const TRUNK_BACK_MAX := 4.0
+

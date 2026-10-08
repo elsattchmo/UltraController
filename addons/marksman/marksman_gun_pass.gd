@@ -1373,19 +1373,28 @@ const HOLD_DOWN_SHARE := 0.7
 ## clean to 45 deg off (fully followed, the gun arm's upper arm went 2-5 cm in), but turning at speed the aim leads the
 ## body ~55 deg while the matcher's turn clip squares the chest: the support arm went across it (4.5 cm).
 const HOLD_CHEST_BAND := 0.6
+const HOLD_CHEST_BAND_LOOSE := 0.25
 
 
 func _hold_out(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transform3D, target_sk: Vector3, at: Vector3) -> void:
 	var uc0 := _part("UpperChest")
 	var sh0 := _gpart("UpperArm")
+	var bar0 := -(pose[rh] * grip).basis.z.normalized()
+	var level := smoothstep(0.4, 0.8, Vector2(bar0.x, bar0.z).length())     # (how horizontal the clip holds the gun)
 	if two and uc0 >= 0 and sh0 >= 0:
-		_chest_to_aim(pose, uc0, sh0, target_sk, HOLD_CHEST_BAND)
-	var turn := _barrel_turn(pose[rh] * grip, target_sk)
+		# (A clip with no gun held out - a turn clip - gives the spine no turn below: the chest follows sooner.)
+		_chest_to_aim(pose, uc0, sh0, target_sk, lerpf(HOLD_CHEST_BAND_LOOSE, HOLD_CHEST_BAND, level))
+	# The spine turns the clip's gun toward the aim - only as far as the clip holds a gun out at all: a clip with the hand
+	# hanging (the back walk, the turn clips - borrowed legs) pointed its "gun" at the floor, and turned onto the aim the
+	# spine bent BACK up to 34 deg (walking backwards with the pistol leaned 15 deg back). The pistol clips hold it out
+	# level: their idle's 11 deg hunch is stood up by it (the sights rely on that).
+	var g0: Transform3D = pose[rh] * grip
+	var turn := _barrel_turn(g0, target_sk)
 	var spine_turn := _limit(turn, SPINE_MAX)
 	for n: String in SPINE_SHARE:
 		var i := _part(n)
 		if i >= 0:
-			_turn_subtree(pose, i, Quaternion.IDENTITY.slerp(spine_turn, float(SPINE_SHARE[n]) * weight), pose[i].origin)
+			_turn_subtree(pose, i, Quaternion.IDENTITY.slerp(spine_turn, float(SPINE_SHARE[n]) * weight * level), pose[i].origin)
 	var neck := _part("Neck")
 	if neck >= 0 and _eye_local == Vector3.INF:
 		_eye_setup(sk)

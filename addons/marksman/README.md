@@ -252,7 +252,7 @@ Marksman makes all of it **visible through the body**: the gun pass drives the a
 - The unarmed back walk (UAL Walk_Backwards) drifts its planted feet ~6 mm a frame under motion matching (g10 KNOWN).
 - Crouched backward / left under motion matching: the clips roll on the balls of the feet, so g10 can't measure slide.
 - Aiming down the sights leaning right, the eye gets 19 cm out against 29 leaning left (the stock sits on the right).
-- The matcher's turn clip leans the chest back 20-30 deg on a fast turn with the pistol up.
+
 
 ## Risks
 - **Binaries build only on main.** V1's core and binding changes must merge before its GDScript can rely on them. Guard with `class_has_method` and fall back to a single group.
