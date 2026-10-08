@@ -8,12 +8,20 @@ extends SinewCharacter
 
 
 ## Motion matching for the standing legs (a spike: MarksmanMotionMatcher, MarksmanMMPass) instead of Sinew's gait.
-## Also `--mm` on the command line.
+## On for every Marksman made while `motion_matching_on()`: the main menu's toggle / `--mm` (kept in Engine meta
+## MM_META across Pause > Main menu).
 @export var motion_matching := false
+const MM_META := &"marksman_mm"
+
+
+static func motion_matching_on() -> bool:
+	if not Engine.has_meta(MM_META):
+		Engine.set_meta(MM_META, "--mm" in OS.get_cmdline_user_args())
+	return bool(Engine.get_meta(MM_META))
 
 
 func _ready() -> void:
-	if "--mm" in OS.get_cmdline_user_args():
+	if motion_matching_on():
 		motion_matching = true
 	super._ready()
 

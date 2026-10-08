@@ -83,6 +83,14 @@ func _ready() -> void:
 		dbg.button_pressed = SinewDebugDraw.view > 0
 		dbg.toggled.connect(func(on: bool) -> void: SinewDebugDraw.view = SinewDebugDraw.View.OVERLAY if on else SinewDebugDraw.View.OFF)
 		right.add_child(dbg)
+		# Marksman's motion-matching legs (the spike) instead of Sinew's procedural gait; also --mm.
+		var mm := CheckButton.new()
+		mm.name = "MarksmanMM"
+		mm.text = "Marksman: motion matching"
+		mm.tooltip_text = "Marksman walks on matched clips (standing; unarmed and rifle) instead of Sinew's gait. Takes effect on Play"
+		mm.button_pressed = MarksmanCharacter.motion_matching_on()
+		mm.toggled.connect(func(on: bool) -> void: Engine.set_meta(MarksmanCharacter.MM_META, on))
+		right.add_child(mm)
 	_header(right, "Launch presets (separate windows)")
 	for p in UltraLauncher.presets():
 		var preset := p
