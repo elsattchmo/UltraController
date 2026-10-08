@@ -1559,13 +1559,20 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   clip fitted the trajectory and the IDLE won (pistol all four diagonals, rifle back-right): its feet stepped after the
   sliding body - 21-24 steps in 3 s. Moving (wish >= 0.3 m/s) the matcher only takes clips travelling within DIR_FIT 70
   deg of the wish (`_dir_fit`; a clip outside the mask always switches). Pistol set: the pack's walk back (55 mm a
-  frame) and 1 m/s strafe (38) skate -> the axe pack's AXE_UnarmedWalkBack (planted 0 mm; also unarmed's, the UAL
-  Walk_Backwards slid 6), U_Run_B, mirrored PST_PistolStrafe2.
+  frame) and 1 m/s strafe (38) skate -> the UAL Walk_Backwards (as unarmed: its feet drift ~6 mm a frame, g10 KNOWN;
+  AXE_UnarmedWalkBack holds them still but swings the head 12.7 cm - 0.6 for Walk_Backwards: gm limp baseline), U_Run_B,
+  mirrored PST_PistolStrafe2.
 - **V7 parity nodes** (`MarksmanAnimDriver._add_parity_nodes`, the UltraController's builders and helpers - inherited):
   air_run (leap seeked by vertical speed), fall, land_heavy, slide start, drop_hang, the hang's shimmy blend
-  (`_build_hang`), ladder refit, dive; `_parity_wanted` maps the motor states as the UltraController does. Every loco change
-  dead-blends (`inertial`, now always made; Sinew started timed moves with a cut), `root_jumped` shifts it and drops the
-  stale physics picture, and the visual root holds its turn the frame the tree lags at a drop's end (`hold_visual_until`:
-  the drop clip turns itself round as the body yaw flips - a cut, never a blend). Suite g9 (courses: ledges, vault,
-  ladder, shimmy, rope, leap, jump, slide, prone, drop to hang, cliff fall, swim + dive).
-
+  (`_build_hang`), ladder refit, dive, prone_down / prone_up; `_parity_wanted` maps the motor states as the UltraController
+  does (off a rope: Marksman's own air clip - the leap swung the body 9 cm a frame). Every loco change dead-blends
+  (`inertial` = `MarksmanInertial`, always made; Sinew started timed moves with a cut: hang -> climb up moved a hand 1 m) -
+  NOT out of a rope / slide (the blend carries the old motion on: pumping legs flung out, a slide's kick put a toe 0.44 m
+  under the floor) nor out of drop_hang. `root_jumped` (UltraCharacter: > 1 m; MarksmanCharacter.simulate also reports a
+  state change's capsule snap > SNAP_JUMP 0.2 m against the pre-tick velocity - a ladder grab moved the body 0.48 m in a
+  frame - and resets `_prev_pos`: no glide) shifts the blend, drops the stale physics picture and cuts the matched pass
+  (its ground fit pulled a drop to hang 2 m down). drop_hang transitions are cuts (the mm node's 0.2 s cross-fades came
+  after); at a drop's end the visual root holds its old turn the frame the tree lags (`hold_visual_until`), then
+  `MarksmanInertial.turn` turns the blend's remembered hips by the root's turn and blends into the hang (a cut jumped the
+  legs 0.8 m). Suite g9 (CI): ledges, vault, ladder, shimmy, rope, leap, jump, slide, prone, drop to hang, cliff fall,
+  swim + dive - each its node, no NaN, no bone (but leaf / Root) over 25 m/s.

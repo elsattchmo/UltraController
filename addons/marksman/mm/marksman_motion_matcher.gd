@@ -24,10 +24,10 @@ const RATE_MAX := 1.35
 const RFP_CROUCH := ["mixamo/RFP_IdleCrouching", "mixamo/RFP_WalkCrouchingForward", "mixamo/RFP_WalkCrouchingForwardLeft",
 	"mixamo/RFP_WalkCrouchingForwardRight", "mixamo/RFP_WalkCrouchingLeft", "mixamo/RFP_WalkCrouchingRight",
 	"mixamo/RFP_WalkCrouchingBackward", "mixamo/RFP_WalkCrouchingBackwardLeft", "mixamo/RFP_WalkCrouchingBackwardRight"]
-## (Backwards unarmed: the axe pack's unarmed walk back - its planted feet hold still; the UAL Walk_Backwards slid them
-## 6 mm a frame, sideways in the source clip.)
+## (Backwards: the UAL Walk_Backwards - its planted feet drift ~6 mm a frame, sideways in the source clip (g10 KNOWN); the
+## axe pack's AXE_UnarmedWalkBack holds them still but swings the head 12.7 cm over the hips (0.6 for this one).)
 const SETS := {
-	"unarmed": ["Idle_A", "mixamo/N_StdWalk2", "mixamo/U_Walk_R", "mirror:mixamo/U_Walk_R", "mixamo/AXE_UnarmedWalkBack", "mixamo/U_Run_F", "mixamo/U_Run_B",
+	"unarmed": ["Idle_A", "mixamo/N_StdWalk2", "mixamo/U_Walk_R", "mirror:mixamo/U_Walk_R", "Walk_Backwards", "mixamo/U_Run_F", "mixamo/U_Run_B",
 		"mixamo/U_Run_L", "mixamo/U_Run_R", "mixamo/S_Fast"],
 	"rifle": ["mixamo/RFP_Idle", "mixamo/RFP_WalkForward", "mixamo/RFP_WalkForwardLeft", "mixamo/RFP_WalkForwardRight",
 		"mixamo/RFP_WalkLeft", "mixamo/RFP_WalkRight", "mixamo/RFP_WalkBackward", "mixamo/RFP_WalkBackwardLeft",
@@ -40,7 +40,7 @@ const SETS := {
 	# gun. Backwards, the unarmed back walk / run: the pack's walk back skated its planted feet 55 mm a frame and its
 	# 1.0 m/s strafe 38 (the gait's set swapped them too) - backing on a diagonal looked a shuffle. The arms are the
 	# gun pass's.)
-	"pistol": ["mixamo/PST_PistolIdle", "mixamo/PST_PistolWalk", "mixamo/AXE_UnarmedWalkBack",
+	"pistol": ["mixamo/PST_PistolIdle", "mixamo/PST_PistolWalk", "Walk_Backwards",
 		"mixamo/PST_PistolStrafe2", "mirror:mixamo/PST_PistolStrafe2",
 		"mixamo/PST_PistolRun", "mixamo/U_Run_B", "mixamo/S_Fast", "mixamo/U_Run_L", "mixamo/U_Run_R"],
 	# Limping (a second matcher, in step with the first: see `follow`, MarksmanAnimDriver._drive_limp), by the bad leg:

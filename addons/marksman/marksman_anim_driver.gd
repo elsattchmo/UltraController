@@ -48,11 +48,6 @@ func _build_sinew() -> AnimationNodeBlendTree:
 	air.connect_node("ready", 0, "clip_ts")
 	air.connect_node("ready", 1, "ready_ts")
 	air.connect_node("output", 0, "ready")
-	# --- letting go of a rope: the arms come down off it slowly (the grip pose is overhead; at the plain cross-fade the
-	# hands swept down 17 cm a frame)
-	for ti in loco.get_transition_count():
-		if loco.get_transition_from(ti) == &"rope":
-			loco.get_transition(ti).xfade_time = ROPE_LET_GO_XFADE
 	# --- landing: as deep as the impact (Jump_Land squats 45 cm - for a hop, a little of it over the idle)
 	var land := loco.get_node("land") as AnimationNodeBlendTree
 	land.disconnect_node("output", 0)
@@ -140,6 +135,11 @@ func _build_sinew() -> AnimationNodeBlendTree:
 				t.xfade_time = XFADE
 				t.xfade_curve = _ease_curve()
 				loco.add_transition(pair[0], pair[1], t)
+	# --- letting go of a rope: the arms come down off it slowly (the grip pose is overhead; at the plain cross-fade the
+	# hands swept down 17 cm a frame) - after every node is in (the leap / fall nodes came later and got 0.2 s)
+	for ti in loco.get_transition_count():
+		if loco.get_transition_from(ti) == &"rope":
+			loco.get_transition(ti).xfade_time = ROPE_LET_GO_XFADE
 	# (Into and out of the drop to hang: always a cut - the capsule is already 2 m down at the end; a cross-fade from the
 	# standing pose drew the body 2 m down and rising.)
 	for ti in loco.get_transition_count():
@@ -257,9 +257,8 @@ func _parity_wanted(w: String) -> String:
 				_jump_vy0 = 0.0
 				return "air_run"
 			if _cur_loco == "rope":
-				_run_jump = hsp > 1.5 and has_leap
-				_jump_vy0 = 0.0
-				return "air_run" if _run_jump else "air"
+				return w          # (Marksman's own air clip off a rope, legs reaching for the landing - the leap, seeked by the
+				                  # vertical speed, swung the body 9 cm a frame letting go: gm rope test)
 			if _cur_loco == "air_run" and air_time < 1.3:
 				return "air_run"
 			if w == "air" and _cur_loco != "air":
@@ -449,7 +448,9 @@ func _go(want: String) -> void:
 	# (Not out of the drop to hang: the visual root turns round to the wall as it ends - the clip has turned itself round
 	# - so the cut is continuous in the world, and a blend of local poses across the turn swung the body 1.1 m.)
 	# (Into / out of the matcher too: a running landing handed to it moved the hands 0.7 m in a frame.)
-	if want != _cur_loco and _cur_loco != "" and inertial and _cur_loco != "drop_hang":
+	# (Not off a rope or out of a slide either: the dead blend carries the old motion on, and fast legs fling out - the
+	# rope's pumping legs 9 cm a frame, the slide's kick put a toe 0.44 m under the floor; their own cross-fades do it.)
+	if want != _cur_loco and _cur_loco != "" and inertial and not _cur_loco in ["drop_hang", "rope", "slide"]:
 		inertial.trigger(LOCO_BLEND)
 	if _cur_loco == "drop_hang" and want != "drop_hang":
 		# (The visual root turns round the frame after the motor does, the tree shows the new node the frame after that:
@@ -578,7 +579,7 @@ func setup(p: AnimationPlayer, sk: Skeleton3D) -> void:
 	# Switches dead-blend (first in the stack, so on the clip pose): the matcher's clip changes and every loco node
 	# change (Sinew starts the timed moves - climb up, get-ups, the roll - with a cut: hang -> climb up moved a hand 1 m
 	# in a frame).
-	inertial = InertialBlendModifier.new()
+	inertial = MarksmanInertial.new()
 	inertial.name = "MMInertial"
 	inertial.blend_time = MM_BLEND
 	sk.add_child(inertial)

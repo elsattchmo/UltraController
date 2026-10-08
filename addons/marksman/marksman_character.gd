@@ -168,6 +168,10 @@ var _prev_state := -1
 var _prev_grounded := true
 
 
+## A capsule move on a state change this far (m) beyond its velocity is a jump for the animation (see simulate).
+const SNAP_JUMP := 0.2
+
+
 func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	# A gun up against a wall can't fire (V4b): the muzzle would be in the wall - the body holds it up out of the way
 	# (MarksmanGunPass) and the trigger does nothing. A query on the state: client and server agree.
@@ -182,8 +186,19 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	if side_run:
 		profile.default_gait = MovementProfile.Gait.JOG
 	var breath0 := state.breath
+	var pos0 := state.pos
+	var vel0 := state.vel
+	var state0 := state.state
 	super.simulate(input, delta, replaying)
 	profile.default_gait = gait
+	# A scripted move's capsule snapping onto its anchor (a ladder grab put it 0.48 m over in a tick) is a root jump for
+	# the animation too - the UltraController reports only jumps over a metre (UltraCharacter.simulate).
+	# (Against the velocity before the tick: a snap sets the velocity to the snap itself.)
+	var snap := state.pos - pos0 - vel0 * delta
+	if not replaying and state.state != state0 and snap.length() > SNAP_JUMP and (state.pos - pos0).length() <= 1.0 \
+			and anim and skeleton and not (ragdoll and (ragdoll as SinewRagdoll).active):
+		anim.root_jumped(skeleton.global_basis.inverse() * -(state.pos - pos0))
+		_prev_pos = state.pos          # (no glide across it: the blend's shift is all at once - UltraCharacter's way)
 	# (Sim, so in replays too: from the state and the input only.)
 	_hold_breath(input, delta, breath0)
 	_empty_reload(delta)
@@ -400,8 +415,16 @@ func _sync_visual(alpha: float) -> void:
 		return
 	# (MarksmanAnimDriver.hold_visual_until: the tree lags a frame or two behind a root jump / the turn at a drop's end.)
 	var drv := anim as MarksmanAnimDriver
-	if drv and Engine.get_process_frames() <= drv.hold_visual_until:
+	var frame := Engine.get_process_frames()
+	if drv and frame <= drv.hold_visual_until:
 		visual_root.global_transform = _vis_prev
+	elif drv and frame == drv.hold_visual_until + 1 and drv.inertial is MarksmanInertial:
+		# The hold ends as the tree shows the new node: the root turns now - the dead blend starts from the pose on screen
+		# turned back by it (a cut jumped the legs 0.8 m at a drop's end).
+		var dyaw := angle_difference(_vis_prev.basis.get_euler().y, visual_root.global_basis.get_euler().y)
+		if absf(dyaw) > 0.3:
+			(drv.inertial as MarksmanInertial).turn(Quaternion(Vector3.UP, dyaw))
+			drv.inertial.trigger(MarksmanAnimDriver.LOCO_BLEND)
 	_vis_prev = visual_root.global_transform
 	if state.state == MotorState.Id.ROPE:
 		_rope_vis = visual_root.global_transform

@@ -44,20 +44,6 @@ func _course(c: MarksmanCharacter, limit: int, fn: Callable, done: Callable) -> 
 	var last := {}
 	var probe := func() -> void:
 		var dt := 1.0 / 60.0
-		if OS.get_environment("G9_TRACE") != "":
-			var hb := sk.find_bone("Hips")
-			var r := c.ragdoll as SinewRagdoll
-			var cp: Array = r.modifier.clip_pose if r and r.modifier else []
-			var rb := sk.find_bone("Root")
-			print("YAW f%d sk %.1f body %.1f node %s" % [Engine.get_physics_frames(), rad_to_deg(sk.global_basis.get_euler().y), rad_to_deg(c.state.body_yaw), c.anim._cur_loco])
-			print("LP f%d root %s %s hips %s %s" % [Engine.get_physics_frames(), sk.get_bone_pose_position(rb).snappedf(0.01) if rb >= 0 else Vector3.ZERO, sk.get_bone_pose_rotation(rb).get_euler().snappedf(0.01) if rb >= 0 else Vector3.ZERO, sk.get_bone_pose_position(hb).snappedf(0.01), sk.get_bone_pose_rotation(hb).get_euler().snappedf(0.01)])
-			var inn: InertialBlendModifier = c.anim.inertial
-			if inn:
-				print("IN f%d active %s t %.3f jumps %d idx %d infl %.2f act %s" % [Engine.get_physics_frames(), inn._active, inn._t, inn.jumps, inn.get_index(), inn.influence, inn.active])
-			print("TR f%d clip-hips %s node %s st %s root %s hips %s lhand %s pos %s blend %.2f" % [Engine.get_physics_frames(), (sk.global_transform * (cp[0] as Transform3D).origin).snappedf(0.01) if not cp.is_empty() else Vector3.ZERO, c.anim._cur_loco, Id.keys()[c.state.state],
-					sk.global_position.snappedf(0.01), (sk.global_transform * sk.get_bone_global_pose(hb).origin).snappedf(0.01),
-					(sk.global_transform * sk.get_bone_global_pose(sk.find_bone("LeftHand")).origin).snappedf(0.01), c.state.pos.snappedf(0.01),
-					r.modifier.blend if r and r.modifier else -1.0])
 		for b in sk.get_bone_count():
 			if sk.get_bone_name(b).contains("leaf") or sk.get_bone_name(b) == "Root":
 				continue          # (end markers of the rig, no pose of their own; the root bone is the capsule's floor)
@@ -73,23 +59,6 @@ func _course(c: MarksmanCharacter, limit: int, fn: Callable, done: Callable) -> 
 					out.fast = v
 					out.fast_bone = sk.get_bone_name(b)
 			last[b] = p
-	if OS.get_environment("G9_TRACE") != "" and out.nodes.is_empty():
-		var lp := (c.anim.tree.tree_root as AnimationNodeBlendTree).get_node("loco") as AnimationNodeStateMachine
-		for nn in ["drop_hang", "air_run", "land_heavy", "hang", "ladder", "prone_down"]:
-			if lp.has_node(nn):
-				var nd := lp.get_node(nn)
-				var an := ""
-				if nd is AnimationNodeBlendTree and (nd as AnimationNodeBlendTree).has_node("clip"):
-					an = String(((nd as AnimationNodeBlendTree).get_node("clip") as AnimationNodeAnimation).animation)
-				elif nd is AnimationNodeAnimation:
-					an = String((nd as AnimationNodeAnimation).animation)
-				print("NODE %s anim '%s' in player %s" % [nn, an, c.anim.player.has_animation(an) if an != "" else false])
-				if an != "" and c.anim.player.has_animation(an):
-					var A := c.anim.player.get_animation(an)
-					for ti in A.get_track_count():
-						var tp := String(A.track_get_path(ti))
-						if tp.ends_with(":Hips") or tp.ends_with(":Root"):
-							print("   track %s type %d keys %d first %s last %s len %.2f" % [tp, A.track_get_type(ti), A.track_get_key_count(ti), A.track_get_key_value(ti, 0), A.track_get_key_value(ti, A.track_get_key_count(ti) - 1), A.length])
 	# (A teleport or respawn moves everything at once: the probe starts after the first frames.)
 	await ticks(4)
 	sk.skeleton_updated.connect(probe)
