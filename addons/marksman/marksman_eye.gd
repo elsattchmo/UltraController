@@ -46,6 +46,12 @@ func _ready() -> void:
 	var model := Vector3(-off.x, off.y, -off.z)
 	eye_local = _sk.get_bone_global_rest(_head).basis.orthonormalized().inverse() * model
 	_sk.skeleton_updated.connect(_capture)
+	freelook = MarksmanFreelook.new(character, rig)
+	rig.add_child(freelook)
+
+
+## Freelook (MarksmanFreelook): the view turned off the aim while it's held.
+var freelook: MarksmanFreelook
 
 
 ## The shown pose is readable only now (after every modifier, the gun pass included).
@@ -69,6 +75,14 @@ func _process(_delta: float) -> void:
 	var shift := (eye - eq.fp_view.origin) * weight
 	rig.global_position += shift
 	eq.fp_view = Transform3D(eq.fp_view.basis, eye)
+	# Freelook turns the camera only (fp_view - the gun's - keeps the aim).
+	if freelook and freelook.offset != Vector2.ZERO:
+		var cam := rig.camera
+		var b := cam.global_transform.basis.orthonormalized()
+		var right := b.x.normalized()
+		var turn := Basis(Vector3.UP, freelook.offset.x * weight)
+		b = Basis(turn * right, freelook.offset.y * weight) * turn * b
+		cam.global_transform = Transform3D(b, cam.global_position)
 	var src := character.input_source
 	if src:
 		src.aim_from = rig.global_position - (character.visual_feet + Vector3.UP * (character.state.height - 0.16))

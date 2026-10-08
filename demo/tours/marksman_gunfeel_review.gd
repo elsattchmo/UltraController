@@ -1,0 +1,82 @@
+extends "res://demo/tours/tour_base.gd"
+## Marksman V4b filmed close up: an empty reload on the carbine and the pistol (the magazine swap, then the left hand
+## racks the charging handle / slide), and freelook (the head turned off the aim, the gun still on it).
+##   godot --path . --fixed-fps 60 --resolution 1280x720 -- --tour=marksman_gunfeel_review --controller=marksman --out=<dir>
+
+var _c: UltraCharacter
+var _cam: Camera3D
+var _slots := {}
+var _view_off := Vector3(1.2, 1.5, -1.2)
+var _look_y := 1.35
+
+
+func _build() -> void:
+	out_dir = out_dir.replace("/m1", "/marksman_gunfeel_review")
+	steps = [{"teleport": "spawn", "t": 0.6, "yaw": 0, "pitch": 0, "view_tp": true, "slot": 0},
+			{"call": _setup, "t": 1.0}]
+	for item in ["rifle", "pistol"]:
+		steps.append({"call": _arm.bind(item), "t": 600.0, "until": _ticks.bind(100), "yaw": 0, "pitch": -5})
+		steps.append({"call": _empty, "t": 600.0, "until": _ticks.bind(3), "yaw": 0, "pitch": -5, "buttons": InputFrame.B_RELOAD})
+		# (Ticks along the reload, real time: the magazine out, in, the rack reached, pulled, let go, back on the grip.)
+		var at := [24, 78, 112, 134, 142, 160] if item == "rifle" else [24, 70, 92, 112, 120, 135]
+		for k in at.size():
+			steps.append({"t": 600.0, "until": _ticks.bind(int(at[k])), "yaw": 0, "pitch": -5, "shot": "%s_empty_%d" % [item, k]})
+		steps.append({"t": 600.0, "until": _ticks.bind(260), "yaw": 0, "pitch": -5})
+	steps.append({"call": _arm.bind("rifle"), "t": 600.0, "until": _ticks.bind(80), "yaw": 0, "pitch": 0})
+	steps.append({"call": _freelook.bind(true), "t": 600.0, "until": _ticks.bind(50), "yaw": 0, "pitch": 0, "shot": "freelook_left"})
+	steps.append({"call": _freelook.bind(false), "t": 600.0, "until": _ticks.bind(50), "yaw": 0, "pitch": 0, "shot": "freelook_back"})
+
+
+var _tick0 := 0
+
+
+func _ticks(n: int) -> bool:
+	return Engine.get_physics_frames() - _tick0 >= n
+
+
+func _setup() -> void:
+	_c = main.player
+	for n in get_tree().root.find_children("*", "CanvasLayer", true, false):
+		(n as CanvasLayer).visible = false
+	_cam = Camera3D.new()
+	main.add_child(_cam)
+	_cam.fov = 40.0
+	_cam.current = true
+	for item: StringName in [&"rifle", &"pistol", &"ammo_556", &"ammo_9mm"]:
+		UltraItems.give(_c, item)
+	for i in _c.inventory.size():
+		var it := _c.inventory.get_slot(i)
+		if it:
+			_slots[String(it.def_id)] = i + 1
+	_c.teleport(main.map.call("marker", "spawn").global_position + Vector3(-16, 0, -3), 0.0)
+
+
+func _arm(item: String) -> void:
+	_slot = int(_slots.get(item, 0))
+	_tick0 = Engine.get_physics_frames()
+
+
+func _empty() -> void:
+	_c.state.mag = 0
+	_tick0 = Engine.get_physics_frames()
+
+
+func _freelook(on: bool) -> void:
+	var fl := MarksmanFreelook.new(_c, null) if not (_c is MarksmanCharacter and (_c as MarksmanCharacter).eye) else (_c as MarksmanCharacter).eye.freelook
+	if fl and on:
+		fl.offset = Vector2(1.0, 0.15)
+		fl.force = true
+	elif fl:
+		fl.force = false
+	_view_off = Vector3(0.2, 1.65, -1.6)
+	_look_y = 1.55
+	_tick0 = Engine.get_physics_frames()
+
+
+func _process(delta: float) -> void:
+	super._process(delta)
+	if _cam == null or _c == null or _c.visual_root == null:
+		return
+	var root := _c.visual_root.global_position
+	_cam.global_position = root + _view_off
+	_cam.look_at(root + Vector3.UP * _look_y + Vector3(0, 0, -0.35), Vector3.UP)

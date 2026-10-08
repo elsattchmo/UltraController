@@ -208,3 +208,165 @@ func test_gun_tucks_at_a_wall() -> void:
 	await ticks(25)
 	info("stepped back: tuck %.2f, rounds fired %d" % [tuck_back, mag0 - c.state.mag])
 	check(tuck_back < 0.1 and mag0 - c.state.mag > 0, "a step back: the gun's down and fires (tuck %.2f, %d rounds)" % [tuck_back, mag0 - c.state.mag])
+
+
+## V4b: a reload on an empty magazine racks the bolt / slide after the new magazine is in - longer by about
+## MarksmanCharacter.EMPTY_RACK, the round counted once (after the rack); a tactical reload (rounds left) doesn't.
+func test_empty_reload_racks() -> void:
+	load_playground()
+	for item: StringName in [&"rifle", &"pistol"]:
+		var took := {}
+		for empty: bool in [false, true]:
+			var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+			await ticks(40)
+			var sl := _slot(c, item)
+			for ammo: StringName in [&"ammo_9mm", &"ammo_556"]:
+				UltraItems.give(c, ammo)
+			bot(c).set_steps([{"ticks": 80, "slot": sl, "yaw": 0.0}])
+			await ticks(80)
+			c.state.mag = 0 if empty else 5
+			var eq := c.get_node("Equipment") as UltraEquipmentVisual
+			var gp := (c.ragdoll as MarksmanRagdoll).gun_pass
+			var sk := c.skeleton
+			var part := eq.held_node.find_child("ChargingHandle", true, false) as Node3D
+			if part == null:
+				part = eq.held_node.find_child("Slide", true, false) as Node3D
+			var seen := {"pull": 0.0, "back": 0.0, "hand": 9.0}
+			var grab := func() -> void:
+				if gp.rack_pull > 0.03:
+					var lh := sk.global_transform * sk.get_bone_global_pose(sk.find_bone("LeftHand")).origin
+					seen.hand = minf(seen.hand, lh.distance_to(part.global_position))
+				seen.pull = maxf(seen.pull, gp.rack_pull)
+				if part and part.has_meta("rest"):
+					var moved: Vector3 = (part.get_parent() as Node3D).global_transform.basis * (part.position - (part.get_meta("rest") as Vector3))
+					seen.back = maxf(seen.back, moved.dot(eq.held_node.global_transform.basis.orthonormalized().z))
+			sk.skeleton_updated.connect(grab)
+			bot(c).set_steps([{"ticks": 3, "slot": sl, "yaw": 0.0, "buttons": InputFrame.B_RELOAD}, {"ticks": 400, "slot": sl, "yaw": 0.0}])
+			var n := 0
+			var mag_steps := 0
+			var last_mag := c.state.mag
+			var flag := false
+			for i in 400:
+				await ticks(1)
+				if c.state.mag != last_mag:
+					mag_steps += 1
+					last_mag = c.state.mag
+				if c.state.action == UltraActionLayer.Action.RELOADING:
+					n += 1
+					flag = flag or c.state.has(MarksmanCharacter.F_EMPTY_RELOAD)
+				elif n > 0:
+					break
+			sk.skeleton_updated.disconnect(grab)
+			took[empty] = n
+			info("%-6s %s reload: %d ticks, magazine filled in %d step(s), empty flag %s, rack pulled %.1f cm (part back %.1f cm), hand %.1f cm from it" % [
+					item, "empty" if empty else "tactical", n, mag_steps, flag, seen.pull * 100.0, seen.back * 100.0, seen.hand * 100.0])
+			check(mag_steps == 1, "%s %s: the magazine is filled once (%d)" % [item, "empty" if empty else "tactical", mag_steps])
+			check(flag == empty, "%s: the empty flag only on an empty reload (%s)" % [item, flag])
+			if empty:
+				check(seen.pull > 0.06 and seen.back > 0.05, "%s: the %s is pulled back (%.1f cm)" % [item, part.name if part else "?", seen.back * 100.0])
+				check(seen.hand < 0.1, "%s: by the left hand (%.1f cm from it)" % [item, seen.hand * 100.0])
+			else:
+				check(seen.pull == 0.0, "%s: a tactical reload racks nothing" % item)
+			chars.erase(c)
+			c.queue_free()
+			await ticks(3)
+		var extra := (int(took[true]) - int(took[false])) / 60.0
+		check(absf(extra - MarksmanCharacter.EMPTY_RACK) < 0.08, "%s: an empty reload takes %.2f s longer (%.2f)" % [item, extra, MarksmanCharacter.EMPTY_RACK])
+
+
+## V4b: holding the breath (sprint held, aiming down sights, standing still) steadies the gun on the aim; after
+## HOLD_TIME it runs out - shakier than plain ADS until half the breath is back, and it can't be held meanwhile.
+func test_hold_breath() -> void:
+	load_playground()
+	var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+	await ticks(40)
+	var sl := _slot(c, &"rifle")
+	var ads := InputFrame.B_SECONDARY
+	var hold := InputFrame.B_SECONDARY | InputFrame.B_SPRINT
+	var amp := func(ticks_n: int) -> float:
+		var lo := Vector2(INF, INF)
+		var hi := Vector2(-INF, -INF)
+		for i in ticks_n:
+			await ticks(1)
+			lo = Vector2(minf(lo.x, c.state.sway.x), minf(lo.y, c.state.sway.y))
+			hi = Vector2(maxf(hi.x, c.state.sway.x), maxf(hi.y, c.state.sway.y))
+		return rad_to_deg((hi - lo).length())
+	bot(c).set_steps([{"ticks": 2000, "slot": sl, "yaw": 0.0, "buttons": ads}])
+	await ticks(140)
+	var plain: float = await amp.call(150)
+	bot(c).set_steps([{"ticks": 2000, "slot": sl, "yaw": 0.0, "buttons": hold}])
+	await ticks(30)
+	var held: float = await amp.call(150)
+	var bt := c.profile.breath_time
+	var out_at := -1
+	for i in 360:
+		await ticks(1)
+		if c.state.has(MarksmanCharacter.F_BREATH_OUT):
+			out_at = i
+			break
+	var held_for := (180 + out_at) / 60.0
+	bot(c).set_steps([{"ticks": 2000, "slot": sl, "yaw": 0.0, "buttons": ads}])
+	var gasp: float = await amp.call(60)
+	var back_at := -1
+	for i in 600:
+		await ticks(1)
+		if not c.state.has(MarksmanCharacter.F_BREATH_OUT):
+			back_at = i
+			break
+	info("sway in ADS %.3f deg, holding the breath %.3f deg; it ran out after %.1f s (breath %.1f / %.0f), out of breath %.3f deg, back after %.1f s more" % [
+			plain, held, held_for, c.state.breath, bt, gasp, (60 + back_at) / 60.0])
+	check(held < plain * 0.5, "holding the breath steadies the gun (%.3f vs %.3f deg)" % [held, plain])
+	check(out_at >= 0 and absf(held_for - MarksmanCharacter.HOLD_TIME) < 0.6, "it runs out after ~%.0f s (%.1f)" % [MarksmanCharacter.HOLD_TIME, held_for])
+	check(gasp > plain * 1.5, "out of breath the aim shakes (%.3f vs %.3f deg)" % [gasp, plain])
+	check(back_at >= 0, "and settles once half the breath is back")
+	chars.erase(c)
+	c.queue_free()
+
+
+## V4b freelook (MarksmanFreelook, `marksman_freelook`): held, the mouse turns the view and the head, not the aim - the
+## shot goes where it did; let go and the view comes back onto the aim. (The bot's yaw_rate stands in for the mouse.)
+func test_freelook_turns_the_head_not_the_aim() -> void:
+	load_playground()
+	var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+	var rig := _rig(c)
+	await ticks(40)
+	var sl := _slot(c, &"rifle")
+	bot(c).view_tp = false
+	bot(c).set_steps([{"ticks": 100, "slot": sl, "yaw": 0.0}])
+	await ticks(100)
+	for i in 60:
+		if c.eye and is_instance_valid(c.eye) and c.eye.freelook:
+			break
+		await ticks(1)
+	if not check(c.eye != null and c.eye.freelook != null, "the first-person eye has a freelook"):
+		rig.queue_free()
+		return
+	var fl := c.eye.freelook
+	var sk := c.skeleton
+	var yaw_of := func(v: Vector3) -> float: return atan2(-v.x, -v.z)
+	var head_yaw := func() -> float:
+		var neck := sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Neck")).origin
+		var e := c.eye.eye - neck
+		return atan2(-e.x, -e.z)
+	var shot0 := UltraActionLayer.aim_ray(c, c.state, c.last_input, c.held_def())
+	var head0: float = head_yaw.call()
+	fl.force = true
+	bot(c).set_steps([{"ticks": 60, "slot": sl, "yaw_rate": 1.2}, {"ticks": 200, "slot": sl}])
+	await ticks(60)
+	var cam_yaw: float = yaw_of.call(-rig.camera.global_transform.basis.z)
+	var shot := UltraActionLayer.aim_ray(c, c.state, c.last_input, c.held_def())
+	var shot_turn := (shot0.dir as Vector3).angle_to(shot.dir)
+	var head_turn := angle_difference(head0, head_yaw.call())
+	info("freelook: view off the aim %.2f rad (camera yaw %.2f), aim yaw %.3f, shot turned %.3f rad, head turned %.2f rad" % [
+			fl.offset.x, cam_yaw, c.last_input.yaw, shot_turn, head_turn])
+	check(fl.offset.x > 0.9 and absf(angle_difference(c.last_input.yaw, cam_yaw) - fl.offset.x) < 0.1, "the view turns (%.2f rad off the aim)" % fl.offset.x)
+	check(absf(angle_difference(0.0, c.last_input.yaw)) < 0.03 and shot_turn < 0.04, "the aim and the shot stay (aim %.3f, shot %.3f rad)" % [c.last_input.yaw, shot_turn])
+	check(head_turn > 0.6, "the head turns with the view (%.2f rad)" % head_turn)
+	fl.force = false
+	await ticks(40)
+	cam_yaw = yaw_of.call(-rig.camera.global_transform.basis.z)
+	info("let go: view off the aim %.3f rad, camera yaw %.3f, aim %.3f" % [fl.offset.x, cam_yaw, c.last_input.yaw])
+	check(fl.offset.length() < 0.05 and absf(angle_difference(c.last_input.yaw, cam_yaw)) < 0.06, "let go, the view is back on the aim")
+	rig.queue_free()
+	chars.erase(c)
+	c.queue_free()

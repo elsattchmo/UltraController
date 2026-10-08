@@ -110,7 +110,7 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	_lean_e0 = Vector3.INF
 	var leaned := _lean(sk, mod.anim_pose, dt)
 	if weight <= 0.001 or not armed:
-		return leaned
+		return _look_about(mod.anim_pose) or leaned
 	var rh := _part("RightHand")
 	var lh := _part("LeftHand")
 	if rh < 0 or lh < 0:
@@ -176,6 +176,23 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 		_shell_mesh.visible = false
 	_two_bone(pose, _part("LeftUpperArm"), _part("LeftLowerArm"), lh, support_target, weight)
 	support_error = pose[lh].origin.distance_to(support_target.origin)
+	_look_about(pose)
+	return true
+
+
+## Freelook (MarksmanFreelook.offset): the head turns toward the view - yaw about the body's up, then pitch about the
+## turned right - on the neck (the head's part), last, so the gun and the arms keep the aim.
+func _look_about(pose: Array[Transform3D]) -> bool:
+	var c := character as MarksmanCharacter
+	var fl: MarksmanFreelook = c.eye.freelook if c and c.eye and is_instance_valid(c.eye) else null
+	var neck := _part("Neck")
+	if fl == null or fl.offset == Vector2.ZERO or neck < 0:
+		return false
+	# (Skeleton space: up +Y; the model faces +Z, its right is -X. + yaw turns left, + pitch looks up.)
+	var yaw := Quaternion(Vector3.UP, fl.offset.x)
+	var right := yaw * Vector3(-1, 0, 0)
+	var q := Quaternion(right, fl.offset.y) * yaw
+	_turn_subtree(pose, neck, q, pose[neck].origin)
 	return true
 
 
@@ -369,8 +386,15 @@ func _reload_hand(sk: Skeleton3D, gun: Transform3D, sup: Transform3D, def: ItemD
 		_mag_dropped = false
 		_mag_snd = 0
 		return Transform3D()
-	var commit := float(def.stat("reload_commit", 1.5))
+	var slow := UltraInjury.reload_mult(st, character.damage_profile)
+	var commit := float(def.stat("reload_commit", 1.5)) * slow
 	var t := st.action_t
+	# An empty reload (MarksmanCharacter.F_EMPTY_RELOAD) runs slower in the sim up to the commit: on its real clock the
+	# magazine goes in as usual, then the bolt / slide is racked (_rack) before the round counts.
+	var empty := st.has(MarksmanCharacter.F_EMPTY_RELOAD)
+	if empty:
+		var stretch := MarksmanCharacter.empty_stretch(def, slow)
+		t = t * stretch if t < commit else t + commit * (stretch - 1.0)
 	var mag_rest: Transform3D = mag.get_meta("rest") if mag.has_meta("rest") else mag.transform
 	var par := mag.get_parent() as Node3D
 	var mag_in_gun := eq.held_node.global_transform.affine_inverse() * par.global_transform * mag_rest if par != eq.held_node else mag_rest
@@ -423,7 +447,7 @@ func _reload_hand(sk: Skeleton3D, gun: Transform3D, sup: Transform3D, def: ItemD
 		if t >= t_up + 0.08 and _mag_snd < 2:
 			_mag_snd = 2
 			fx.sfx.play(pre + "mag_in", well_w, -2.0, 2.5, 25.0)
-		if t >= t_seat + 0.12 and _mag_snd < 3:
+		if t >= t_seat + 0.12 and _mag_snd < 3 and not empty:
 			_mag_snd = 3
 			if not fx.sfx.streams(pre + "slide").is_empty():
 				fx.sfx.play(pre + "slide", well_w, -2.0, 2.5, 25.0)
@@ -447,7 +471,64 @@ func _reload_hand(sk: Skeleton3D, gun: Transform3D, sup: Transform3D, def: ItemD
 		return hand_on.call(mag_at)
 	if t < t_pouch:
 		return (hand_on.call(below) as Transform3D).interpolate_with(hand_on.call(pouch), smoothstep(MAG_OUT, t_pouch, t))
+	if empty:
+		var racked := _rack(sk, gun, sup, def, eq, t - t_seat, commit * (MarksmanCharacter.empty_stretch(def, slow) - 1.0) + 0.12, hand_on.call(in_well))
+		if racked != Transform3D():
+			return racked
 	return (hand_on.call(in_well) as Transform3D).interpolate_with(sup, smoothstep(t_seat, commit + 0.15, t))
+
+
+## The rack after an empty reload's magazine is in: the left hand over the top of the charging handle (rifle) / slide
+## (pistol), pulls it back RACK_PULL and lets it fly forward, then goes back to its grip. `u` s since the magazine was
+## seated, over `span` s; `from` = the hand on the seated magazine. Transform3D() once done (or nothing to rack).
+const RACK_PULL := 0.07
+var rack_pull := 0.0                   ## (tests) how far the bolt / slide is back now (m)
+var _rack_snd := false
+
+
+func _rack(sk: Skeleton3D, gun: Transform3D, sup: Transform3D, def: ItemDefinition, eq: UltraEquipmentVisual, u: float, span: float, from: Transform3D) -> Transform3D:
+	var part := eq.held_node.find_child("ChargingHandle", true, false) as Node3D
+	if part == null:
+		part = eq.held_node.find_child("Slide", true, false) as Node3D
+	rack_pull = 0.0
+	if part == null or u < 0.0:
+		_rack_snd = false
+		return Transform3D()
+	if not part.has_meta("rest"):
+		part.set_meta("rest", part.position)
+	var g := gun.orthonormalized()
+	var to_sk := sk.global_transform.affine_inverse()
+	# Back along the gun (+Z: the barrel is -Z), in the part's parent frame.
+	var par := part.get_parent() as Node3D
+	var back_local := (par.global_transform.basis.orthonormalized().inverse() * (eq.held_node.global_transform.basis.orthonormalized().z)).normalized()
+	var reach := 0.15                    # hand from the magazine to the part
+	var pull_end := span * 0.7           # pulled back by then, let go
+	var back_by := span                  # the hand back on its grip
+	var pull := 0.0
+	if u > reach:
+		pull = RACK_PULL * smoothstep(reach, pull_end, u) if u < pull_end else 0.0
+	rack_pull = pull
+	part.position = (part.get_meta("rest") as Vector3) + back_local * pull
+	if u >= pull_end and not _rack_snd:
+		_rack_snd = true
+		var fx := UltraEffects.instance()
+		if fx and fx.sfx:
+			var pre := UltraEffects.sound_of(def) + "_reload_"
+			if not fx.sfx.streams(pre + "slide").is_empty():
+				fx.sfx.play(pre + "slide", part.global_position, -1.0, 2.5, 25.0)
+	if u >= back_by + 0.25:
+		_rack_snd = false
+		part.position = part.get_meta("rest")
+		return Transform3D()
+	# Overhand: the palm down on the top of the part, fingers across it to the right; pulled with it.
+	var top := to_sk * part.global_position + g.basis.y.normalized() * 0.012
+	var held := maxf(pull, RACK_PULL * (1.0 - smoothstep(pull_end, pull_end + 0.08, u)) if u >= pull_end else pull)
+	var hand := _left_hand(g.basis.x.normalized() + g.basis.z.normalized() * 0.3, -g.basis.y, top + g.basis.z.normalized() * (held - pull), 0.025)
+	if u < reach:
+		return from.interpolate_with(hand, smoothstep(0.0, reach, u))
+	if u < back_by:
+		return hand
+	return hand.interpolate_with(sup, smoothstep(back_by, back_by + 0.25, u))
 
 
 ## A tube loaded a shell at a time: from the pouch on the left hip to the load port and in, each `shell_time`.

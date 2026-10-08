@@ -72,6 +72,88 @@ func tuck_distance(s: MotorState, i: InputFrame) -> float:
 	return shoulder.distance_to(hit.position) if not hit.is_empty() else INF
 
 
+# ------------------------------------------------------------------ holding the breath, empty reloads (V4b)
+
+## MotorState flag bits Marksman takes (0-7 motor_state.gd, 8 F_TURNING, 9 F_HALVED, 10 F_BLOCKING, 11 F_HEART).
+const F_BREATH_OUT := 1 << 12          ## held the breath till it ran out: shaky until it's half back
+const F_EMPTY_RELOAD := 1 << 13        ## this reload began on an empty magazine: the bolt / slide is racked
+
+## Holding the breath (Insurgency: Sandstorm's way: sprint held while aiming down sights, standing still): the gun
+## settles onto the aim for up to HOLD_TIME s, drawn from the swimming breath (MotorState.breath - the HUD's breath bar
+## shows it, it refills out of the water); run out and the aim shakes until half of it is back.
+const HOLD_TIME := 5.0
+const HOLD_CALM := 16.0                ## 1/s: the free-aim offset settles toward the aim this fast while held
+const BREATH_BACK := 0.5               ## share of the breath back before the shaking stops
+const OUT_SHAKE_DEG := 0.9             ## the tremor once out of breath (deg, at its worst)
+const BREATH_FLOOR := 0.05             ## never lower (at 0 the motor drowns you)
+
+
+## Is the breath being held this tick? (State + input: every machine agrees.)
+func holding_breath(s: MotorState, i: InputFrame) -> bool:
+	if i == null or s.has(F_BREATH_OUT) or s.action != UltraActionLayer.Action.READY or not s.is_grounded():
+		return false
+	if s.state in [MotorState.Id.SWIM, MotorState.Id.DIVE]:
+		return false
+	return i.has(InputFrame.B_SPRINT) and i.has(InputFrame.B_SECONDARY) and s.ads_w > 0.6 \
+			and Vector2(s.vel.x, s.vel.z).length() < 0.5
+
+
+func _hold_breath(i: InputFrame, dt: float, breath0: float) -> void:
+	var s := state
+	var bt := profile.breath_time
+	if s.state in [MotorState.Id.SWIM, MotorState.Id.DIVE]:
+		return
+	if holding_breath(s, i):
+		# (Drawn down from where it was before the motor refilled it this tick.)
+		s.breath = breath0 - dt * bt / HOLD_TIME
+		if s.breath <= BREATH_FLOOR * bt:
+			s.breath = BREATH_FLOOR * bt
+			s.set_flag(F_BREATH_OUT, true)
+		elif s.fire_cd <= 0.0:          # (a shot's kick still comes through)
+			var k := exp(-HOLD_CALM * dt)
+			s.sway *= k
+			s.sway_v *= k
+		return
+	if s.has(F_BREATH_OUT):
+		var back := s.breath / (BREATH_BACK * bt)
+		if back >= 1.0:
+			s.set_flag(F_BREATH_OUT, false)
+		elif s.held_uid != 0 and s.action in [UltraActionLayer.Action.READY, UltraActionLayer.Action.RELOADING]:
+			# Gasping: a quick, irregular tremor (off the sway clock), fading as the breath comes back.
+			var ph := s.sway_phase
+			var amp := deg_to_rad(OUT_SHAKE_DEG) * (1.0 - back)
+			s.sway_v += Vector2(sin(ph * 7.0 + 0.4), sin(ph * 5.0 + 1.3)) * amp * 60.0 * dt
+
+
+## A reload that began on an empty magazine racks the bolt / slide after the new magazine is in: the sim plays the time
+## up to `reload_commit` slower (EMPTY_RACK s longer in all) - the round is only there once it's chambered. Only before
+## the commit (UltraActionLayer._reload finds the commit by `action_t - dt < commit`: slowed past it, it fired again).
+const EMPTY_RACK := 0.6
+
+
+static func empty_stretch(def: ItemDefinition, slow: float) -> float:
+	var commit := float(def.stat("reload_commit", 1.5)) * slow
+	return (commit + EMPTY_RACK) / commit
+
+
+func _empty_reload(dt: float) -> void:
+	var s := state
+	if s.action != UltraActionLayer.Action.RELOADING:
+		s.set_flag(F_EMPTY_RELOAD, false)
+		return
+	var def := ItemDB.by_index(s.equipped) if s.held_uid != 0 else null
+	if def == null or String(def.stat("reload_mode", "")) == "shell":
+		return
+	if s.action_t <= dt * 1.5:
+		s.set_flag(F_EMPTY_RELOAD, s.mag <= 0)
+	if not s.has(F_EMPTY_RELOAD):
+		return
+	var slow := UltraInjury.reload_mult(s, damage_profile)
+	var commit := float(def.stat("reload_commit", 1.5)) * slow
+	if s.action_t < commit:
+		s.action_t = maxf(s.action_t - dt * (1.0 - 1.0 / empty_stretch(def, slow)), 0.0)      # (encoded as u16 ms)
+
+
 # ------------------------------------------------------------------ going over an edge
 
 ## Walking off an edge standing (motion matching, single player): Sinew has the body from the moment the capsule
@@ -99,8 +181,12 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	var gait := profile.default_gait
 	if side_run:
 		profile.default_gait = MovementProfile.Gait.JOG
+	var breath0 := state.breath
 	super.simulate(input, delta, replaying)
 	profile.default_gait = gait
+	# (Sim, so in replays too: from the state and the input only.)
+	_hold_breath(input, delta, breath0)
+	_empty_reload(delta)
 	if replaying:
 		return
 	_cross_gaps()
