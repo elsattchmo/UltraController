@@ -344,7 +344,8 @@ func test_ledges() -> void:
 const GAPS := [[108.0, 107.6], [104.6, 103.9], [100.9, 99.9], [96.9, 95.5]]
 
 
-func _gap_run(sprint: bool) -> Dictionary:
+## (Feet are counted only over the gaps meant to be strides at this pace: falling into a wider one they go down it.)
+func _gap_run(sprint: bool, strides: int) -> Dictionary:
 	var c := _marksman(marker("gap_walk").global_position, true)
 	bot(c).live_yaw = 0.0
 	await ticks(40)
@@ -355,7 +356,8 @@ func _gap_run(sprint: bool) -> Dictionary:
 		for f: int in feet:
 			var p := (sk.global_transform * sk.get_bone_global_pose(f)).origin
 			if p.y < 0.6 + 0.12 and p.y > 0.4:            # a foot down at the path's height ..
-				for g: Array in GAPS:
+				for gi in strides:
+					var g: Array = GAPS[gi]
 					if p.z < float(g[0]) - 0.03 and p.z > float(g[1]) + 0.03 and absf(p.x) < 1.0:
 						res.foot_in_gap += 1          # .. over a gap
 	sk.skeleton_updated.connect(grab)
@@ -379,12 +381,12 @@ func _gap_run(sprint: bool) -> Dictionary:
 
 func test_gaps_are_strides() -> void:
 	load_playground()
-	var walk: Dictionary = await _gap_run(false)
+	var walk: Dictionary = await _gap_run(false, 2)
 	info("walking the gap walk: crossed %s, fell at z %.1f, feet planted in a gap %d frames, states %s" % [walk.crossed, walk.fell_at, walk.foot_in_gap, (walk.states as Dictionary).keys()])
 	check(walk.crossed[0] and walk.crossed[1], "walking, the 0.4 and 0.7 m gaps are strides")
 	check(not walk.crossed[2] and walk.fell_at < 100.9 and walk.fell_at > 99.0, "the 1.0 m gap is wider than a walking stride: it falls there (z %.1f)" % walk.fell_at)
 	check(walk.foot_in_gap == 0, "no foot put down in a gap (%d frames)" % walk.foot_in_gap)
-	var run: Dictionary = await _gap_run(true)
+	var run: Dictionary = await _gap_run(true, 4)
 	info("sprinting the gap walk: crossed %s, fell at z %.1f, feet planted in a gap %d frames, states %s" % [run.crossed, run.fell_at, run.foot_in_gap, (run.states as Dictionary).keys()])
 	check(run.crossed == [true, true, true, true] and run.fell_at < 0, "sprinting, every gap up to 1.4 m is a stride")
 	check(run.foot_in_gap == 0, "no foot put down in a gap (%d frames)" % run.foot_in_gap)
