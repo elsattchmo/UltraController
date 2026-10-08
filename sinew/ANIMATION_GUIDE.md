@@ -210,3 +210,17 @@ Before, they jumped 6-9 cm. The causes:
 - Stair treads shorter than the foot leave a toe or heel in a riser (stairs sink limit 20 cm).
 - Hips "drop" on a steep ramp down is mostly the measure: hips are measured over the lower toe, which is
   20+ cm downhill.
+
+## Marksman: motion-matching sets and strikes (V7 lessons)
+- **A direction with no clip is not a shuffle-free direction.** Under motion matching, backing on a diagonal matched no
+  clip well and the IDLE won (its feet stepped after the sliding body: 21-24 steps in 3 s). The matcher now only takes
+  clips travelling within 70 deg of the wish while moving (`MarksmanMotionMatcher._dir_fit`); measure a new set with
+  suite g10 (8 ways x stance x posture, planted slide = ankle AND toe low, the smaller of their moves).
+- **Pack clips can skate.** The pistol pack's walk back (55 mm a frame) and 1 m/s strafe (38) - swapped for the UAL
+  Walk_Backwards and the mirrored 2.2 m/s strafe. The UAL Walk_Backwards itself drifts ~6 mm a frame (sideways in the
+  source); the axe pack's AXE_UnarmedWalkBack plants its feet but swings the head 12.7 cm over the hips (0.6) - a
+  limp's healthy baseline (gm) rules it out.
+- **Strike clips hold their own weapon.** M_RiflePunch's hands are spaced and turned for its rifle: hung on the gun hand
+  by our grip, our fore-end ended 56 cm from the clip's other hand. Place the gun from BOTH clip hands (grip at the gun
+  hand, fore-end at the support hand - that arm is at full stretch through the punch) and IK the hands onto it.
+  Contact = the hand's speed peak driving the blow (tools/measure_melee.gd).

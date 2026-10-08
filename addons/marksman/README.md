@@ -231,24 +231,28 @@ Marksman makes all of it **visible through the body**: the gun pass drives the a
 - Suite g7: holds both ways (barrel, limp arm, stock under the arm, nothing in the body), a lost hand, reloads both
   ways, a mid-hold switch, replication agreement.
 
-### V7 – Everything else: parity with the other controllers
-
-Every role from the audit gets a node in the Marksman driver, unarmed and, where it applies, armed (stowing for two-handed states as `UltraActionLayer.TWO_HANDED` already does).
-
-| Area | Roles / clips |
-|---|---|
-| Jumps / air | jump_start, jump_air, jump_land (depth by impact), land_heavy (or AAD_HardLanding), running leap `air_run` (J_Sprint_RM seeked by vertical speed), stance jumps (RFP / PST jumps), fall (AAD_FallingIdle) |
-| Traversal | mantle / ledge climb (ClimbUp_1m_RM), vault (Run_Jump), ledge hang idle + shimmy left / right blend, drop to hang / climb down (C_DropToHang + DROP_CLIP_FIT), down-ladder / down-wall, ladder up / down (Ladder_Climb, negative rate), wall climb, rope (pipe_climb + swing-angle legs), teeter (Lose_Balance upper layer), slide (slide_start → slide) |
-| Actions | push (procedural `reach` + UAL Push one-shot, wired), pickup / carry (walk_carry, two-handed hold on the prop through the hand pass), throw (OverhandThrow / push_throw), door / interact (claims a hand → one-handed gun), roll and dodges (root motion, with Sinew's `mixamo/` + mirror fix) |
-| Combat | melee swings / blocks / block hits (item roles; `play_swing` upper / full / arms layers), gun-butt, grenade toss (SHB_TossGrenade) |
-| Body state | limp (Injured_Walk / Back mirrored per leg, INJ run / turns), idle_hurt (INJ idle), knock-down / get-up front and back, deaths (ragdoll; RFP deaths optional), swim / dive |
-
-- **Builder fix:** the hand-added roles move into a Marksman builder (and `build_animset.gd` ROLES gets them too), so no rebuild deletes them.
-- **Tests (g7):** each motor state plays its node, unarmed and armed. Traversal courses are scripted on the playground: mantle, ledge hang + shimmy, drop to hang, ladder, rope, push, pickup, carry, throw. Each checks the expected node, no NaNs, no part faster than 25 m/s, and hands on the rope / ledge / prop within limits.
-- Tour `marksman_parity_review`.
+### V7 – Everything else: parity with the other controllers (done)
+- **Movement nodes** (`MarksmanAnimDriver._add_parity_nodes`, the UltraController's builders - inherited): running
+  leap (`air_run`, seeked by vertical speed), fall, heavy landing, slide start, drop to hang (`drop_hang`), the ledge
+  hang's shimmy blend, ladder refit, dive, prone down / up (PR_FromCrouch / PR_ToCrouch). `_parity_wanted` maps the
+  motor states as the UltraController does.
+- **No pops**: every loco change dead-blends (`MarksmanInertial`; not out of a rope / slide / drop to hang), root jumps
+  (a drop's 2 m, a ladder grab's 0.48 m) shift the blend and drop the stale physics picture, the drop's end turns the
+  blend with the root. Suite g9: every course plays its node, nothing over 25 m/s (strikes 40).
+- **Actions**: melee weapon swings and the throw (Sinew's driver ignored item events); **weapon melee is new**
+  (`STRIKES`: the rifle punch / pistol whip clips timed to the sim's hit, the gun placed from both of the clip's hands);
+  hands on a carried prop (`MarksmanGunPass._carry_hands`, suite g11).
+- Not needed under Marksman: teeter (edges are Sinew's), the procedural first-person gun-butt (the body's eye sees the
+  clip). Left: injured idle, grenade toss.
 
 ### V8 – Docs and wrap-up
-- CLAUDE.md section, ANIMATION_GUIDE updates, known issues.
+- CLAUDE.md section (kept up per change), ANIMATION_GUIDE updates, known issues (below).
+
+## Known issues
+- The unarmed back walk (UAL Walk_Backwards) drifts its planted feet ~6 mm a frame under motion matching (g10 KNOWN).
+- Crouched backward / left under motion matching: the clips roll on the balls of the feet, so g10 can't measure slide.
+- Aiming down the sights leaning right, the eye gets 19 cm out against 29 leaning left (the stock sits on the right).
+- The matcher's turn clip leans the chest back 20-30 deg on a fast turn with the pistol up.
 
 ## Risks
 - **Binaries build only on main.** V1's core and binding changes must merge before its GDScript can rely on them. Guard with `class_has_method` and fall back to a single group.
