@@ -235,8 +235,9 @@ func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> vo
 	var foot_w: Vector3 = xf * pose[ft_i].origin
 	var drv := character.anim as MarksmanAnimDriver
 	var turning := drv != null and drv.turn_stepping()
-	var fading := drv != null and drv.turn_w > 0.05 and not turning
 	var idle_clip := float(matcher.db.clips[matcher.clip].speed) < 0.15
+	# (Only standing: walking off out of a turn, the long hold dragged a planted foot - and the hips - after the body.)
+	var fading := drv != null and drv.turn_w > 0.05 and not turning and idle_clip
 	# (Planted: the matched clip's contact - an idle's feet always (the pistol idle's weight shifts read as lifted: the
 	# feet turned round with the body); in a turn clip, a foot the clip has down (it's locked until the clip lifts it -
 	# else its stance, unlike the idle's, slid in under the body); fading out of a turn, where the turn left them.)

@@ -1467,3 +1467,11 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
 - **Limp clips**: + INJ_InjuredRunBackwards (mirrored like the walk back); INJ_InjuredWalk / WalkBackwards are the same as
   Injured_Walk / _Back; no injured strafes exist (sideways = the procedural limp).
 - Ball launcher from a Marksman: gm test_ball_launcher_works (fires, knocks the target, not the shooter).
+- **Gore under Sinew**: a cut-off part is physics in Sinew (it drops), but the SKELETON keeps its bone on its parent as
+  animated (`SinewRagdoll.part_cut`, `SinewPoseModifier`): the gore system hides it and throws its own gib. Posed on the
+  falling piece, the stump's rim (skinned partly to the cut bone) stretched across the body (78 cm; s2
+  test_a_cut_limb_leaves_the_sinew_body). Tour `gore_review --controller=marksman --mm` vs `--controller=ultra`.
+- Lean with the head up at the hip: `_head_up_at_hip` fades out with the lean and `_lean_settle` (after the gun is placed)
+  bends the rest so the eye ends LEAN_OUT from where it stands at the hip (`_hip_shift`, measured unleaned).
+- Godot's `Quaternion.get_axis()` / `Vector3.slerp` on near-parallel vectors give a non-unit axis ("The axis ... must be
+  normalized" floods): normalise the axis / lerp + normalize (MarksmanMMPass._ground_fit).

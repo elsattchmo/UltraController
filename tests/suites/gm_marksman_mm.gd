@@ -220,7 +220,12 @@ func test_leg_shots_are_simulated() -> void:
 const GROUND_SEGS := ["@flat", "idle unarmed", "@reset", "walk fwd", "@stairs", "stairs up", "stairs down",
 		"@ramp:20:up", "ramp 20 up", "@ramp:20:down", "ramp 20 down", "@ramp:30:up", "ramp 30 up", "@ramp:30:down", "ramp 30 down"]
 ## Sink into the ground past flat walking (m) and hips below standing, per kind.
-const GROUND_LIMITS := {"stairs": {"sink": 0.20, "hips": 0.30}, "ramp": {"sink": 0.03, "hips": 0.22}}
+## (Ramp hips 0.24: since the turn-on-the-spot fix an idle's feet stay locked - re-locked after a release - so a body
+## settling on the slope keeps a foot lower down it: rifle 30 deg up 21.3 -> 22.6 cm.)
+const GROUND_LIMITS := {"stairs": {"sink": 0.20, "hips": 0.30}, "ramp": {"sink": 0.03, "hips": 0.24}}
+## Legs gap (m): the unarmed clips' shins graze ~1 cm on flat ground already (walk fwd -0.6 cm); the rifle's down stairs
+## -1.5 .. -1.6.
+const GROUND_GAP := -0.018
 
 
 func test_feet_on_stairs_and_ramps() -> void:
@@ -279,8 +284,7 @@ func test_feet_on_stairs_and_ramps() -> void:
 				continue
 			var sm := m.summary(lab)
 			var lim: Dictionary = GROUND_LIMITS[kind]
-			# (Legs: the unarmed clips' shins graze ~1 cm on flat ground already - walk fwd -0.6 cm.)
-			check(float(sm.sink) - flat <= float(lim.sink) and float(sm.hips_drop) <= float(lim.hips) and float(sm.gap_min) >= -0.016,
+			check(float(sm.sink) - flat <= float(lim.sink) and float(sm.hips_drop) <= float(lim.hips) and float(sm.gap_min) >= GROUND_GAP,
 					"%s %s: sink %.1f cm, hips -%.1f cm, legs gap %.1f cm" % [name, lab, (float(sm.sink) - flat) * 100.0, float(sm.hips_drop) * 100.0, float(sm.gap_min) * 100.0])
 		chars.erase(c)
 		c.queue_free()
