@@ -1369,7 +1369,34 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   taken IN the leg (stagger first, the leg knocked and weak: tone 0.7 -> 0.15, 0.5 -> 1.2 s by impulse). Balancer (core):
   steps from ONE planted foot (it waited for both: mid-stride takeovers toppled), seeds contacts for soles already on the
   ground at takeover (`seed_contact`), and a standing leg holds only as well as its tone (`leg_tone`: stance stiffness and
-  ankle cap scale with it). Outcome = simulation (gm: 16/30 dmg staggers, 60 dmg falls 2 in 8).
+  ankle cap scale with it). Standing still that's the balancer's stagger. MOVING (> 0.8 m/s) a leg hit / staggering blow
+  is a stumble the way it's going (`_stumble_hit`: receive_push = the gait's catch steps with the momentum + a lurch along
+  the travel, `moving_hit_per_impulse` 0.11 x (1 + 0.4 x speed), x0.4 if the struck leg was swinging (MM contact), <= 4.5
+  m/s; the leg still weakened) - the balancer stagger froze the animation in place (the user: "stays in that pose").
+  The lurch is NOT scaled by speed and the push's chest jolt is skipped (`_quiet_push`: the shot already struck the part);
+  the run command sags only by severity (`MarksmanCharacter.moving_stumble_sag` 0.7 via Sinew's additive
+  `_stumble_command_share` hook - Sinew's own rule asks for NOTHING right after a push, so every sprinter tripped);
+  a powered knock-down adds only the velocity the body doesn't already have (`MarksmanRagdoll.start`: Sinew added the
+  run on top of the moving body - a sprinter shot in the leg flew at 15-21 m/s). gm test_shot_while_sprinting: hips
+  <= run + 2.3 m/s; graze runs on, 60 dmg trips 1 in 4.
+- **Unarmed arms per clip** (`MarksmanMotionMatcher.CLIP_ARMS`): the U_* walk strafes / runs hold both hands up at the
+  chest (0.6 m over the hips); their legs play under borrowed arms (N_StdWalk2 for the strafe walks, LMM_StandardRun for
+  the runs) on the mm node's filtered `carms` layer, seeked in step (each clip's left footfall = `left_down` /
+  `arms_left_down`, MarksmanMMDatabase._lowest_t). gm test_unarmed_arms_hang_every_way.
+- **Rope swing**: the hands on the rope (the climb clip), the legs pump the swing (`MarksmanRopePass`, a pose pass: out
+  along the rope's angle 0.25 s ahead, x1.2, -0.55 .. 0.95 rad, like UltraTraversalVisual._rope_legs). A physical hanging
+  body was tried and dropped (the user: "looks terrible"). Letting go: `MarksmanCharacter._sync_visual` eases the
+  UltraController's rope tilt / 16 cm offset out over 0.3 s (it stood the skeleton up in ONE frame, 1.1 m) and the rope
+  node's cross-fades are 0.5 s (the arms came off the grip 17 cm a frame). gm test_rope_legs_pump_the_swing (shown bones
+  in the skeleton frame at skeleton_updated), tour `marksman_rope_review`.
+- **Limp in every direction**: `MarksmanMMPass._limp` - while the hurt leg carries the weight the trunk leans out over it
+  (`LIMP_LEAN` 0.26 rad x damage) and the hips dip (5 cm), the swinging bad knee is straightened by 55 % x damage - on top
+  of the forward / back limp clips, alone sideways (no sideways limp clips: a hurt strafe was a slow plain walk). The
+  limp CLIP layer only shows a moving limp clip going the walk's way (the matcher's injured idle under a strafe was 19 cm of
+  lurch at 70 %). gm test_limp_in_stages: forward 6.7 / 13.3 / 31 cm at 70 / 55 / 25 %, strafe 7.8 / 8.3 / 14.7.
+- **Pistol at the hip** (`MarksmanGunPass._hold_out`): placed gun-first - the gun hand at `PISTOL_HIP` (0.13 right, 0.22
+  down, 0.45 ahead of the eye along the view), barrel onto the aim point, arm by IK. The PST clips hold it up in front of
+  the face: in first person it covered the view (17-19 deg above the centre; now 7-9 below). g3 test_hip_gun_clears_the_view.
 - **Foot IK (ground fit)**: each foot onto the ground under its ankle / ball (higher of the two), followed (rise 3.5, fall
   2 m/s); hips down only as far as a leg can't reach (`REACH` 0.97); planted soles tilt to the surface (<= 28 deg). Leg IK
   swings the knee WITH the leg onto the new hip->foot line, plus the thigh's forward only when the knee is nearly straight
@@ -1378,9 +1405,39 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   state copy); standing at a lip a planted foot's ball is drawn back onto solid ground (the lock follows it); the tick the
   capsule leaves the ground from a ground state over a drop >= `ledge_height` (0.6 m; lower = a plain step down, and
   the lip rule uses it too, measured from the foot's own ground, only for a body standing still), Sinew takes the body (`over_edge` -> stagger, kept
-  powered in the air by Sinew's additive `_powered_in_air` hook) - it lands and recovers or falls.
+  powered in the air by Sinew's additive `_powered_in_air` hook) - it lands and recovers or falls. ONLY AN ACCIDENT
+  (user): going off with the stick and the motion within 90 deg of the facing is on purpose - a plain drop
+  (`_walking_off`); backing / side-stepping / shoved / drifting off is Sinew's, tipped INTO the drop (`over_edge(dir)`:
+  `over_edge_tip` 1.1 m/s, pelvis 40 %). Taken over in the air, the balancer gets the STANDING target height
+  (`_standing_target`): measured in the air (COM 1.9 m over the floor below) every landing "sank" and went down.
+- **Jumps / landings**: `MarksmanCharacter.landing` = `motor.predict_impact` each falling tick; the air node blends the
+  legs (filtered) to Jump_Land's first frame (legs long, feet down; the air clip tucks them 40 cm up) over the last 0.4 s
+  (`legs_ready`); the land node squats by impact (`depth`: idle <-> Jump_Land, 2 .. 10 m/s); under MM a landing faster
+  than 1.2 m/s along the ground stays matched (runs on). Landing >= `land_brace_speed` 7 m/s (a hop is ~5.6): the body is
+  powered 0.1 s before touchdown (`land_brace`, once: re-arming it reset the pose every tick) with the fall's velocity,
+  the upper body physical for `land_window` 0.8 s at tone 0.75 .. 0.4 (it carries on into the stop, the muscles catch it),
+  legs on the clip; >= `land_stagger_speed` 11.5 (~4 m) the balancer has the legs (may go down). A 2 m jump down lands on
+  its feet; the motor's hard landing (> 15.5) stays the limp ragdoll. gm test_jumps_and_landings.
 - **Gaps**: `MarksmanCharacter._cross_gaps` scans ahead along the travel; a gap (ground back within 0.25 m) no wider than the
   span (0.9 m walking .. 1.8 m sprinting) is crossed held at the edges' height; the fit pass keeps feet level over it and
   lands planted feet on the nearer edge. Playground: GAP WALK (0.4 / 0.7 / 1.0 / 1.4 m, marker `gap_walk`), SPRINT TRACK
   (a `Sprinter` dummy: `UltraDummyPost.sprint_loop`, steered corner to corner), animation gallery square grid + floor sized
   to every clip at load (suite `pg`).
+- **Firing / reloading (V4, MarksmanGunPass)**: the shot through the body - the base `_recoil` spring (the fire event's
+  kick, gun frame, m) rocks the spine back (`ROCK` 2.4 rad/m, <= 0.25) BEFORE the gun is placed, then pushes the gun back
+  and flips the muzzle up round the hand (`FLIP` 1.8 rad/m, <= 0.22), arms by IK (rifle 2.6 cm / 1.7 deg / chest 0.7 cm,
+  shotgun 13 cm / 8.8 / 3.4). Reloads keep the gun in the hands (`raised()` is 0 while RELOADING: it used to drop to the
+  stance clip and the magazine just blinked): `_reload_pose` brings it in and rolls it to the left hand (long 22 deg,
+  pistol 32 + to the middle), `_reload_hand` = UltraEquipmentVisual's magazine / shell paths on the sim clock (action_t,
+  reload_commit, shell_time) for the LEFT ARM'S IK in the pass (Marksman has no hand IK: the base paths never ran);
+  the magazine node is placed through the base's `_mag_hand` / `_mag_hidden`; `_left_hand(fingers, palm, contact)`
+  builds any left-hand grip. Suite g4 (CI): kick + recovery, reloads by hand (magazine 56-74 cm off the gun in the
+  hand, support back on after), lean, wall tuck. Tests give reserve ammo (no playground infinite ammo without main).
+- **Lean (V4b)**: `MarksmanGunPass._lean` bends Spine / Chest / UpperChest about the VIEW's way (a bladed rifle stance
+  turns the chest 35 deg: about the body's forward it was lopsided) until the eye is `LEAN_OUT` 0.28 m out (bend, measure,
+  correct once); unarmed too. MarksmanEye zeroes the camera rig's own lean offset (it came on top). Shots follow through
+  aim_from (with a rifle up the head - the camera - sits 24 cm right of the capsule, over the stock).
+- **Wall tuck (V4b)**: `MarksmanCharacter.tuck_distance` (sim: a ray from the shoulder along gun_dir for `gun_reach` -
+  stat "tuck_length", long 0.75 / else 0.45 m) - `simulate` strips B_PRIMARY from a COPY of the input when tucked
+  (deterministic, the UltraController has no fire hook); the pass raises the muzzle 55 / 40 deg round the hand and draws
+  it in by how far the gun would go into the wall (full at 25 cm), ADS off meanwhile.

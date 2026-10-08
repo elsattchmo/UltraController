@@ -29,6 +29,12 @@ func _init(c: UltraCharacter, r: UltraCameraRig) -> void:
 
 
 func _ready() -> void:
+	# (Leaning is the body's - MarksmanGunPass bends the spine and the eye goes with it: the rig's own sideways camera
+	# offset would come on top of it. A little of its roll stays.)
+	if rig.cam_profile:
+		rig.cam_profile = rig.cam_profile.duplicate()
+		rig.cam_profile.lean_offset = 0.0
+		rig.cam_profile.lean_angle_deg = minf(rig.cam_profile.lean_angle_deg, 5.0)
 	_sk = character.skeleton
 	if _sk == null:
 		return

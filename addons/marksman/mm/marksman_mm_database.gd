@@ -70,7 +70,17 @@ func build(sk: Skeleton3D, list: Array) -> void:
 		# Where this clip's floor is (the lower sole's 5th percentile): clips are authored a few cm off the ground.
 		lows.sort()
 		var c := {"name": spec.name, "anim": a, "loop": loop, "length": a.length, "vel": vel, "ground": lows[int(lows.size() * 0.05)],
-				"start": frame_clip.size(), "count": 0, "speed": vel.length()}
+				"start": frame_clip.size(), "count": 0, "speed": vel.length(), "left_down": _lowest_t(P.lf, dt60)}
+		# (Arms from another clip, in step: its own left footfall time.)
+		if spec.has("arms_anim"):
+			var aa: Animation = spec.arms_anim
+			var m := maxi(2, int(ceil(aa.length * 60.0)))
+			var al := []
+			for i in m + 1:
+				al.append((SinewGaitCycles._globals(aa, sk, minf(i * aa.length / m, aa.length))[lf] as Transform3D).origin)
+			c.arms = spec.arms
+			c.arms_length = aa.length
+			c.arms_left_down = _lowest_t(al, aa.length / m)
 		var miny := [_min_y(P.lf), _min_y(P.rf), _min_y(P.lt), _min_y(P.rt)]
 		var nf := maxi(1, int(floor(a.length * FPS)))
 		var root_v := Vector3(vel.x, 0.0, vel.y)
@@ -115,6 +125,15 @@ func build(sk: Skeleton3D, list: Array) -> void:
 	_normalise()
 
 
+## When a foot track is lowest (s): the footfall a clip's cycle is locked on.
+static func _lowest_t(track: Array, dt: float) -> float:
+	var best := 0
+	for i in track.size():
+		if (track[i] as Vector3).y < (track[best] as Vector3).y:
+			best = i
+	return best * dt
+
+
 func size() -> int:
 	return frame_clip.size()
 
@@ -140,6 +159,23 @@ func query_from(fi: int, traj: PackedFloat32Array, body_v := Vector2.INF) -> Pac
 	for d in 15:
 		var v := raw[fi * DIM + d]
 		if d >= 6:                  # velocities: x and z of each
+			var k := (d - 6) % 3
+			v += dv.x if k == 0 else (dv.y if k == 2 else 0.0)
+		q[d] = (v - mean[d]) * scale[d]
+	for d in 12:
+		q[15 + d] = (traj[d] - mean[15 + d]) * scale[15 + d]
+	return q
+
+
+## The query as another database's frame `ofi` (in `other`) shows it - its feet and hips as the body moves them -
+## normalised for this database: a second matcher that picks frames in step with the first (the limp layer).
+func query_follow(other: MarksmanMMDatabase, ofi: int, traj: PackedFloat32Array, body_v: Vector2) -> PackedFloat32Array:
+	var q := PackedFloat32Array()
+	q.resize(DIM)
+	var dv := body_v - (other.clips[other.frame_clip[ofi]].vel as Vector2)
+	for d in 15:
+		var v := other.raw[ofi * DIM + d]
+		if d >= 6:
 			var k := (d - 6) % 3
 			v += dv.x if k == 0 else (dv.y if k == 2 else 0.0)
 		q[d] = (v - mean[d]) * scale[d]

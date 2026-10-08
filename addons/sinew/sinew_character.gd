@@ -207,6 +207,11 @@ func receive_push(dv: Vector3) -> bool:
 	return true
 
 
+## How much of the wanted motion a stumbling body still asks for (0 just after the push .. 1 when the stumble's over).
+func _stumble_command_share() -> float:
+	return 1.0 - _stumble_t / STUMBLE_TIME
+
+
 func stumbling() -> bool:
 	return _stumble_t > 0.0
 
@@ -276,7 +281,7 @@ func _drive_motion(input: InputFrame, delta: float) -> void:
 	# Stumbling: nobody walks off while their feet are busy catching them.
 	if _stumble_t > 0.0:
 		_stumble_t = maxf(_stumble_t - delta, 0.0)
-		u *= 1.0 - _stumble_t / STUMBLE_TIME
+		u *= _stumble_command_share()
 	var hv := Vector3(state.vel.x, 0.0, state.vel.z)
 	var v0 := _motion_vel if _motion_on else hv
 	var v: Vector3 = r.world.physics.call("character_gait_drive", r._id, state.pos, v0, u, delta)

@@ -13,6 +13,8 @@ var group := -1
 
 ## The gun pass over the animated pose (aim, support hand): see MarksmanGunPass.
 var gun_pass: MarksmanGunPass
+## The legs on a swing rope (MarksmanRopePass).
+var rope_pass: MarksmanRopePass
 
 
 func setup(c: UltraCharacter) -> void:
@@ -20,6 +22,8 @@ func setup(c: UltraCharacter) -> void:
 	if modifier != null and not parts.is_empty():
 		gun_pass = MarksmanGunPass.new(c, self)
 		modifier.passes.append(gun_pass)
+		rope_pass = MarksmanRopePass.new(c, self)
+		modifier.passes.append(rope_pass)
 
 
 func _setup_gait() -> void:
@@ -78,17 +82,25 @@ const GROUND_STATES := [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TU
 
 
 func _gait_states() -> Array:
-	# (Motion matching has the legs standing in a stance it has clips for - unless a stumble handed them to the gait's
-	# catching steps: the gait then only crouches.)
-	if mm_legs() and not _stumble:
-		return [MotorState.Id.CROUCH]
-	return super._gait_states() + [MotorState.Id.CROUCH]
+	# (Motion matching has the legs in whatever stance and posture it has clips for - unless a stumble handed them to the
+	# gait's catching steps.)
+	var all := super._gait_states() + [MotorState.Id.CROUCH]
+	var drv := character.anim as MarksmanAnimDriver if character else null
+	if _stumble or drv == null or drv.mm == null:
+		return all
+	var st := MarksmanStance.of(character)
+	var out := []
+	for s in all:
+		var crouched: bool = s == MotorState.Id.CROUCH
+		if not drv.mm.has_stance(st + "_crouch" if crouched else st):
+			out.append(s)
+	return out
 
 
-## Motion matching walks this stance (the gait stands by for stumbles).
+## Motion matching walks the stance and posture the character is in (the gait stands by for stumbles).
 func mm_legs() -> bool:
 	var drv := character.anim as MarksmanAnimDriver if character else null
-	return drv != null and drv.mm != null and drv.mm.has_stance(MarksmanStance.of(character))
+	return drv != null and drv.mm != null and drv.mm.has_stance(MarksmanMotionMatcher.key_for(character))
 
 
 # ------------------------------------------------------------------ stumbles under motion matching
@@ -151,21 +163,117 @@ func _gait_upper_weight(busy: bool, speed: float) -> float:
 
 ## The body went over an edge (MarksmanCharacter.simulate): the whole body physical now, the balancer on - it lands
 ## on whatever is below and either catches itself or goes down.
-func over_edge() -> void:
+##
+## Losing the footing, the body goes INTO the drop: it tips over the edge the way it went off (`dir`, flat) - the upper
+## body more than the feet, so it pitches over the lip rather than dropping straight down beside it.
+func over_edge(dir := Vector3.ZERO) -> void:
 	if _id == 0 or active or not _powered_on or _stagger_t >= 0.0:
 		return
 	start_stagger()
 	_over_edge = _stagger_t >= 0.0
+	_standing_target()
+	if _over_edge and dir.length() > 1e-3:
+		world.physics.call("character_add_velocity", _id, dir.normalized() * over_edge_tip, 0.4, 1.0)
+
+
+## m/s the upper body tips into a drop it lost its footing on (the pelvis 40 % of it).
+@export var over_edge_tip := 1.1
 
 
 var _over_edge := false
+
+
+## Taken over in the air: the balancer's upright target and standing height are the body's on its feet - left to
+## itself it measured them in the air (the centre of mass 1.9 m over the ground below), and any landing then "sank" under
+## 60 % of that and went down.
+func _standing_target() -> void:
+	if _stagger_t < 0.0:
+		return
+	var anim := _anim_world()
+	if anim.is_empty():
+		return
+	var p: Transform3D = anim[0]
+	var h := maxf(p.origin.y - character.state.pos.y, 0.8) + 0.05
+	world.physics.call("character_balance_set_target", _id, p.basis.orthonormalized().get_rotation_quaternion(), h)
 
 
 ## Going over an edge, the body stays powered in the air (the balancer has it until it lands and settles or falls).
 func _powered_in_air() -> bool:
 	if _over_edge and _stagger_t < 0.0:
 		_over_edge = false
-	return _over_edge
+	return _over_edge or _powered_in_air_for_landing()
+
+
+## A hard landing is coming (MarksmanCharacter._predict_landing, a moment before touchdown at `speed` m/s down): the
+## body is powered in the air and meets the ground with its own momentum. The legs land on the animation (the reach,
+## then the squat as deep as the impact) while the upper body is physical - the torso, head and arms carry on down
+## into the stop and the muscles catch them (slackened by how hard it was). Only a really hard one
+## (`land_stagger_speed`) hands the legs to the balancer too: it catches itself or goes down. Asked each tick until on.
+func land_brace(speed: float) -> void:
+	if _id == 0 or active or not powered or _stagger_t >= 0.0 or _land_air:
+		return
+	_land_brace = true
+	_brace_speed = speed
+
+
+## Landing at least this hard (m/s down; ~4 m dropped) the legs are physical too - the balancer's.
+@export var land_stagger_speed := 11.5
+## The upper body's tone into the catch: a landing at the brace speed .. at the stagger speed.
+@export var land_tone := Vector2(0.75, 0.4)
+## Seconds the upper body stays physical after a landing.
+@export var land_window := 0.8
+
+var _land_brace := false
+var _brace_speed := 0.0
+var _land_air := false          ## powered in the air for a landing (till it's down)
+var _land_floor := -1.0         ## the torso's slackened tone while the landing's relax runs (-1: none)
+
+
+func _powered_in_air_for_landing() -> bool:
+	if _land_air and character.state.is_grounded():
+		_land_air = false
+	return _land_air or _land_brace
+
+
+func sinew_pre_step(dt: float) -> void:
+	_track_hips(dt)
+	var bracing := _land_brace and not active
+	super.sinew_pre_step(dt)
+	if not bracing:
+		_land_brace = false
+		return
+	_land_brace = false
+	if not _powered_on or _stagger_t >= 0.0:
+		return
+	# (Powered on mid-air just now: no 0.25 s snap onto the animation - the tree has long been posing; the body takes
+	# the fall's own velocity.)
+	var anim := _anim_world()
+	if not anim.is_empty():
+		world.physics.call("character_set_pose", _id, anim, character.state.vel)
+	_powered_t = maxf(_powered_t, 0.25)
+	_land_air = true
+	landed_braced += 1
+	if stagger and _brace_speed >= land_stagger_speed:
+		start_stagger()
+		_over_edge = _stagger_t >= 0.0
+		_standing_target()
+		return
+	var k := smoothstep(0.0, 1.0, inverse_lerp(7.0, land_stagger_speed, _brace_speed))
+	var spine := _part("Spine")
+	for i in parts.size():
+		if not _walks(i) and bool(world.physics.call("character_attached", _id, i)):
+			_hit_t[i] = land_window
+			_set_dyn(i, true)
+			part_w[i] = 1.0
+	if spine >= 0:
+		_land_floor = lerpf(land_tone.x, land_tone.y, k)
+		_hit_relax[spine] = 0.0
+		for i in _relaxed(spine):
+			world.physics.call("character_set_part_tone", _id, i, _land_floor)
+
+
+## Landings the body took (tests).
+var landed_braced := 0
 
 
 # ------------------------------------------------------------------ hits are felt
@@ -192,6 +300,15 @@ var _leg_weak := {}                  ## part -> [floor tone, seconds]
 func hit(region: int, dir: Vector3, amount: float) -> void:
 	var imp := minf(amount * hit_impulse_per_damage, hit_impulse_max)
 	var c := character as SinewCharacter
+	var hv := Vector3(character.state.vel.x, 0.0, character.state.vel.z)
+	if stagger and _powered_on and not active and _stagger_t < 0.0 and character.state.is_grounded() \
+			and not region in ARM_REGIONS and hv.length() > moving_hit_speed and c != null \
+			and (region in LEG_REGIONS or imp >= stagger_min_impulse) and _stumble_hit(region, dir, imp, hv):
+		var keep := stagger
+		stagger = false                  # (the flinch and the struck part's slack, no standing stagger)
+		super.hit(region, dir, amount)
+		stagger = keep
+		return
 	if stagger and _powered_on and not active and _stagger_t < 0.0 and character.state.is_grounded() \
 			and not region in ARM_REGIONS:
 		if region in LEG_REGIONS and imp >= leg_stagger_min_impulse and _part_of_region.has(region):
@@ -207,7 +324,103 @@ func hit(region: int, dir: Vector3, amount: float) -> void:
 	super.hit(region, dir, amount)
 
 
+## Moving faster than this (m/s), a leg hit or a blow that would stagger a standing body is a stumble on the move.
+@export var moving_hit_speed := 0.8
+## The stumble: m/s of lurch along the way it's going per N s of hit (a leg knocked from under a moving body - it
+## pitches on over the other one), plus this share of it along the hit; at most `moving_hit_max`.
+@export var moving_hit_per_impulse := 0.12
+@export var moving_hit_along := 0.5
+@export var moving_hit_max := 1.6
+## A leg hit while that leg swings (not carrying the weight) throws the body this share as much.
+@export var moving_hit_swinging := 0.4
+
+
+## A hit on a moving body (MarksmanRagdoll.hit): the stagger goes the way it's going. The struck leg is weakened as
+## for a standing body, and the feet are handed to the gait's catching steps with the body's momentum and a lurch
+## along it (SinewCharacter.receive_push): it stumbles on, catches itself in a few steps, or trips if the steps can't
+## keep up (the gait's capture margin - the simulation decides, harder hits and higher speeds more often). Standing
+## still the balancer has it (a stagger on the spot). False if the push couldn't be taken (then: the standing way).
+func _stumble_hit(region: int, dir: Vector3, imp: float, hv: Vector3) -> bool:
+	var c := character as SinewCharacter
+	var h := Vector3(dir.x, 0.0, dir.z)
+	h = h.normalized() if h.length() > 1e-3 else Vector3.ZERO
+	var leg := region in LEG_REGIONS
+	# (It matters which leg: the one carrying the weight buckles and the body pitches over it; one in the air swings
+	# on and lands short.)
+	var bearing := 1.0
+	if leg:
+		var drv := character.anim as MarksmanAnimDriver
+		var side := 0 if region in [UltraLimbs.Region.THIGH_L, UltraLimbs.Region.SHIN_L, UltraLimbs.Region.FOOT_L] else 1
+		if drv != null and drv.mm != null and drv._cur_loco == "mm" and not drv.mm.planted(side):
+			bearing = moving_hit_swinging
+	# (A lurch, not a launch: the body already carries its momentum - a faster one trips more easily through the gait's
+	# capture margin, it isn't thrown harder. Scaled by speed it sped a sprinter up 4.5 m/s and the knock-down doubled
+	# that: flung at 15-21 m/s.)
+	var dv := minf(imp * moving_hit_per_impulse * (1.0 if leg else 0.7) * bearing, moving_hit_max)
+	var fwd := hv.normalized()
+	var push := fwd * dv + (h - fwd * h.dot(fwd)) * dv * moving_hit_along
+	_quiet_push = true                 # (the shot already struck the part: no chest jolt for the push on top)
+	var took := c.receive_push(push)
+	_quiet_push = false
+	if not took:
+		return false
+	if c is MarksmanCharacter:
+		var sev := clampf(imp / maxf(hit_impulse_max, 1e-3), 0.0, 1.0) * bearing
+		(c as MarksmanCharacter).moving_stumble = sev
+	if leg and _part_of_region.has(region):
+		var k := clampf((imp - leg_stagger_min_impulse) / maxf(hit_impulse_max - leg_stagger_min_impulse, 1e-3), 0.0, 1.0)
+		_leg_weak[int(_part_of_region[region])] = [lerpf(leg_weak_tone.x, leg_weak_tone.y, k), lerpf(leg_weak_time.x, leg_weak_time.y, k)]
+	moving_hits += 1
+	return true
+
+
+## Hits taken on the move as stumbles (tests).
+var moving_hits := 0
+var _quiet_push := false
+
+
+func jolt(dir: Vector3, impulse: float) -> void:
+	if not _quiet_push:
+		super.jolt(dir, impulse)
+
+
+## Knocked down while powered: the body is already moving with the character (its kinematic legs and tracked upper body
+## carry the run), and Sinew adds the push ON TOP - a sprinter's 6 m/s went in twice. Only what the body doesn't already
+## have is added: along the way it's going, the excess; across it, the push as is.
+func start() -> void:
+	var st := character.state if character else null
+	if st == null or not _powered_on or active or _hips_v == Vector3.INF or modifier == null or modifier.blend < 0.99:
+		super.start()
+		return
+	var keep := st.vel
+	var have := Vector3(_hips_v.x, 0.0, _hips_v.z)
+	var flat := Vector3(keep.x, 0.0, keep.z)
+	var extra := flat
+	if have.length() > 0.3:
+		var along := have.normalized()
+		extra = flat - along * clampf(flat.dot(along), 0.0, have.length())
+	st.vel = Vector3(extra.x, keep.y, extra.z)
+	super.start()
+	st.vel = keep
+
+
+var _hips_v := Vector3.INF
+var _hips_last := Vector3.INF
+
+
+func _track_hips(dt: float) -> void:
+	if pose_now.is_empty() or dt <= 0.0:
+		return
+	var h := (pose_now[0] as Transform3D).origin
+	_hips_v = (h - _hips_last) / dt if _hips_last != Vector3.INF else Vector3.INF
+	_hips_last = h
+
+
 func _relax_floor(part: int) -> float:
+	if _land_floor >= 0.0 and part == _part("Spine"):
+		if _hit_relax.has(part):
+			return _land_floor
+		_land_floor = -1.0
 	if _leg_weak.has(part):
 		return float(_leg_weak[part][0])
 	return super._relax_floor(part)

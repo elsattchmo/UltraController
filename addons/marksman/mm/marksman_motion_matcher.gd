@@ -16,9 +16,14 @@ const SWITCH_MARGIN := 0.4
 const RATE_MIN := 0.5
 const RATE_MAX := 1.35
 
-## Clips per stance (the player's animation names, "library/clip"; "mirror:" = mirrored left / right). Picked by their own
-## legs' closest approach (thighs, shins, feet as capsules): not the crossover side steps Strafe_Walk_L / R (cross by
-## design), U_Walk_L (-6.2 cm: the left step is a mirrored U_Walk_R, +2.5), U_Walk_F (-2.5; N_StdWalk2 +1.8).
+## Clips per stance and posture (key "<stance>" standing, "<stance>_crouch" crouched; the player's animation names,
+## "library/clip"; "mirror:" = mirrored left / right). Picked by their own legs' closest approach (thighs, shins, feet as
+## capsules): not the crossover side steps Strafe_Walk_L / R (cross by design), U_Walk_L (-6.2 cm: the left step is a
+## mirrored U_Walk_R, +2.5), U_Walk_F (-2.5; N_StdWalk2 +1.8). Crouched, every stance walks the rifle pack's 8-way crouch
+## legs; ARMS (below) lays calmer arms over them where the rifle's would show.
+const RFP_CROUCH := ["mixamo/RFP_IdleCrouching", "mixamo/RFP_WalkCrouchingForward", "mixamo/RFP_WalkCrouchingForwardLeft",
+	"mixamo/RFP_WalkCrouchingForwardRight", "mixamo/RFP_WalkCrouchingLeft", "mixamo/RFP_WalkCrouchingRight",
+	"mixamo/RFP_WalkCrouchingBackward", "mixamo/RFP_WalkCrouchingBackwardLeft", "mixamo/RFP_WalkCrouchingBackwardRight"]
 const SETS := {
 	"unarmed": ["Idle_A", "mixamo/N_StdWalk2", "mixamo/U_Walk_R", "mirror:mixamo/U_Walk_R", "Walk_Backwards", "mixamo/U_Run_F", "mixamo/U_Run_B",
 		"mixamo/U_Run_L", "mixamo/U_Run_R", "mixamo/S_Fast"],
@@ -28,7 +33,42 @@ const SETS := {
 		"mixamo/RFP_RunLeft", "mixamo/RFP_RunRight", "mixamo/RFP_RunBackward", "mixamo/RFP_RunBackwardLeft",
 		"mixamo/RFP_RunBackwardRight", "mixamo/RFP_SprintForward", "mixamo/RFP_SprintForwardLeft",
 		"mixamo/RFP_SprintForwardRight"],
+	# (The pistol pack: walk 2.4 m/s (played down to 1.2), back, strafes 1.0 left / 2.2 right - mirrored for the other
+	# sides - run, run back; the sprint is the unarmed one (the gun is lowered). Not the plain walk: its free left arm
+	# swung the support hand 12 cm off the gun.)
+	"pistol": ["mixamo/PST_PistolIdle", "mixamo/PST_PistolWalk", "mixamo/PST_PistolWalkBackward",
+		"mixamo/PST_PistolStrafe", "mirror:mixamo/PST_PistolStrafe", "mixamo/PST_PistolStrafe2", "mirror:mixamo/PST_PistolStrafe2",
+		"mixamo/PST_PistolRun", "mixamo/PST_PistolRunBackward", "mixamo/S_Fast"],
+	# Limping (a second matcher, in step with the first: see `follow`, MarksmanAnimDriver._drive_limp), by the bad leg:
+	# Injured_Walk favours the left (UltraController's measure), Injured_Walk_Back the right, the INJ pack's hurting
+	# idle stands on the right (129 of 181 frames) - mirrored for the other leg.
+	"limp_l": ["mixamo/INJ_InjuredHurtingIdle", "mixamo/Injured_Walk", "mirror:mixamo/Injured_Walk_Back", "mixamo/INJ_InjuredRun"],
+	"limp_r": ["mirror:mixamo/INJ_InjuredHurtingIdle", "mirror:mixamo/Injured_Walk", "mixamo/Injured_Walk_Back", "mirror:mixamo/INJ_InjuredRun"],
+	"unarmed_crouch": RFP_CROUCH,
+	"rifle_crouch": RFP_CROUCH,
+	"pistol_crouch": RFP_CROUCH,
 }
+## Arms laid over the matched clip (still, moving - blended by speed), per set; none = the clip's own.
+## Per clip: the clip whose arms show over it. The U_* walk strafes / runs hold both hands up at the chest (a guard,
+## 0.6 m over the hips - the forward walk's hang at the hips): their legs, the forward walk's / a natural run's arms,
+## in step with the legs (MarksmanAnimDriver._drive_clip_arms, locked on each clip's left footfall).
+const CLIP_ARMS := {
+	"mixamo/U_Walk_R": "mixamo/N_StdWalk2", "mirror:mixamo/U_Walk_R": "mixamo/N_StdWalk2",
+	"mixamo/U_Run_F": "mixamo/LMM_StandardRun", "mixamo/U_Run_B": "mixamo/LMM_StandardRun",
+	"mixamo/U_Run_L": "mixamo/LMM_StandardRun", "mixamo/U_Run_R": "mixamo/LMM_StandardRun",
+}
+
+const ARMS := {
+	"unarmed_crouch": ["Crouch_Idle", "mixamo/N_StdWalk2"],
+	"pistol_crouch": ["mixamo/PST_PistolKneelingIdle", "mixamo/PST_PistolKneelingIdle"],
+}
+
+
+## The set for a character now: its stance, crouched or not.
+static func key_for(c: UltraCharacter) -> String:
+	var st := MarksmanStance.of_item(c.held_def())
+	return st + "_crouch" if c.state.stance == MotorState.Stance.CROUCH else st
+
 
 var character: UltraCharacter
 var driver: UltraAnimDriver
@@ -51,6 +91,10 @@ var switches := 0
 var search_us := 0
 ## The predicted trajectory (world, xz offsets from the body) of the last search - for debug drawing.
 var predicted: Array[Vector3] = []
+
+## A matcher this one keeps in step with: starting, and whenever that one switches, its query's pose is that one's frame
+## (the limp layer follows the walk).
+var follow: MarksmanMotionMatcher
 
 var _t_search := 0.0
 var _last_wish := Vector2.ZERO
@@ -79,7 +123,12 @@ func database(st: String) -> MarksmanMMDatabase:
 				pn = driver._mirrored(pn)
 			var a := driver.player.get_animation(pn) if driver.player.has_animation(pn) else null
 			if a:
-				list.append({"name": pn, "anim": a})
+				var spec := {"name": pn, "anim": a}
+				var an := _player_name(String(CLIP_ARMS.get(name, "")))
+				if CLIP_ARMS.has(name) and driver.player.has_animation(an):
+					spec.arms = StringName(an)
+					spec.arms_anim = driver.player.get_animation(an)
+				list.append(spec)
 		var d := MarksmanMMDatabase.new()
 		d.build(sk, list)
 		_cache[key] = d
@@ -141,6 +190,10 @@ func _search(wish: Vector2, speed: float, force: bool) -> void:
 	var cur := frame if clip >= 0 else 0
 	var bv := driver.skeleton.global_transform.basis.orthonormalized().inverse() * Vector3(character.state.vel.x, 0.0, character.state.vel.z)
 	var q := db.query_from(cur, traj, Vector2(bv.x, bv.z))
+	# (In step with the followed matcher where this one starts or that one has just switched; between, its own pose:
+	# re-taking the other's pose at every search pinned it to the same few frames and its stride never played.)
+	if follow != null and follow.db != null and follow.frame >= 0 and (clip < 0 or follow.switched):
+		q = db.query_follow(follow.db, follow.frame, traj, Vector2(bv.x, bv.z))
 	var t0 := Time.get_ticks_usec()
 	var r := db.search(q, clip, time)
 	search_us = maxi(search_us, Time.get_ticks_usec() - t0)

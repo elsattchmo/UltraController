@@ -50,6 +50,21 @@ func _init(c: UltraCharacter, r: SinewRagdoll, m: MarksmanMotionMatcher) -> void
 		_p[String(r.parts[i].name)] = i
 
 
+## How much of the limp layer shows (MarksmanAnimDriver), 0 without one.
+func _limp_w() -> float:
+	var drv := character.anim as MarksmanAnimDriver
+	if drv == null or drv.mm_limp == null or drv.mm_limp.db == null or drv.mm_limp.clip < 0:
+		return 0.0
+	return drv.limp_w
+
+
+## Is the foot planted in what shows: the walk's frame, or the limp's once it is most of the picture.
+func _planted(side: int) -> bool:
+	if _limp_w() > 0.5:
+		return (character.anim as MarksmanAnimDriver).mm_limp.planted(side)
+	return matcher.planted(side)
+
+
 func _part(n: String) -> int:
 	return int(_p.get(n, -1))
 
@@ -77,6 +92,10 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	_w = w
 	# The clip's floor onto the real one (eased: a switch between clips authored at different heights glides).
 	var want: float = matcher.db.clips[matcher.clip].ground
+	var lw := _limp_w()
+	if lw > 0.0:
+		var lm: MarksmanMotionMatcher = (character.anim as MarksmanAnimDriver).mm_limp
+		want = lerpf(want, float(lm.db.clips[lm.clip].ground), lw)
 	ground = move_toward(ground, want, GROUND_RATE * dt) if dt > 0.0 and _ground_set else want
 	_ground_set = true
 	if absf(ground) > 1e-5:
@@ -85,6 +104,7 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 			pose[i].origin += down
 	if OS.get_environment("MM_NOWARP") == "":
 		_warp(sk, pose, dt)
+	_limp(pose, dt)
 	if OS.get_environment("MM_NOFIT") == "":
 		_ground_fit(sk, pose, dt)
 	if OS.get_environment("MM_NOLOCK") == "":
@@ -126,6 +146,73 @@ func _warp(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 			pose[j] = x * pose[j]
 
 
+# ------------------------------------------------------------------ the limp, any way it walks
+
+## A hurt leg shows in every direction and grows with the damage (UltraInjury.leg_damage 0 .. 1): while the bad leg
+## carries the weight the trunk leans out over it and the hips dip (the antalgic lurch), and it swings through stiff-
+## kneed. Over the forward / backward limp clips (the limp layer) it adds to theirs; sideways - no limp clips - it is
+## the limp. (Before, a hurt body strafing or backing at an angle only walked slowly.)
+const LIMP_LEAN := 0.26        ## rad, trunk over the bad leg at full damage
+const LIMP_DIP := 0.05         ## m, the hips dropping onto it
+const LIMP_STIFF := 0.55       ## share of the swinging bad knee's bend taken out
+var limp_load := 0.0           ## eased: how much the bad leg alone carries the body now (0 .. 1)
+var limp_amount := 0.0         ## the damage shown (tests)
+
+
+func _limp(pose: Array[Transform3D], dt: float) -> void:
+	var st := character.state
+	var dl := UltraInjury.leg_damage(st, true)
+	var dr := UltraInjury.leg_damage(st, false)
+	var d := maxf(dl, dr)
+	var moving := smoothstep(0.15, 0.5, Vector2(st.vel.x, st.vel.z).length())
+	limp_amount = d * moving * _w
+	if limp_amount < 0.01 or _physics_legs:
+		limp_load = move_toward(limp_load, 0.0, 6.0 * dt)
+		return
+	var bad := 0 if dl >= dr else 1
+	var on_bad := _planted(bad)
+	var on_good := _planted(1 - bad)
+	var want := 1.0 if on_bad and not on_good else (0.4 if on_bad else 0.0)
+	limp_load = move_toward(limp_load, want, 7.0 * dt)
+	var k := limp_amount
+	# Trunk over the bad leg (the model's left is skeleton +X; turning about +Z by -a leans the top toward +X).
+	var lean := LIMP_LEAN * k * limp_load * (-1.0 if bad == 0 else 1.0)
+	var spine := _part("Spine")
+	var hips := _part("Hips")
+	if hips < 0:
+		hips = 0
+	if spine >= 0 and absf(lean) > 1e-4:
+		var b := Basis(Vector3.BACK, lean)                 # (about skeleton +Z: the way the model faces)
+		var piv: Vector3 = pose[spine].origin
+		var x := Transform3D(b, piv - b * piv)
+		for j: int in _subtree(spine):
+			pose[j] = x * pose[j]
+	# The hips dip onto it (the planted feet's locks hold the feet where they are).
+	var dip := LIMP_DIP * k * limp_load
+	if dip > 1e-4:
+		for j: int in _subtree(hips):
+			pose[j].origin.y -= dip
+	# The bad leg swings through stiff: its knee straightened by a share (only while it's in the air).
+	if not on_bad:
+		var pre := "Left" if bad == 0 else "Right"
+		var up_i := _part(pre + "UpperLeg")
+		var lo_i := _part(pre + "LowerLeg")
+		if up_i >= 0 and lo_i >= 0:
+			# (The knee's bend = the shin relative to the thigh, from the rest pose's relation: part of it taken out.)
+			var u := pose[up_i].basis.get_rotation_quaternion()
+			var l := pose[lo_i].basis.get_rotation_quaternion()
+			var u0 := (ragdoll.parts[up_i].rest as Transform3D).basis.get_rotation_quaternion()
+			var l0 := (ragdoll.parts[lo_i].rest as Transform3D).basis.get_rotation_quaternion()
+			var bend := (u * u0.inverse()).inverse() * (l * l0.inverse())          # rest-relative shin vs thigh
+			var less := bend.slerp(Quaternion.IDENTITY, LIMP_STIFF * k)
+			var l_new := (u * u0.inverse()) * less * l0
+			var turn := Basis(l_new * l.inverse())
+			var piv2: Vector3 = pose[lo_i].origin
+			var x2 := Transform3D(turn, piv2 - turn * piv2)
+			for j: int in _subtree(lo_i):
+				pose[j] = x2 * pose[j]
+
+
 func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> void:
 	var pre := "Left" if side == 0 else "Right"
 	var up_i := _part(pre + "UpperLeg")
@@ -135,7 +222,7 @@ func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> vo
 		return
 	var xf := sk.global_transform
 	var foot_w: Vector3 = xf * pose[ft_i].origin
-	var planted := matcher.planted(side) and not _physics_legs
+	var planted := _planted(side) and not _physics_legs
 	# Where the foot shows now: the clip's, plus what is left of a released lock's offset.
 	var shown := foot_w
 	if not locked[side] and release_t[side] > 0.0:
@@ -242,14 +329,14 @@ func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 			if (a_ank > -0.02 and a_ank < width + 0.02) or (a_ball > -0.02 and a_ball < width + 0.02):
 				want[side] = float(gd.y) - floor_y
 				normals[side] = Vector3.UP
-				if matcher.planted(side):
+				if _planted(side):
 					var to_far := a_ank > width * 0.5 - 0.1
 					# (Far edge: the heel just onto it; near edge: the ball just short of it.)
 					var shift := (width + GAP_HEEL - a_ank) if to_far else (-GAP_BALL - a_ball)
 					_edge_pull[side] = to_sk * (dir * shift)
 				continue
 		var still := Vector2(character.state.vel.x, character.state.vel.z).length() < EDGE_STILL
-		if matcher.planted(side) and still:
+		if _planted(side) and still:
 			# The ball first (the foot's front over the lip), then the whole foot: drawn back toward the body's centre
 			# until the ball is on solid ground. A drop is measured from the ground under the foot's own ankle (going
 			# down stairs or a slope, the ball's ground is lower than the body's floor without any edge), and only for a
@@ -307,7 +394,7 @@ func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 		var lift := fit_off[side] * k - pelvis_off
 		var b: Basis = pose[ft_i].basis
 		# A planted sole onto the surface (its normal in the skeleton's frame), limited.
-		if matcher.planted(side):
+		if _planted(side):
 			var n_sk := (to_sk * fit_normal[side]).normalized()
 			var q := _arc(Vector3.UP, n_sk)
 			var ang := q.get_angle()

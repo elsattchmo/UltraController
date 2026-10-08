@@ -154,6 +154,8 @@ func test_leg_shots_are_simulated() -> void:
 	load_playground()
 	var rows := []
 	var outcomes := {}
+	var min_moved := INF
+	var lurch := 0.0
 	for dmg: float in [8.0, 16.0, 30.0, 60.0]:
 		for region: int in [UltraLimbs.Region.SHIN_L, UltraLimbs.Region.THIGH_R]:
 			for delay: int in [0, 9, 18, 27]:
@@ -162,7 +164,11 @@ func test_leg_shots_are_simulated() -> void:
 				var r := t.ragdoll as MarksmanRagdoll
 				bot(t).set_steps([{"ticks": 400, "move": Vector2(0, 1), "yaw": 0.0}])
 				await ticks(45 + delay)
+				var hit_at := t.state.pos
+				var v0 := Vector2(t.state.vel.x, t.state.vel.z).length()
 				t.react_to_hit(region, Vector3(0, 0, 1), dmg)
+				var moved := 0.0
+				var peak := 0.0
 				var stag := false
 				var stumble := false
 				var fell := false
@@ -175,6 +181,13 @@ func test_leg_shots_are_simulated() -> void:
 					stag = stag or r.staggering()
 					stumble = stumble or r.stumbling_gait()
 					fell = fell or t.state.state == Id.RAGDOLL
+					if i == 59:
+						moved = -(t.state.pos.z - hit_at.z)
+					if i < 40:
+						peak = maxf(peak, -t.state.vel.z)
+				if not fell:
+					min_moved = minf(min_moved, moved)
+				lurch = maxf(lurch, peak - v0)
 				var how := "fell" if fell else ("staggered" if stag else ("stumbled" if stumble else "flinched"))
 				rows.append("%3.0f dmg %-7s +%2d ticks: %s  (%s)" % [dmg, UltraLimbs.NAMES[region], delay, how, why])
 				var key := "%d" % dmg
@@ -186,9 +199,13 @@ func test_leg_shots_are_simulated() -> void:
 				await ticks(3)
 	for line: String in rows:
 		info(line)
-	info("outcomes by damage: %s" % [outcomes])
-	check(not (outcomes["8"] as Dictionary).has("fell") and not (outcomes["8"] as Dictionary).has("staggered"), "a graze doesn't stagger or floor (%s)" % [outcomes["8"]])
-	check(int((outcomes["30"] as Dictionary).get("staggered", 0)) + int((outcomes["30"] as Dictionary).get("fell", 0)) > 0, "a solid leg hit staggers (%s)" % [outcomes["30"]])
+	info("outcomes by damage: %s; on its feet it went on at least %.2f m in the second after (walking 1.35); lurch up to +%.2f m/s" % [outcomes, min_moved, lurch])
+	check(not (outcomes["8"] as Dictionary).has("fell"), "a graze doesn't floor (%s)" % [outcomes["8"]])
+	# (On the move a leg hit is a stumble the way it's going, never a stagger on the spot: the body doesn't stop dead.)
+	for k: String in outcomes:
+		check(not (outcomes[k] as Dictionary).has("staggered"), "%s dmg on the move: no stagger on the spot (%s)" % [k, outcomes[k]])
+	check(int((outcomes["30"] as Dictionary).get("stumbled", 0)) + int((outcomes["30"] as Dictionary).get("fell", 0)) > 0, "a solid leg hit stumbles it (%s)" % [outcomes["30"]])
+	check(min_moved > 0.7 and lurch > 0.3, "it stumbles on along its way - no freeze (at least %.2f m in 1 s, lurch +%.2f m/s)" % [min_moved, lurch])
 	check((outcomes["60"] as Dictionary).size() > 1 or not (outcomes["60"] as Dictionary).has("fell"),
 			"even a heavy leg hit isn't a guaranteed fall: the outcome depends on the moment (%s)" % [outcomes["60"]])
 	var falls := func(k: String) -> int: return int((outcomes[k] as Dictionary).get("fell", 0))
@@ -321,37 +338,61 @@ func test_ledges() -> void:
 				info("past the edge: %s %s by %.1f cm" % [side, "ankle" if p == ankle else "toe", (p.z - top.z - 2.0) * 100.0])
 	info("at the lip: capsule %.2f m from the edge, feet points past it: %d" % [top.z + 2.0 - c.state.pos.z, off_edge])
 	check(stopped and off_edge == 0 and c.state.state in [Id.IDLE, Id.MOVE], "standing at the lip, the feet stay on the block (%d points past the edge)" % off_edge)
-	# And walking on: no climb-down; over the edge, Sinew has the body.
+	# And walking on: no climb-down, and going off forward is on purpose - a plain drop, landed on its feet (the body meets
+	# the landing - MarksmanRagdoll.land_brace - but no fall).
 	bot(c).set_steps([{"ticks": 200, "move": Vector2(0, 1), "yaw": PI}])
 	var down_move := false
-	var stag := false
+	var stag_air := false
+	var fell := false
 	var states := {}
 	for i in 200:
 		await ticks(1)
 		down_move = down_move or c.state.state == Id.LEDGE_CLIMB
-		stag = stag or r.staggering()
+		stag_air = stag_air or (r.staggering() and not c.state.is_grounded())
+		fell = fell or c.state.state == Id.RAGDOLL
 		states[Id.keys()[c.state.state]] = true
-	info("standing, walked off the 2 m drop: staggered %s, states %s" % [stag, states.keys()])
+	info("standing, walked off the 2 m drop forward: Sinew's fall %s, went down %s, states %s" % [stag_air, fell, states.keys()])
 	check(not down_move, "standing, no climb-down")
-	check(stag, "over the edge the body is Sinew's (the balancer took it)")
+	check(not stag_air and not fell and c.state.pos.y < 0.3, "walking off forward is a plain drop, landed on its feet")
 	chars.erase(c)
 	c.queue_free()
 	await ticks(3)
-	# Below the ledge height (0.6 m) a drop is a step down: off the 0.5 m wall plainly; off the 1.0 m wall, Sinew.
-	for wall: Array in [[0.5, 58.0, false], [1.0, 63.0, true]]:
+	# Backing off it is an accident: over the edge, Sinew has the body.
+	c = _marksman(top, true)
+	r = c.ragdoll as MarksmanRagdoll
+	bot(c).live_yaw = 0.0
+	bot(c).set_steps([{"ticks": 40, "yaw": 0.0}, {"ticks": 400, "move": Vector2(0, -1), "yaw": 0.0}])
+	var stag := false
+	for i in 300:
+		await ticks(1)
+		stag = stag or (r.staggering() and not c.state.is_grounded())
+	var lay := (r.pose_now[0] as Transform3D).origin if not r.pose_now.is_empty() else c.state.pos
+	info("backed off the 2 m drop: Sinew's fall %s, state %s, hips came to rest %.2f m out from the wall, %.2f m up" % [stag,
+			Id.keys()[c.state.state], lay.z - (top.z + 2.0), lay.y])
+	check(stag, "backing off the edge, the body is Sinew's (an accident)")
+	check(lay.y < 1.0 and lay.z > top.z + 2.25, "and it went into the drop - down there, out from the wall (%.2f m)" % (lay.z - top.z - 2.0))
+	chars.erase(c)
+	c.queue_free()
+	await ticks(3)
+	# Below the ledge height (0.6 m) a drop is a step down, any way it's taken: off the 0.5 m wall backwards plainly. Off
+	# the 1.0 m wall forward plainly, backwards Sinew's.
+	for wall: Array in [[0.5, 58.0, -1, false], [1.0, 63.0, 1, false], [1.0, 63.0, -1, true]]:
 		c = _marksman(Vector3(float(wall[1]), float(wall[0]) + 0.05, -30.0), true)
 		r = c.ragdoll as MarksmanRagdoll
-		bot(c).live_yaw = PI
+		var yaw := PI if int(wall[2]) > 0 else 0.0
+		bot(c).live_yaw = yaw
+		bot(c).set_steps([{"ticks": 40, "yaw": yaw}])
 		await ticks(40)
-		bot(c).set_steps([{"ticks": 150, "move": Vector2(0, 1), "yaw": PI}])
+		bot(c).set_steps([{"ticks": 250, "move": Vector2(0, float(wall[2])), "yaw": yaw}])
 		var took := false
 		var landed := false
-		for i in 150:
+		for i in 250:
 			await ticks(1)
-			took = took or r.staggering()
+			took = took or (r.staggering() and not c.state.is_grounded())
 			landed = landed or c.state.pos.y < 0.2
-		info("walked off the %.1f m wall: Sinew took the body %s" % [wall[0], took])
-		check(landed and took == bool(wall[2]), "off the %.1f m wall: %s" % [wall[0], "Sinew takes the body (a ledge)" if wall[2] else "a plain step down (under the ledge height)"])
+		var how := "forward" if int(wall[2]) > 0 else "backwards"
+		info("off the %.1f m wall %s: Sinew took the body %s" % [wall[0], how, took])
+		check(landed and took == bool(wall[3]), "off the %.1f m wall %s: %s" % [wall[0], how, "Sinew takes the body (an accident)" if wall[3] else "a plain drop"])
 		chars.erase(c)
 		c.queue_free()
 		await ticks(3)
@@ -408,3 +449,360 @@ func test_gaps_are_strides() -> void:
 	info("sprinting the gap walk: crossed %s, fell at z %.1f, feet planted in a gap %d frames, states %s" % [run.crossed, run.fell_at, run.foot_in_gap, (run.states as Dictionary).keys()])
 	check(run.crossed == [true, true, true, true] and run.fell_at < 0, "sprinting, every gap up to 1.4 m is a stride")
 	check(run.foot_in_gap == 0, "no foot put down in a gap (%d frames)" % run.foot_in_gap)
+
+
+## Motion matching covers every stance and posture: pistol standing, unarmed / rifle / pistol crouched - 8 ways each,
+## the matched clips show (not the gait), the body goes where it's told, the legs don't go through each other.
+func test_crouch_and_pistol_are_matched() -> void:
+	load_playground()
+	const D := 0.70710678
+	var dirs := {"f": Vector2(0, 1), "fr": Vector2(D, D), "r": Vector2(1, 0), "br": Vector2(D, -D), "b": Vector2(0, -1),
+			"bl": Vector2(-D, -D), "l": Vector2(-1, 0), "fl": Vector2(-D, D)}
+	var spot := marker("spawn").global_position + Vector3(-16, 0, -3)
+	for spec: Array in [[&"pistol", false], [&"", true], [&"rifle", true], [&"pistol", true]]:
+		var c := _marksman(spot, true)
+		await ticks(40)
+		var sl := 0
+		if spec[0] != &"":
+			UltraItems.give(c, spec[0])
+			for i in c.inventory.size():
+				var it := c.inventory.get_slot(i)
+				if it and it.def_id == spec[0]:
+					sl = i + 1
+		var buttons := InputFrame.B_CROUCH if spec[1] else 0
+		var r := c.ragdoll as MarksmanRagdoll
+		var drv := c.anim as MarksmanAnimDriver
+		var m := SinewMoveMetrics.new(c)
+		m.record_sinks = false
+		var name := "%s %s" % ["unarmed" if spec[0] == &"" else String(spec[0]), "crouched" if spec[1] else "standing"]
+		var bad := []
+		for d: String in dirs:
+			m.label = ""
+			c.teleport(spot, 0.0)
+			bot(c).live_yaw = 0.0
+			bot(c).set_steps([{"ticks": 40, "buttons": buttons, "slot": sl, "yaw": 0.0}])
+			await ticks(40)
+			var from := c.state.pos
+			m.label = d
+			var shown := true
+			bot(c).set_steps([{"ticks": 76, "move": dirs[d], "buttons": buttons, "slot": sl, "yaw": 0.0}])
+			for i in 75:
+				await ticks(1)
+				if i > 15:
+					shown = shown and drv._cur_loco == "mm" and r.gait_w < 0.05
+			var moved := c.state.pos - from
+			var want := Vector3(dirs[d].x, 0, -dirs[d].y)
+			var s := m.summary(d)
+			var ok: bool = shown and moved.normalized().dot(want) > 0.9 and moved.length() > 0.5 and float(s.gap_min) >= -0.02
+			if not ok:
+				bad.append("%s (shown %s, moved %.2f m at %.0f deg off, gap %.1f cm)" % [d, shown, moved.length(), rad_to_deg(moved.normalized().angle_to(want)), float(s.gap_min) * 100.0])
+		m.label = ""
+		m.detach()
+		info("%s matched:\n%s" % [name, m.table()])
+		check(bad.is_empty(), "%s: 8 ways on matched clips, legs clear (%s)" % [name, bad])
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+
+
+## A hurt leg limps in stages: the limp layer's weight is the leg's damage (UltraInjury.leg_damage), and the body
+## lurches more over the stride the worse the leg (the injured walk's limp is in the body: its feet stay down equally long).
+func test_limp_in_stages() -> void:
+	load_playground()
+	var rows := []
+	var by_dir := {}
+	for dir: Array in [["forward", Vector2(0, 1)], ["strafe R", Vector2(1, 0)], ["back-left", Vector2(-0.7, -0.7)]]:
+		var ratios := []
+		for hp: float in [100.0, 70.0, 55.0, 25.0]:
+			var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3), true)
+			await ticks(30)
+			c.state.limb_hp[UltraLimbs.Region.THIGH_L] = hp
+			var drv := c.anim as MarksmanAnimDriver
+			var sk := c.skeleton
+			var gap := [9.0]
+			var lurch := [9.0, -9.0]
+			var grab := func() -> void:
+				var b := {}
+				for n in SinewMoveMetrics.BONES:
+					var bi := sk.find_bone(n)
+					if bi >= 0:
+						b[n] = (sk.global_transform * sk.get_bone_global_pose(bi)).origin
+				gap[0] = minf(gap[0], SinewMoveMetrics.legs_gap(b))
+				# The lurch: the head's sideways offset over the hips (body frame), its swing over the stride.
+				var y := c.state.body_yaw
+				var side := ((b.Head as Vector3) - (b.Hips as Vector3)).dot(Vector3(cos(y), 0, -sin(y)))
+				lurch[0] = minf(lurch[0], side)
+				lurch[1] = maxf(lurch[1], side)
+			bot(c).set_steps([{"ticks": 200, "move": dir[1], "yaw": 0.0}])
+			await ticks(50)
+			sk.skeleton_updated.connect(grab)
+			await ticks(150)
+			sk.skeleton_updated.disconnect(grab)
+			var ratio := float(lurch[1]) - float(lurch[0])                   # the head's sideways swing over the hips (m)
+			var want := UltraInjury.leg_damage(c.state, true)
+			rows.append("%-9s left thigh %3.0f %%: damage %.2f, limp clip layer %.2f, procedural %.2f, head lurch %.1f cm, speed %.2f m/s, legs gap %.1f cm" % [
+					dir[0], hp, want, drv.limp_w, drv.mm_pass.limp_amount, ratio * 100.0, Vector2(c.state.vel.x, c.state.vel.z).length(), gap[0] * 100.0])
+			ratios.append(ratio)
+			check(gap[0] >= -0.02, "%s, left thigh at %.0f %%: legs clear (%.1f cm)" % [dir[0], hp, gap[0] * 100.0])
+			chars.erase(c)
+			c.queue_free()
+			await ticks(3)
+		by_dir[dir[0]] = ratios
+	for r: String in rows:
+		info(r)
+	for k: String in by_dir:
+		var ratios: Array = by_dir[k]
+		check(ratios[1] >= ratios[0] - 0.005 and ratios[2] >= ratios[1] + 0.005 and ratios[3] >= ratios[2] + 0.01 and ratios[3] > ratios[0] * 2.0,
+				"%s: a little limp hurt a little, worse the worse the leg (%.1f / %.1f / %.1f / %.1f cm)" % [k, ratios[0] * 100.0, ratios[1] * 100.0, ratios[2] * 100.0, ratios[3] * 100.0])
+
+
+## Jumps and landings: in the air the legs come down to meet the ground before it arrives (the predicted landing), a
+## hop or a running jump lands on the animation and the matcher carries on, a jump down a drop is landed by the body
+## (Sinew powered a moment before touchdown, the balancer on: it catches itself or goes down - the simulation's).
+func _jump_run(c: MarksmanCharacter, steps: Array, n: int) -> Dictionary:
+	var r := c.ragdoll as MarksmanRagdoll
+	var drv := c.anim as MarksmanAnimDriver
+	var sk := c.skeleton
+	var out := {"feet_at_touch": INF, "ready_max": 0.0, "braced": 0, "staggered": false, "down": false, "locos": {}, "air": false, "after": ""}
+	var was_air := [false]
+	var touch := [-1]
+	var frame := [0]
+	var feet := func() -> void:
+		var lo := INF
+		for b in ["LeftFoot", "RightFoot"]:
+			lo = minf(lo, (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(b))).origin.y)
+		if touch[0] == frame[0]:
+			out.feet_at_touch = lo - c.state.pos.y
+	sk.skeleton_updated.connect(feet)
+	var before := r.landed_braced
+	bot(c).set_steps(steps)
+	for i in n:
+		frame[0] = i
+		var air := not c.state.is_grounded()
+		if was_air[0] and not air and touch[0] < 0:
+			touch[0] = i + 1                     # (the shown pose a frame on: the first one drawn on the ground)
+		was_air[0] = air
+		out.air = out.air or air
+		out.ready_max = maxf(out.ready_max, drv.legs_ready)
+		out.staggered = out.staggered or r.staggering()
+		out.down = out.down or c.state.state == Id.RAGDOLL
+		out.locos[drv._cur_loco] = true
+		if OS.get_environment("GM_DUMP") != "" and (r.staggering() or air):
+			var bs := r.balance_state()
+			print("t%d %s y %.2f vy %.2f %s fallen %s %s com %s comv %s" % [i, Id.keys()[c.state.state], c.state.pos.y, c.state.vel.y, drv._cur_loco,
+					bs.get("fallen", "-"), bs.get("reason", ""), bs.get("com", ""), bs.get("com_velocity", "")])
+		if touch[0] >= 0 and i == touch[0] + 50:
+			out.after = drv._cur_loco
+		await ticks(1)
+	sk.skeleton_updated.disconnect(feet)
+	out.braced = r.landed_braced - before
+	return out
+
+
+func test_jumps_and_landings() -> void:
+	load_playground()
+	# A hop on the spot.
+	var c := _marksman(marker("spawn").global_position + Vector3(-6, 0, 0))
+	await ticks(60)
+	var o := await _jump_run(c, [{"ticks": 4, "buttons": InputFrame.B_JUMP}, {"ticks": 200}], 150)
+	info("hop: legs ready %.2f, feet %.1f cm over the soles at touchdown, braced %d, after %s, locos %s" % [o.ready_max, o.feet_at_touch * 100.0, o.braced, o.after, o.locos.keys()])
+	check(o.air and o.ready_max > 0.8, "a hop: the legs reach for the ground before touchdown (%.2f)" % o.ready_max)
+	check(o.feet_at_touch < 0.15, "a hop lands on its feet, not folded legs (lowest ankle %.1f cm up)" % (o.feet_at_touch * 100.0))
+	check(o.braced == 0 and not o.staggered and o.after == "mm", "a hop is the animation's (braced %d, after: %s)" % [o.braced, o.after])
+	chars.erase(c)
+	c.queue_free()
+	await ticks(3)
+	# A running jump on flat ground.
+	c = _marksman(marker("spawn").global_position + Vector3(-6, 0, 0))
+	await ticks(60)
+	o = await _jump_run(c, [{"ticks": 70, "move": Vector2(0, 1), "buttons": InputFrame.B_SPRINT}, {"ticks": 4, "move": Vector2(0, 1), "buttons": InputFrame.B_JUMP},
+			{"ticks": 200, "move": Vector2(0, 1)}], 170)
+	info("running jump: legs ready %.2f, feet %.1f cm, braced %d, after %s, locos %s" % [o.ready_max, o.feet_at_touch * 100.0, o.braced, o.after, o.locos.keys()])
+	check(o.air and o.braced == 0 and not o.down and o.after == "mm" and not o.locos.has("land"),
+			"a running jump runs on: matched locomotion straight after (locos %s)" % [o.locos.keys()])
+	chars.erase(c)
+	c.queue_free()
+	await ticks(3)
+	# A jump down from the 2 m drop: the body meets it (upper body physical into the stop) and stays up; from the 4 m one
+	# the balancer has the legs too (it may go down - the simulation's).
+	for h in [2, 4]:
+		var top := marker("drop_%d" % h).global_position
+		c = _marksman(top)
+		var r := c.ragdoll as MarksmanRagdoll
+		bot(c).live_yaw = PI
+		bot(c).set_steps([{"ticks": 40, "yaw": PI}])
+		await ticks(40)
+		var chest := r._part("Chest")
+		var phys := [0.0]
+		var watch := func() -> void:
+			if c.state.is_grounded() and chest >= 0:
+				phys[0] = maxf(phys[0], r.part_w[chest])
+		get_tree().physics_frame.connect(watch)
+		o = await _jump_run(c, [{"ticks": 70, "move": Vector2(0, 1), "yaw": PI}, {"ticks": 4, "move": Vector2(0, 1), "yaw": PI, "buttons": InputFrame.B_JUMP},
+				{"ticks": 300, "yaw": PI}], 260)
+		get_tree().physics_frame.disconnect(watch)
+		info("jump down %d m: legs ready %.2f, braced %d, chest physical %.2f, staggered %s, went down %s, state now %s, locos %s" % [h, o.ready_max,
+				o.braced, phys[0], o.staggered, o.down, Id.keys()[c.state.state], o.locos.keys()])
+		check(o.air and o.braced == 1, "a jump down %d m is met by the body (braced %d)" % [h, o.braced])
+		check(c.state.pos.y < 0.3, "and it's down there (y %.2f)" % c.state.pos.y)
+		if h == 2:
+			check(phys[0] > 0.9 and not o.staggered and not o.down, "2 m: the upper body takes the stop physically, the legs land it - on its feet")
+		else:
+			check(o.staggered, "4 m: the balancer has the legs")
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+
+
+## Shot in the leg at a sprint: it stumbles or goes down with the momentum it HAS - never flung faster than it ran.
+func test_shot_while_sprinting() -> void:
+	load_playground()
+	var worst := 0.0
+	var rows := []
+	var falls := {}
+	for dmg: float in [16.0, 30.0, 60.0]:
+		for delay: int in [0, 7, 14, 21]:
+			var t := _marksman(marker("spawn").global_position + Vector3(-20 + delay * 0.3, 0, 10 - dmg * 0.05))
+			await ticks(40)
+			var r := t.ragdoll as MarksmanRagdoll
+			bot(t).set_steps([{"ticks": 400, "move": Vector2(0, 1), "yaw": 0.0, "buttons": InputFrame.B_SPRINT}])
+			await ticks(100 + delay)
+			var v0 := Vector2(t.state.vel.x, t.state.vel.z).length()
+			t.react_to_hit(UltraLimbs.Region.THIGH_R, Vector3(0, 0, 1), dmg)
+			var prev := (r.pose_now[0] as Transform3D).origin
+			var top := 0.0
+			var fell := false
+			for i in 150:
+				await ticks(1)
+				if OS.get_environment("GM_DUMP") != "" and i < 60:
+					var gs: Dictionary = r.world.physics.call("character_gait_state", r._id)
+					print("t%d %s v %.2f margin %s stepping %s stumble %s" % [i, Id.keys()[t.state.state], Vector2(t.state.vel.x, t.state.vel.z).length(),
+							gs.get("capture_margin", "-"), gs.get("stepping", "-"), t.stumbling()])
+				var h := (r.pose_now[0] as Transform3D).origin
+				top = maxf(top, Vector2(h.x - prev.x, h.z - prev.z).length() * 60.0)
+				prev = h
+				fell = fell or t.state.state == Id.RAGDOLL
+			worst = maxf(worst, top - v0)
+			rows.append("%2.0f dmg +%d: ran %.1f m/s, hips up to %.1f m/s, %s" % [dmg, delay, v0, top, "fell" if fell else "kept up"])
+			falls[dmg] = int(falls.get(dmg, 0)) + (1 if fell else 0)
+			chars.erase(t)
+			t.queue_free()
+			await ticks(3)
+	for line: String in rows:
+		info(line)
+	check(worst < 2.5, "never flung: the hips at most %.1f m/s over the running speed" % worst)
+	info("falls of 4 by damage: %s" % [falls])
+	check(int(falls[16.0]) == 0 and int(falls[16.0]) <= int(falls[30.0]) and int(falls[30.0]) <= int(falls[60.0]) and int(falls[60.0]) > 0,
+			"a graze runs on; harder hits trip more often (%s)" % [falls])
+
+
+## Unarmed, the arms are the same kind of arms whichever way it walks or runs: the U_* strafe / run clips hold both hands
+## up at the chest - their legs play under borrowed natural arms (MarksmanMotionMatcher.CLIP_ARMS).
+func test_unarmed_arms_hang_every_way() -> void:
+	load_playground()
+	var rows := []
+	var hands := {}
+	for spec: Array in [["walk fwd", Vector2(0, 1), 0], ["strafe R", Vector2(1, 0), 0], ["strafe L", Vector2(-1, 0), 0],
+			["run fwd", Vector2(0, 1), -1], ["run R", Vector2(1, 0), -1], ["run L", Vector2(-1, 0), -1]]:
+		var c := _marksman(marker("spawn").global_position + Vector3(-10, 0, 6))
+		if int(spec[2]) < 0:
+			c.profile.default_gait = MovementProfile.Gait.JOG      # (a run: the U_Run_* clips)
+			spec[2] = 0
+		await ticks(40)
+		var sk := c.skeleton
+		var top := [-INF]
+		var grab := func() -> void:
+			var hy := (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Hips"))).origin.y
+			for b in ["LeftHand", "RightHand"]:
+				top[0] = maxf(top[0], (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(b))).origin.y - hy)
+		bot(c).set_steps([{"ticks": 200, "move": spec[1], "yaw": 0.0, "buttons": spec[2]}])
+		await ticks(60)
+		sk.skeleton_updated.connect(grab)
+		await ticks(60)
+		sk.skeleton_updated.disconnect(grab)
+		var drv := c.anim as MarksmanAnimDriver
+		hands[spec[0]] = top[0]
+		rows.append("%-9s hands up to %.2f m over the hips (clip %s)" % [spec[0], top[0], String(drv._mm_clip).get_file()])
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+	for r: String in rows:
+		info(r)
+	for k: String in ["strafe R", "strafe L"]:
+		check(float(hands[k]) < float(hands["walk fwd"]) + 0.12, "%s: the hands hang as walking forward (%.2f vs %.2f m)" % [k, hands[k], hands["walk fwd"]])
+	# (A run pumps the arms - the sprint clip to 0.37 m; the U_Run clips' own guard held them at 0.6-0.68.)
+	check(float(hands["run R"]) < 0.5 and float(hands["run L"]) < 0.5 and float(hands["run fwd"]) < 0.5 \
+			and absf(float(hands["run R"]) - float(hands["run fwd"])) < 0.1 and absf(float(hands["run L"]) - float(hands["run fwd"])) < 0.1,
+			"running: natural arms every way (forward %.2f, right %.2f, left %.2f m over the hips)" % [hands["run fwd"], hands["run R"], hands["run L"]])
+
+
+## On a rope the hands hold it (the climb clip) and the legs pump the swing (MarksmanRopePass): forward at the front of
+## the swing, back at the back; letting go eases the rope's tilt and the arms out (no snap).
+func test_rope_legs_pump_the_swing() -> void:
+	load_playground()
+	var c := _marksman(marker("parkour_rope").global_position)
+	var r := c.ragdoll as MarksmanRagdoll
+	var on_rope := [-1]
+	var tick := [0]
+	bot(c).driver = func(_t: int, _b: BotInputSource) -> InputFrame:
+		tick[0] += 1
+		var f := InputFrame.new()
+		if c.state.state == Id.ROPE:
+			if on_rope[0] < 0:
+				on_rope[0] = tick[0]
+			var k: int = tick[0] - on_rope[0]
+			f.move = Vector2(0, 1.0 if c.state.vel.z < 0.0 else -1.0)
+			# (Let go swinging back toward the start platform, near the top of the swing: a short drop.)
+			if k > 300 and c.state.vel.z > 0.0 and absf(c.state.vel.z) < 1.5:
+				f.buttons = InputFrame.B_JUMP
+			return f
+		if on_rope[0] >= 0:
+			return f
+		f.move = Vector2(0, 1)
+		f.buttons = InputFrame.B_SPRINT | (InputFrame.B_JUMP if c.state.pos.z < -55.4 and c.state.is_grounded() else 0)
+		return f
+	# The pose as shown, in the skeleton's frame: the feet ahead of / behind the hips, and how far bones jump a frame.
+	var sk := c.skeleton
+	var bones: Array[int] = []
+	for b in ["Hips", "Head", "LeftHand", "RightHand", "LeftFoot", "RightFoot"]:
+		bones.append(sk.find_bone(b))
+	var shown := {"prev": [], "step": 0.0, "feet": 0.0}
+	var grab := func() -> void:
+		var now := []
+		for b in bones:
+			now.append(sk.get_bone_global_pose(b).origin)
+		var st := 0.0
+		if not (shown.prev as Array).is_empty():
+			for k in now.size():
+				st = maxf(st, (now[k] as Vector3).distance_to(shown.prev[k]))
+		shown.step = st
+		shown.prev = now
+		# (Skeleton space: the model faces +Z.)
+		shown.feet = ((now[4] as Vector3).z + (now[5] as Vector3).z) * 0.5 - (now[0] as Vector3).z
+	sk.skeleton_updated.connect(grab)
+	var front := -9.0
+	var back := 9.0
+	var pop := 0.0
+	var released := -1
+	for i in 900:
+		await ticks(1)
+		if on_rope[0] < 0:
+			continue
+		if c.state.state == Id.ROPE:
+			if tick[0] - on_rope[0] > 60:
+				front = maxf(front, float(shown.feet))
+				back = minf(back, float(shown.feet))
+		elif released < 0:
+			released = i
+		if released >= 0 and i - released < 40:
+			pop = maxf(pop, float(shown.step))
+		if released >= 0 and i - released > 60:
+			break
+	sk.skeleton_updated.disconnect(grab)
+	info("rope: caught %s, feet from %.2f m behind to %.2f m in front of the hips, letting go: worst %.1f cm/frame about the body, state %s" % [
+			on_rope[0] >= 0, -back, front, pop * 100.0, Id.keys()[c.state.state]])
+	if not check(on_rope[0] >= 0, "caught the rope"):
+		return
+	check(not r.active and r.rope_pass != null, "the body is the animation on the rope (no ragdoll)")
+	check(front > 0.3 and back < -0.05, "the legs pump the swing: kicked out in front %.2f m, back behind %.2f m" % [front, -back])
+	check(released >= 0 and pop < 0.08, "letting go eases back into the animation (worst %.1f cm/frame about the body)" % (pop * 100.0))

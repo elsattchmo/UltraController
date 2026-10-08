@@ -42,6 +42,30 @@ func _traversal_hook(m: UltraMotor, s: MotorState, inp: InputFrame) -> int:
 	return r
 
 
+# ------------------------------------------------------------------ the gun against a wall (V4b)
+
+## How far a held firearm reaches in front of the shoulder (m; item stat "tuck_length", else long guns 0.75, others 0.45).
+static func gun_reach(def: ItemDefinition) -> float:
+	return float(def.stat("tuck_length", 0.75 if def.two_handed else 0.45))
+
+
+## The distance to a wall in the gun's way (m, from the shoulder along where the gun points), or INF when it's clear or
+## no firearm is up. Pure: the simulated eye, the aim + free-aim offset, a ray against the static / dynamic world.
+func tuck_distance(s: MotorState, i: InputFrame) -> float:
+	var def := ItemDB.by_index(s.equipped) if s.held_uid != 0 else null
+	if def == null or def.kind != ItemDefinition.Kind.FIREARM or not is_inside_tree():
+		return INF
+	var dir := UltraActionLayer.gun_dir(i.yaw, i.pitch, s.sway)
+	var right := dir.cross(Vector3.UP)
+	right = right.normalized() if right.length() > 1e-3 else Vector3.RIGHT
+	var shoulder := s.pos + Vector3.UP * (s.height - 0.3) + right * 0.17
+	var reach := gun_reach(def)
+	var q := PhysicsRayQueryParameters3D.create(shoulder, shoulder + dir * reach, UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC)
+	q.exclude = [get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	return shoulder.distance_to(hit.position) if not hit.is_empty() else INF
+
+
 # ------------------------------------------------------------------ going over an edge
 
 ## Walking off an edge standing (motion matching, single player): Sinew has the body from the moment the capsule
@@ -57,10 +81,16 @@ var _prev_grounded := true
 
 
 func simulate(input: InputFrame, delta: float, replaying := false) -> void:
+	# A gun up against a wall can't fire (V4b): the muzzle would be in the wall - the body holds it up out of the way
+	# (MarksmanGunPass) and the trigger does nothing. A query on the state: client and server agree.
+	if input != null and input.has(InputFrame.B_PRIMARY) and tuck_distance(state, input) < INF:
+		input = input.copy()
+		input.buttons &= ~InputFrame.B_PRIMARY
 	super.simulate(input, delta, replaying)
 	if replaying:
 		return
 	_cross_gaps()
+	_predict_landing()
 	var was := _prev_state
 	var was_grounded := _prev_grounded
 	_prev_state = state.state
@@ -70,8 +100,66 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	# (Walking off: the tick the capsule leaves the ground from a ground state - not a jump. The motor only says FALL a
 	# moment later, by when Sinew had already let the body go to the animation for the air.)
 	if was in MOTION_STATES and was_grounded and not state.is_grounded() and state.state in [MotorState.Id.FALL, MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TURN_IN_PLACE] and r != null and r.mm_legs() and offline and is_authority() \
-			and state.stance != MotorState.Stance.CROUCH and _drop_below() >= ledge_height:
-		r.over_edge()
+			and state.stance != MotorState.Stance.CROUCH and not _walking_off(input) and _drop_below() >= ledge_height:
+		r.over_edge(_off_dir())
+
+
+## Going over on purpose: the stick pushes the way the body faces (within 90 deg either side) and it moves that way -
+## stepping, running or striding off forward is a plain drop (the air clip, the legs reaching down, the landing).
+## Only an accident is Sinew's fall: backing or side-stepping off, shoved or drifting off with no stick.
+func _walking_off(input: InputFrame) -> bool:
+	if input == null or input.move.length() < 0.1:
+		return false
+	var facing := Basis(Vector3.UP, state.body_yaw) * Vector3.FORWARD
+	var wish := input.move_world(input.yaw)
+	var hv := Vector3(state.vel.x, 0.0, state.vel.z)
+	return wish.dot(facing) > 0.0 and (hv.length() < 0.2 or hv.normalized().dot(facing) > 0.0)
+
+
+## Which way the body went off an edge (flat): the way it was moving, else away from the ground it stood on (probed
+## round the capsule).
+func _off_dir() -> Vector3:
+	var hv := Vector3(state.vel.x, 0.0, state.vel.z)
+	if hv.length() > 0.15:
+		return hv.normalized()
+	var space := get_world_3d().direct_space_state
+	var away := Vector3.ZERO
+	for k in 8:
+		var d := Vector3.FORWARD.rotated(Vector3.UP, k * TAU / 8.0)
+		var p := state.pos + d * 0.35
+		var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 0.3, p + Vector3.DOWN * 0.5, UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC)
+		q.exclude = [get_rid()]
+		if space.intersect_ray(q).is_empty():
+			away += d
+	return away.normalized() if away.length() > 1e-3 else Vector3.ZERO
+
+
+# ------------------------------------------------------------------ landings
+
+## Falling, where and how hard we'll come down: UltraMotor.predict_impact ({speed, time, point}; {} rising, grounded,
+## coming down in water / on a moving platform). The driver straightens the legs to meet the ground by it.
+var landing := {}
+## A landing at least this hard (m/s down; a standing hop comes down at ~5.6) is met by the body: Sinew powers it a
+## moment before touchdown (MarksmanRagdoll.land_brace) - the upper body physical, carried on into the stop and caught
+## by its muscles, the legs on the landing clip; a very hard one is the balancer's. Softer landings are the animation's.
+## The motor's own hard landing (hard_land_speed, the limp ragdoll) stays the motor's.
+@export var land_brace_speed := 7.0
+## Seconds before touchdown the body goes physical.
+const LAND_BRACE_LEAD := 0.1
+
+
+func _predict_landing() -> void:
+	landing = {}
+	if state.is_grounded() or state.state not in [MotorState.Id.JUMP, MotorState.Id.FALL] or state.vel.y > 0.5 or motor == null:
+		return
+	landing = motor.predict_impact(state)
+	var r := ragdoll as MarksmanRagdoll
+	var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
+	if landing.is_empty() or r == null or not offline or not is_authority():
+		return
+	var v: float = landing.speed
+	if v >= land_brace_speed and v <= profile.hard_land_speed and float(landing.time) <= LAND_BRACE_LEAD:
+		r.land_brace(v)
 
 
 # ------------------------------------------------------------------ gaps: one long stride
@@ -162,9 +250,25 @@ func _drop_below() -> float:
 	return state.pos.y - (hit.position as Vector3).y if not hit.is_empty() else 9.0
 
 
+## A hit on the move (MarksmanRagdoll._stumble_hit) doesn't stop the runner: the body still wants its run, held back
+## only by how bad the hit was (`moving_stumble_sag` x severity at the hit, back over the stumble) - the gait's catching
+## steps then judge the lurch against a run, not a stop (Sinew's push rule asks for nothing at first: every sprinter
+## shot in the leg tripped). -1 = a plain push.
+var moving_stumble := -1.0
+@export var moving_stumble_sag := 0.7
+
+
+func _stumble_command_share() -> float:
+	if moving_stumble < 0.0 or _stumble_t <= 0.0:
+		moving_stumble = -1.0
+		return super._stumble_command_share()
+	return 1.0 - moving_stumble * moving_stumble_sag * _stumble_t / STUMBLE_TIME
+
+
 ## A push under motion matching: the legs go to Sinew's gait for the stumble (its catching steps under physical
 ## motion, the trip rule), then back to the matcher (MarksmanRagdoll.stumble_start).
 func receive_push(dv: Vector3) -> bool:
+	moving_stumble = -1.0          # (a hit on the move sets it again after its push)
 	var r := ragdoll as MarksmanRagdoll
 	var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
 	if not _motion_on and r != null and r.mm_legs() and physical_motion and offline and is_authority() \
@@ -174,6 +278,40 @@ func receive_push(dv: Vector3) -> bool:
 			_motion_on = true
 			_motion_vel = Vector3(state.vel.x, 0.0, state.vel.z)
 	return super.receive_push(dv)
+
+
+# ------------------------------------------------------------------ rope: letting go without a snap
+
+## On a rope the body is drawn along it (UltraCharacter._sync_visual: tilted to the rope, 16 cm behind it); letting go it
+## stood straight up in one frame - the whole skeleton turned up to 60 deg and moved 1.1 m in a frame (Sinew read it as a
+## teleport and snapped the hanging body onto the animation). The tilt and offset ease out over ROPE_LET_GO s instead.
+const ROPE_LET_GO := 0.3
+var _rope_vis := Transform3D()
+var _rope_off := Vector3.INF          ## the rope pose's offset from the upright one at the release (INF: none)
+var _rope_ease := -1.0
+
+
+func _sync_visual(alpha: float) -> void:
+	super._sync_visual(alpha)
+	if visual_root == null:
+		return
+	if state.state == MotorState.Id.ROPE:
+		_rope_vis = visual_root.global_transform
+		_rope_ease = 0.0
+		_rope_off = Vector3.INF
+		return
+	if _rope_ease < 0.0:
+		return
+	var up := visual_root.global_transform
+	if _rope_off == Vector3.INF:
+		_rope_off = _rope_vis.origin - up.origin
+	_rope_ease += get_process_delta_time()
+	var k := smoothstep(0.0, 1.0, _rope_ease / ROPE_LET_GO)
+	if k >= 1.0:
+		_rope_ease = -1.0
+		return
+	var b := _rope_vis.basis.get_rotation_quaternion().slerp(up.basis.get_rotation_quaternion(), k)
+	visual_root.global_transform = Transform3D(Basis(b), up.origin + _rope_off * (1.0 - k))
 
 
 func _new_anim_driver() -> SinewAnimDriver:
