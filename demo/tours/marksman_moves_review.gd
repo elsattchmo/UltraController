@@ -27,11 +27,11 @@ func _build() -> void:
 	steps = [{"teleport": "spawn", "t": 0.6, "yaw": 0, "pitch": -4, "view_tp": true, "slot": 0},
 			{"call": _setup, "t": 1.0}]
 	for item in ["", "rifle", "pistol"]:
-		var stance := "unarmed" if item == "" else item
+		var stance: String = "unarmed" if item == "" else item
 		if only != "" and not stance.contains(only):
 			continue
 		for posture in postures:
-			var buttons := {"stand": 0, "crouch": InputFrame.B_CROUCH, "prone": InputFrame.B_CRAWL | InputFrame.B_CROUCH}[posture]
+			var buttons: int = {"stand": 0, "crouch": InputFrame.B_CROUCH, "prone": InputFrame.B_CRAWL | InputFrame.B_CROUCH}[posture]
 			for d: String in DIRS:
 				var label := "%s_%s_%s" % [stance, posture, d]
 				steps.append({"call": _place.bind(item), "t": 0.1})

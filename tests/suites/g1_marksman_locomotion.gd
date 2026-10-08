@@ -212,3 +212,38 @@ func test_clip_audit() -> void:
 	for msg: String in changes:
 		info("changed: " + msg)
 	check(changes.is_empty(), "the reference clips read as in the baseline (%d changes; deliberate? CLIP_AUDIT_WRITE=1)" % changes.size())
+
+
+## Drawing (and putting away) a rifle mid-walk: the gait switches stance per foot and fades its pose - the
+## pelvis doesn't jump, no planted foot slides.
+func test_draw_while_walking() -> void:
+	load_playground()
+	var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+	await ticks(40)
+	UltraItems.give(c, &"rifle")
+	var sl := _slot(c, &"rifle")
+	var m := SinewMoveMetrics.new(c)
+	m.label = "draw"
+	bot(c).set_steps([{"ticks": 60, "move": Vector2(0, 1), "slot": 0, "yaw": 0.0}, {"ticks": 90, "move": Vector2(0, 1), "slot": sl, "yaw": 0.0},
+			{"ticks": 90, "move": Vector2(0, 1), "slot": 0, "yaw": 0.0}])
+	await ticks(240)
+	m.label = ""
+	m.detach()
+	var pelvis_jump := 0.0
+	var slide := 0.0
+	var prev: Dictionary = {}
+	for f: Dictionary in m.frames:
+		if not prev.is_empty():
+			var b: Dictionary = f.bones
+			var pb: Dictionary = prev.bones
+			var body := (f.pos as Vector3) - (prev.pos as Vector3)
+			pelvis_jump = maxf(pelvis_jump, ((b.Hips as Vector3) - (pb.Hips as Vector3) - body).length())
+			for side in ["Left", "Right"]:
+				var key := "planted_l" if side == "Left" else "planted_r"
+				if f[key] and prev[key]:
+					slide = maxf(slide, minf(((b[side + "Foot"] as Vector3) - (pb[side + "Foot"] as Vector3)).length(),
+							((b[side + "Toes"] as Vector3) - (pb[side + "Toes"] as Vector3)).length()))
+		prev = f
+	info("draw / put away mid-walk: pelvis moves %.1f cm a tick off the body at most, planted foot %.1f mm" % [pelvis_jump * 100.0, slide * 1000.0])
+	check(pelvis_jump < 0.03, "the pelvis doesn't jump (%.1f cm)" % (pelvis_jump * 100.0))
+	check(slide < 0.005, "no planted foot slides (%.1f mm)" % (slide * 1000.0))

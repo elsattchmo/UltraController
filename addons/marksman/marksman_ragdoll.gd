@@ -28,9 +28,8 @@ func _setup_gait() -> void:
 		var g: Dictionary = aset.groups[gi]
 		var built := SinewGaitCycles.build_group(character.anim, parts, g.get("cycles", []), g.get("upper_from", {}), gi)
 		for c in built:
-			# (Crouched: the feet roll onto their balls; side steps never cross - bent knees collide.)
+			# (Crouched, the feet roll onto their balls through the stance.)
 			c["rolling_stance"] = g.get("posture", "") == "crouch"
-			c["keep_apart"] = g.get("posture", "") == "crouch"
 		cycles.append_array(built)
 		var idle := SinewGaitCycles.idle_pose(character.anim, parts, StringName(g.get("idle", "idle")))
 		if not idle.is_empty():
