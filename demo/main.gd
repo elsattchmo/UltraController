@@ -229,7 +229,7 @@ func _on_player_added(p: NetPlayer) -> void:
 
 
 ## Playground loadout: a pistol (slot 1), the carbine (2), the shotgun (3), a bat (4), a machete
-## (5) and ammo (the server
+## (5), Sinew's ball launcher (6, Sinew / Marksman players) and ammo (the server
 ## grants it; owners get it replicated).
 func _give_starting_kit(c: UltraCharacter) -> void:
 	if args.has("no-kit"):
@@ -241,14 +241,15 @@ func _give_starting_kit(c: UltraCharacter) -> void:
 	for mw: StringName in [&"bat", &"machete"]:
 		if ItemDB.get_def(mw):
 			UltraItems.give(c, mw, 1)
+	# Sinew's test tool: balls to knock the dummies about with - in the hotbar (slot 6): given after the ammo and the
+	# medkit it was the tenth item, in the backpack past the 9 hotbar slots, and no key selected it.
+	if c is SinewCharacter and ItemDB.get_def(&"ball_launcher"):
+		UltraItems.give(c, &"ball_launcher", 1)
 	UltraItems.give(c, &"ammo_9mm", 36)
 	UltraItems.give(c, &"ammo_556", 90)
 	if ItemDB.get_def(&"ammo_12g"):
 		UltraItems.give(c, &"ammo_12g", 30)
 	UltraItems.give(c, &"medkit", 1)
-	# Sinew's test tool: balls to knock the dummies about with.
-	if c is SinewCharacter and ItemDB.get_def(&"ball_launcher"):
-		UltraItems.give(c, &"ball_launcher", 1)
 
 
 ## The shooting range bench also has a carbine and a box of 5.56 on it (server-spawned

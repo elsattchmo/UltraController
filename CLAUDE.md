@@ -1600,4 +1600,18 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   barrel's horizontal share 0.4 .. 0.8): full for the pistol clips (it stands their idle's 11 deg hunch up - the sights
   need it), none for a hanging hand; then the chest-follow's band narrows to HOLD_CHEST_BAND_LOOSE 0.25 (else a fast
   turn put the support arm 2.2 cm in). Pistol trunk now -4 .. +1 deg every way (unarmed -15 .. -1).
-
+- **Draw / put away** (`MarksmanDraw`, the user: "a small animation to equip these items"): keyed off the sim's
+  EQUIPPING / HOLSTERING clock (presentation; the UltraController's times). The gun-side hand goes to the item's place
+  (`holster_bone` x `holster_offset` x grip^-1, path bowed out BOW_OUT 16 cm + forward), takes it at GRAB 0.45 of the
+  draw, brings it up as the gun pass rises (`MarksmanDraw.raised`: 0 until then); away: to the place by RELEASE 0.68,
+  then the empty hand back. Meanwhile the held node is put in its place (`post`, top_level) and the body shows unarmed
+  (`MarksmanStance.of` reads `MarksmanDraw.shown_def`: stance sets, matcher, item clips). Upright the hip holster is out
+  of reach: the trunk bends toward it (<= BEND_MAX 0.45). The arms are kept animated through a draw and their Sinew
+  picture faded out fast (`MarksmanRagdoll.DRAW_FADE`: an idle's physical arm, eased over Sinew's 0.3 s, left the hand
+  10 cm short of the pistol). The support hand joins over the last half of the bring-up (`support_w`, also scaling
+  `_post_hands`). Suite g12, tour `marksman_feedback_review -- --draw`.
+- MM foot lock: a walking clip's foot within GROUND_KEEP 18 mm of its rest height (the clip's own, BEFORE the ground
+  fit - fitted onto a ramp the downhill foot read as down mid-swing and crossed the legs) counts as planted beside the
+  database's contact window: the UAL back walk scuffs its feet 2 cm a frame landing and lifting (6 -> 2.2 mm/frame).
+- The ball launcher is given right after the melee weapons (hotbar slot 6): after the ammo and medkit it was the tenth
+  item, in the backpack past Inventory.HOTBAR 9, and no key selected it (g0 checks).

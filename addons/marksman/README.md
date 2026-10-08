@@ -150,6 +150,11 @@ The ANIMATION_GUIDE gains a section on stance sets.
 - Reloads: Rifle_Reload / SHB_Reloading time-scaled to `reload_commit`; UAL Pistol_Reload.
 - SHB_FiringRifle for automatic fire.
 - Equip / holster blend into the stance switch.
+- Draw / put away (done, `MarksmanDraw`, suite g12): the hand goes to the item's holster / sling spot (its
+  `holster_bone` x `holster_offset`, where the stowed copy shows), takes it at GRAB 45 % of `equip_time`, brings it up
+  (bowed out round the body; the trunk bends toward a hip holster out of reach); putting away is the same backwards,
+  let go at RELEASE 68 % of the holster time. Until the hand has it the body is unarmed (`shown_def`: stance, item
+  clips) and the item shows in its place; the arms are animated through it (a physical idle arm trailed 10 cm).
 - Tests:
   - barrel recovers within 0.5° in 0.3 s;
   - muzzle on the barrel axis;
@@ -249,7 +254,8 @@ Marksman makes all of it **visible through the body**: the gun pass drives the a
 - CLAUDE.md section (kept up per change), ANIMATION_GUIDE updates, known issues (below).
 
 ## Known issues
-- The unarmed back walk (UAL Walk_Backwards) drifts its planted feet ~6 mm a frame under motion matching (g10 KNOWN).
+- The unarmed back walk (UAL Walk_Backwards) scuffs its feet as they land and lift: 2.1-2.4 mm a frame under motion
+  matching after the foot lock holds a foot while the clip has it flat (`GROUND_KEEP`; it was 6).
 - Crouched backward / left under motion matching: the clips roll on the balls of the feet, so g10 can't measure slide.
 - Aiming down the sights leaning right, the eye gets 19 cm out against 29 leaning left (the stock sits on the right).
 

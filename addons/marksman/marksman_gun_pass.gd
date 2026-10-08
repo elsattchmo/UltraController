@@ -109,6 +109,7 @@ func _equipment() -> UltraEquipmentVisual:
 ## pose last shown (the equipment re-attached the gun at once; solved straight onto the new side the body popped 27 cm).
 const SWITCH_TIME := 0.3
 var _switch_t := SWITCH_TIME
+var draw := MarksmanDraw.new()
 var _switch_from: Array[Transform3D] = []
 var _last_pose: Array[Transform3D] = []
 
@@ -123,6 +124,9 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	var eq := _equipment()
 	if strike_w > 0.001 and eq and eq.held_def and eq.held_node and eq.held_def.two_handed and two and character.state.held_uid != 0:
 		_strike_support(sk, pose, eq, eq.held_def)
+		changed = true
+	# (Drawing / putting away: the hand to the holster / sling and back - MarksmanDraw.)
+	if draw.apply(self, sk, pose):
 		changed = true
 	if _switch_t < SWITCH_TIME and _switch_from.size() == pose.size():
 		_switch_t += clampf(mod.get_process_delta_time(), 0.0, 0.1)
@@ -158,7 +162,7 @@ func _apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	# (Reloading the gun stays in the hands - brought in and loaded by the body, MarksmanGunPass reload section; with one
 	# working arm the gun is pinned against the body while the hand loads it: _one_hand_reload.)
 	var reloading := armed and st.action == UltraActionLayer.Action.RELOADING and def.kind == ItemDefinition.Kind.FIREARM
-	var want := (1.0 if reloading else UltraActionLayer.raised(st) * (1.0 - st.gun_low)) if armed else 0.0
+	var want := (1.0 if reloading else MarksmanDraw.raised(st, def) * (1.0 - st.gun_low)) if armed else 0.0
 	var drv := character.anim as UltraAnimDriver
 	if drv and drv.prone_transitioning():
 		want = 0.0             # (getting down to prone / up: the transition clip carries the gun)
@@ -436,6 +440,7 @@ var arm_clear := MarksmanArmClear.new()
 func apply_post(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 	_post_hands(mod, sk)
 	_place_pinned(sk)
+	draw.post(self, sk)
 	# Last: the arms out of the body (the hands where they are).
 	arm_clear.apply(sk)
 
@@ -480,7 +485,7 @@ func _post_hands(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 	elif _letgo and post_off < REGRIP:
 		_letgo = false
 	grip_w = move_toward(grip_w, 0.0 if _letgo else 1.0, dt / REGRIP_TIME)
-	var k := smoothstep(0.0, 1.0, grip_w) * weight
+	var k := smoothstep(0.0, 1.0, grip_w) * weight * draw.support_w
 	if k <= 0.001:
 		return
 	_two_bone(pose, ids[1], ids[2], ids[3], target, k)

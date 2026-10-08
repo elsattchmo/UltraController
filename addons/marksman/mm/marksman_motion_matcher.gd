@@ -74,7 +74,7 @@ const ARMS := {
 
 ## The set for a character now: its stance, crouched or not.
 static func key_for(c: UltraCharacter) -> String:
-	var st := MarksmanStance.of_item(c.held_def())
+	var st := MarksmanStance.of(c)
 	return st + "_crouch" if c.state.stance == MotorState.Stance.CROUCH else st
 
 

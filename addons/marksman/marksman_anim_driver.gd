@@ -827,7 +827,8 @@ func _process(delta: float) -> void:
 	super._process(delta)
 	if tree == null:
 		return
-	_stance = MarksmanStance.of_item(held_def)
+	var ch := get_parent() as UltraCharacter
+	_stance = MarksmanStance.of(ch) if ch else MarksmanStance.of_item(held_def)
 	rifle_w = _ease_w(&"st_rifle", 1.0 if _stance == "rifle" else 0.0, delta)
 	pistol_w = _ease_w(&"st_pistol", 1.0 if _stance == "pistol" else 0.0, delta)
 	tree.set(GROUND + "st_rifle/blend_amount", rifle_w)
@@ -896,7 +897,9 @@ func _crawl_ref() -> float:
 ## The held item's own upper-body clips only for items without a stance (melee, tools): a gun's stance
 ## shows its arms through the stance idles and the gait's cycles.
 func _drive_item_layer(delta: float) -> void:
-	if MarksmanStance.of_item(held_def) != "unarmed":
+	var ch := get_parent() as UltraCharacter
+	# (A gun's stance holds it; anything on its way out of / back into its place isn't held yet: MarksmanDraw.)
+	if MarksmanStance.of_item(held_def) != "unarmed" or (ch and not MarksmanDraw.in_hand(ch.state, held_def)):
 		item_w = _ease_w(&"item", 0.0, delta)
 		tree.set("parameters/item/blend_amount", item_w)
 		return

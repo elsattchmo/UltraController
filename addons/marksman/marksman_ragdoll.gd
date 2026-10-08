@@ -440,12 +440,19 @@ func _part_wants_physics(i: int, want: bool) -> bool:
 		return false           # (getting down to prone / up: the clip, not a physical upper body sagging over it)
 	if want and armed_hold() and String(parts[i].name) in ARM_PARTS:
 		return false
+	# (Drawing / putting away: the hand goes where the item is - a physical arm trailed the quick pistol draw 10 cm short.)
+	# The arm comes back to the animation quickly too (Sinew eases it over 0.3 s: the pistol's reach lasts 0.16 s).
+	if character and MarksmanDraw.active(character.state, character.held_def()) and String(parts[i].name) in ARM_PARTS:
+		part_w[i] = maxf(part_w[i] - DRAW_FADE, 0.0)
+		return false
 	return want
 
 
 ## V6: an arm that's out (crippled, or what's left of it once severed) hangs: physical in every state at LIMP_TONE.
 ## The shoulder stays the animation's (the clavicle carries the chest's motion).
 const LIMP_TONE := 0.08
+## Drawing / putting away, a physical arm's picture goes back to the animation this much a tick (on top of Sinew's own).
+const DRAW_FADE := 0.2
 const LIMP_PARTS := ["UpperArm", "LowerArm", "Hand"]
 var _limp: Dictionary = {}           ## part -> true while held limp (its tone restored when the arm heals)
 

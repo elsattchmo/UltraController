@@ -26,6 +26,20 @@ func _build() -> void:
 							"shot": "strike_%s_%s_%d" % [item, v[0], k]})
 				steps.append({"t": 600.0, "until": _ticks.bind(200), "yaw": 0, "pitch": 0, "view_tp": v[0] != "fp"})
 		return
+	# Drawing and putting away (--draw): pistol from the hip holster, rifle and bat off the back - from the right-front.
+	if "--draw" in OS.get_cmdline_user_args():
+		for item in ["pistol", "rifle", "bat"]:
+			steps.append({"call": _arm.bind("", Vector3(2.2, 1.3, -1.6), false), "t": 600.0, "until": _ticks.bind(60), "yaw": 0, "pitch": 0, "view_tp": true})
+			steps.append({"call": _pick.bind(item), "t": 600.0, "until": _ticks.bind(61), "yaw": 0, "pitch": 0, "view_tp": true})
+			for k in 10:
+				steps.append({"t": 600.0, "until": _ticks.bind(62 + k * 4), "yaw": 0, "pitch": 0, "view_tp": true,
+						"shot": "draw_%s_%d" % [item, k]})
+			steps.append({"t": 600.0, "until": _ticks.bind(140), "yaw": 0, "pitch": 0, "view_tp": true})
+			for k in 8:
+				steps.append({"t": 600.0, "until": _ticks.bind(142 + k * 4), "yaw": 0, "pitch": 0, "view_tp": true, "slot": 0,
+						"shot": "away_%s_%d" % [item, k]})
+			steps.append({"t": 600.0, "until": _ticks.bind(200), "yaw": 0, "pitch": 0, "view_tp": true, "slot": 0})
+		return
 	# Lean with the rifle: from behind and in first person.
 	for lean: Array in [["right", InputFrame.B_LEAN_R], ["left", InputFrame.B_LEAN_L]]:
 		for v: Array in [["back", Vector3(0, 1.6, 2.0)], ["fp", Vector3.ZERO]]:
@@ -62,12 +76,16 @@ func _setup() -> void:
 	main.add_child(_cam)
 	_cam.fov = 45.0
 	_cam.current = true
-	for item: StringName in [&"rifle", &"pistol"]:
+	for item: StringName in [&"rifle", &"pistol", &"bat"]:
 		UltraItems.give(_c, item)
 	for i in _c.inventory.size():
 		var it := _c.inventory.get_slot(i)
 		if it:
 			_slots[String(it.def_id)] = i + 1
+
+
+func _pick(item: String) -> void:
+	_slot = int(_slots.get(item, 0))
 
 
 func _arm(item: String, off: Vector3, fp: bool) -> void:
