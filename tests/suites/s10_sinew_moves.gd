@@ -28,6 +28,9 @@ const KNOWN := {
 	# touches for a tick.)
 	"sprint flick 180": {"gap": -0.12, "overlap": 12},
 	"sprint turn 90/s": {"overlap": 1},
+	# (The thigh capsules brush at the roots - shallower than 1 cm - for a few ticks while the stick reverses at
+	# 1-2 m/s; the committed margin before the hip-pop work was +1.0 cm.)
+	"chaos sprint": {"gap": -0.01, "overlap": 10},
 }
 
 

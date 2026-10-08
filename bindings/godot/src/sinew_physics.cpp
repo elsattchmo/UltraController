@@ -748,6 +748,18 @@ void SinewPhysics::character_gait_reset(int character, const Transform3D& root) 
 	}
 }
 
+void SinewPhysics::character_gait_set_pelvis_offset(int character, const Vector3& offset) {
+	auto it = _gaits.find(character);
+	if (it != _gaits.end()) {
+		it->second->set_pelvis_offset(to_sinew(offset));
+	}
+}
+
+Vector3 SinewPhysics::character_gait_pelvis_offset(int character) const {
+	auto it = _gaits.find(character);
+	return it != _gaits.end() ? to_godot(it->second->pelvis_offset()) : Vector3();
+}
+
 void SinewPhysics::character_gait_reseat_feet(int character) {
 	auto it = _gaits.find(character);
 	if (it != _gaits.end()) {
@@ -1005,6 +1017,8 @@ void SinewPhysics::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("character_gait_set_group", "character", "group", "blend_s"), &SinewPhysics::character_gait_set_group, DEFVAL(0.35));
 	ClassDB::bind_method(D_METHOD("character_gait_reset", "character", "root"), &SinewPhysics::character_gait_reset);
 	ClassDB::bind_method(D_METHOD("character_gait_reseat_feet", "character"), &SinewPhysics::character_gait_reseat_feet);
+	ClassDB::bind_method(D_METHOD("character_gait_set_pelvis_offset", "character", "offset"), &SinewPhysics::character_gait_set_pelvis_offset);
+	ClassDB::bind_method(D_METHOD("character_gait_pelvis_offset", "character"), &SinewPhysics::character_gait_pelvis_offset);
 	ClassDB::bind_method(D_METHOD("character_gait_update", "character", "root", "velocity", "dt", "command", "home_feet"),
 			&SinewPhysics::character_gait_update, DEFVAL(Variant()), DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("character_gait_stepping", "character"), &SinewPhysics::character_gait_stepping);

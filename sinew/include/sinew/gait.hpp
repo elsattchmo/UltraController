@@ -115,6 +115,8 @@ struct GaitSettings {
 	float side_settle = 0.3f, side_settle_angle = 0.45f;   ///< a side step follows its clip's path freely after this long (s) within this of sideways (rad)
 	float teleport_dist = 0.6f;                 ///< the root moving further than this in one update = a teleport (m)
 	float drop_snap_rate = 1.0f, drop_snap_speed = 3.0f;   ///< the hips' drop never changes faster than rate + speed x this (m/s)
+	float drop_release_rate = 0.6f, drop_release_speed = 1.2f;   ///< .. and comes back up no faster than this (m/s)
+	float pelvis_offset_ease = 0.25f;           ///< a pelvis offset handed over from a clip eases away with this time constant (s)
 	float drop_fall_clip = 0.4f;                ///< walking on a clip's legs: the hips come back up this fast (m/s)
 	/// 8-way: the longest step backing / sideways as a share of the forward one (the cadence rises
 	/// to make up the speed: short quick side-steps, never a lunge).
@@ -226,6 +228,11 @@ public:
 	/// The hips' yaw off the facing this tick (rad, + left): standing, they sit between feet and facing.
 	float pelvis_turn() const { return _pelvis_turn; }
 	float pelvis_drop() const { return _shown_drop; }   ///< how far the hips are lowered to reach the feet (m)
+	/// The pelvis shown this far off its own place (world, m) - a hand-over from a clip that held the hips elsewhere
+	/// (an idle's hips sit back of the feet): the legs reach the planted feet from there, and it eases away by itself
+	/// over `pelvis_offset_ease` s.
+	void set_pelvis_offset(const Vec3& off) { _pelvis_off = off; }
+	Vec3 pelvis_offset() const { return _pelvis_off; }
 	bool feet_pivoting() const { return _pivoting; }   ///< a planted foot is swivelling in place
 	float legs_gap() const { return _legs_gap; }       ///< the posed legs' closest approach as capsules (m; < 0 = through)
 	/// Both feet down on their standing spots, facing as the stance does (the clip's own standing legs match).
@@ -393,6 +400,8 @@ private:
 	float _legs_gap = 1.0f;
 	bool _pivoting_last[2] = { false, false };
 	float _drop = 0.0f, _shown_drop = 0.0f, _dt = 1.0f / 60.0f;
+	Vec3 _pelvis_off{};
+	float _step_w = 0.0f;   ///< stepping, eased (the cycle pose's share at low speed)
 	Vec3 _cmd, _cop, _trim, _drive_acc;
 	float _pelvis_h = 0.95f;     ///< last pelvis height over the ground (the pendulum's length)
 	bool _has_cmd = false;

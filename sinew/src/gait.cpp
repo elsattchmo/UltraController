@@ -871,6 +871,8 @@ void Gait::reset(const Transform& root) {
 	_warp_back = false;
 	_drop = 0.0f;
 	_shown_drop = 0.0f;
+	_pelvis_off = Vec3{};
+	_step_w = 0.0f;
 	_drive_acc = Vec3{};
 	_trim = Vec3{};
 	_lean = _lean_v = _acc = _prev_vel = Vec3{};
@@ -937,7 +939,9 @@ void Gait::update(const GaitInput& in) {
 		_vel = flat(in.velocity, up());
 	}
 	step_feet(in.dt);
+	_step_w = _stepping ? std::min(1.0f, _step_w + in.dt / 0.15f) : std::max(0.0f, _step_w - in.dt / 0.3f);
 	update_lean(in.dt);
+	_pelvis_off = _pelvis_off * std::exp(-std::max(in.dt, 0.0f) / std::max(_s.pelvis_offset_ease, 1e-3f));
 	std::vector<Quat> local;
 	Quat pm;
 	float ph;
@@ -1704,8 +1708,9 @@ void Gait::base_pose_group(int group, std::vector<Quat>& local, Quat& pelvis_mod
 	ref /= cum;
 	float w = 1.0f;
 	if (_speed < ref) {
-		w = _stepping ? std::clamp(_speed / std::max(ref, 0.05f), 0.0f, 1.0f) : 0.0f;
-		w = std::max(w, _stepping ? 0.35f : 0.0f);   // stepping on the spot still lifts the feet like a walk
+		// (Stepping on the spot still lifts the feet like a walk. Eased in and out with the stepping: as a switch,
+		// stopping dropped the hips 7-8 cm in a frame crouched - the crouch idle kneels lower than the crouch walk.)
+		w = _step_w * std::max(std::clamp(_speed / std::max(ref, 0.05f), 0.0f, 1.0f), 0.35f);
 	}
 	for (size_t k = 0; k < n; ++k) {
 		local[k] = normalized(slerp(local[k], acc[k], w));
@@ -1917,7 +1922,7 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 	// Knees bend more the faster it goes.
 	const float bend = _cl.ok ? 0.0f : _s.knee_bend * smoothstep(0.0f, _s.walk_speed, _stepping ? _speed : 0.0f) + (_s.knee_bend_run - _s.knee_bend) * run +
 			(_s.knee_bend_sprint - _s.knee_bend_run) * smoothstep(_s.run_speed, _s.sprint_speed, _speed);
-	Vec3 P = _root.p + U * (pelvis_h - bend);
+	Vec3 P = _root.p + U * (pelvis_h - bend) + _pelvis_off;
 	if (procedural) {
 		P += U * (-_s.bob * m * std::cos(4.0f * PI * _phase) - _s.run_crouch * run);
 		P += left * (_s.sway * m * std::sin(2.0f * PI * _phase));
@@ -1975,6 +1980,33 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		}
 		drop = std::max(drop, dz - allowed);
 	}
+	// A foot coming down: the hips lower into its foothold through the second half of the swing (where the
+	// hip will be at touchdown), as a heel strike does - not all at once when it lands (a walk's first step
+	// dropped them 7 cm in a tick, the hip-pop at every start).
+	if (_stepping && _speed > 0.3f) {
+		for (int i = 0; i < 2; ++i) {
+			const Foot& f = _feet[i];
+			if (_leg[i] < 0 || !f.swinging) {
+				continue;
+			}
+			const float k = smoothstep(0.4f, 1.0f, swing_s(f, f.p));
+			if (k <= 0.0f) {
+				continue;
+			}
+			const LimbInfo& l = _limbs.limb(LimbId(_leg[i]));
+			const float L = (l.upper_len + l.lower_len) * reach_share;
+			const float t_rem = (1.0f - f.p) / std::max(_cadence * 0.5f, 0.1f);
+			const Vec3 hip = P + rotate(Pq, rig.parts[size_t(l.upper)].frame_parent.p) + _vel * t_rem;
+			const Vec3 d = hip - f.target;
+			const float dh = length(flat(d, U));
+			if (dh > 0.98f * L) {
+				continue;
+			}
+			const float need = dot(d, U) - std::sqrt(std::max(L * L - dh * dh, 0.0f));
+			const float drop_max = _speed > 2.0f ? _s.run_drop_max : _s.walk_drop_max;
+			drop = std::max(drop, std::min(need, drop_max) * k);
+		}
+	}
 	drop = std::min(drop, _s.max_drop);
 	// Eased: the hips sink into a stride's stretch and stay low through it (no dip at every step);
 	// what's beyond the eased drop by more than the slack is taken at once (a leg must reach).
@@ -1991,7 +2023,10 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 	// (Rate-limited as a whole: a start's first stretched foot yanked the hips down 20 cm in a tick.)
 	const float want_drop = _drop + std::max(0.0f, drop - _drop - (_cl.ok ? 0.0f : _s.drop_slack));
 	const float snap = (_s.drop_snap_rate + _s.drop_snap_speed * _speed) * _dt;   // (a sprint's push-off needs it quick)
-	_shown_drop = _cl.ok ? std::clamp(want_drop, _shown_drop - snap, _shown_drop + snap) : want_drop;
+	// (Back up gently: a leg must reach its foot now, but nothing needs the hips up at once - a stretched foot
+	// lifting let them spring up 7.8 cm in a tick at a walk.)
+	const float release = (_s.drop_release_rate + _s.drop_release_speed * _speed) * _dt;
+	_shown_drop = _cl.ok ? std::clamp(want_drop, _shown_drop - release, _shown_drop + snap) : want_drop;
 	P -= U * _shown_drop;
 	// Forward kinematics of the base pose.
 	_pose[0] = Transform{ P, Pq };

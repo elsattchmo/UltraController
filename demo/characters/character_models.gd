@@ -10,7 +10,7 @@ const ZOMBIE_BODY := "res://assets/characters/zombie/zombie_body_profile.tres"
 const CONTROLLERS := [
 	{"key": "ultra", "title": "UltraController", "blurb": "the controller as it is"},
 	{"key": "sinew", "title": "Sinew", "blurb": "physics body (in development)"},
-	{"key": "marksman", "title": "Marksman", "blurb": "Sinew body + rifle / pistol packs (in development)"},
+	{"key": "marksman", "title": "Marksman", "blurb": "Sinew body with 8-way stance locomotion (unarmed / rifle / pistol; standing, crouched, prone). Gun handling in progress"},
 ]
 const MODELS := [
 	{"key": "mannequin", "title": "Mannequin", "blurb": "Quaternius mannequin"},

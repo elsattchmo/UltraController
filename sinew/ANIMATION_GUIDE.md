@@ -181,6 +181,24 @@ What made feet twist or spin, and what fixed each:
 - **Teleports.** `SinewRagdoll.moved()` resets the gait on the next update, whatever the distance. A teleport
   onto the same spot facing another way kept the old footholds.
 
+## Hips that never jump
+
+g1 `test_feet_pivot_not_twist` also measures the hips' movement off the body's own motion, held to 4 cm a frame.
+Before, they jumped 6-9 cm. The causes:
+- **Clip ↔ gait hand-over.** An idle clip holds the hips about 9 cm back of where the gait centres them.
+  - Fix: while the clip has the legs, the gait carries the clip's hips (`Gait::set_pelvis_offset`).
+  - Taking the legs back, it starts from those hips and eases the offset away (`pelvis_offset_ease` 0.25 s).
+  - The legs reach the planted feet from there, so the feet don't move.
+- **Heel strike.** A foothold far ahead dropped the hips 7 cm in the tick the foot landed.
+  - Fix: the hips lower into a swinging foot's foothold through the second half of its swing, using where the
+    hip will be at touchdown.
+- **A stretched foot lifting.** The drop sprang back 7.8 cm in a tick.
+  - Fix: the shown drop goes down as fast as a leg needs, but comes back up at most `drop_release_rate` +
+    `drop_release_speed` x speed (0.6 + 1.2 x m/s).
+- **Stopping or starting to step.** The cycle pose's share of the base pose switched between 35 % and 0 % (8 cm
+  crouched: the crouch idle kneels lower than the crouch walk).
+  - Fix: it is eased (`_step_w`: in over 0.15 s, out over 0.3 s).
+
 ## Known open problems
 
 - A 180° flick at a run (s10 `sprint flick 180`): the feet swap sides in the air and the legs pass through each

@@ -288,6 +288,13 @@ func _update_gait(dt: float) -> void:
 	elif _legs_w() >= 1.0:
 		_clip_anchor = []
 		_reseated = false
+	# While the clip holds the legs the gait carries the clip's hips (an idle's sit ~9 cm back of the feet): taking
+	# the legs back it starts from them and eases the offset away - the hips jumped 9 cm in a frame.
+	if _reseated and _legs_w() <= 0.0 and gait_now.size() == parts.size() and modifier != null \
+			and modifier.clip_pose.size() == parts.size() and world.physics.has_method("character_gait_set_pelvis_offset"):
+		var clip_p: Vector3 = (character.skeleton.global_transform * modifier.clip_pose[0]).origin
+		var off: Vector3 = world.physics.call("character_gait_pelvis_offset", _id)
+		world.physics.call("character_gait_set_pelvis_offset", _id, off + clip_p - gait_now[0].origin)
 
 
 ## The clip's feet (world) as they stood when the clip began taking the legs (re-set when it has them all and
