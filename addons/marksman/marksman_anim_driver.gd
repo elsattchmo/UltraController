@@ -11,6 +11,8 @@ extends SinewAnimDriver
 ## Stance weights shown now (eased): rifle and pistol over unarmed.
 var rifle_w := 0.0
 var pistol_w := 0.0
+## The rifle's aim clip over its idle (how far the gun is up, eased).
+var aim_w := 0.0
 var _stance := "unarmed"
 
 
@@ -20,21 +22,25 @@ func _build_sinew() -> AnimationNodeBlendTree:
 	# --- ground: the unarmed blend (Sinew's) with the armed stances' idles over it
 	var g := loco.get_node("ground") as AnimationNodeBlendTree
 	g.disconnect_node("output", 0)
-	_stance_chain(g, "move_ts", &"r_idle", &"p_idle", Vector2(450, 0))
+	_stance_chain(g, "move_ts", &"r_idle", &"r_aim", &"p_idle", Vector2(450, 0))
 	# --- crouched: the stance's crouch idle over the unarmed still / walk mix, as on the ground (the gait shows
 	# the legs; moving, its upper body comes in by speed). Over "still" only, a start showed the unarmed crouch
 	# walk's arms until the gait's upper body was in: the rifle dipped.
 	var c := loco.get_node("crouch") as AnimationNodeBlendTree
 	c.disconnect_node("output", 0)
-	_stance_chain(c, "mix", &"rc_idle", &"pc_idle", Vector2(650, 60))
+	_stance_chain(c, "mix", &"rc_idle", &"rc_aim", &"pc_idle", Vector2(650, 60))
 	# --- prone: 8 ways
 	loco.replace_node("prone", _build_prone())
 	return root
 
 
-## `src` -> Blend2 (rifle idle) -> Blend2 (pistol idle) -> output.
-func _stance_chain(bt: AnimationNodeBlendTree, src: String, rifle_role: StringName, pistol_role: StringName, at: Vector2) -> void:
-	bt.add_node("rifle_src", _role_node(rifle_role), at + Vector2(0, 140))
+## `src` -> Blend2 (rifle idle / aim, by how far the gun is up) -> Blend2 (pistol idle) -> output.
+func _stance_chain(bt: AnimationNodeBlendTree, src: String, rifle_role: StringName, rifle_aim: StringName, pistol_role: StringName, at: Vector2) -> void:
+	bt.add_node("rifle_idle", _role_node(rifle_role), at + Vector2(-200, 100))
+	bt.add_node("rifle_aim", _role_node(rifle_aim if _role_anim(rifle_aim) else rifle_role), at + Vector2(-200, 200))
+	bt.add_node("rifle_src", AnimationNodeBlend2.new(), at + Vector2(0, 140))
+	bt.connect_node("rifle_src", 0, "rifle_idle")
+	bt.connect_node("rifle_src", 1, "rifle_aim")
 	bt.add_node("pistol_src", _role_node(pistol_role), at + Vector2(0, 260))
 	bt.add_node("st_rifle", AnimationNodeBlend2.new(), at + Vector2(200, 0))
 	bt.add_node("st_pistol", AnimationNodeBlend2.new(), at + Vector2(400, 0))
@@ -123,6 +129,11 @@ func _process(delta: float) -> void:
 	tree.set(GROUND + "st_pistol/blend_amount", pistol_w)
 	tree.set(LOCO + "crouch/st_rifle/blend_amount", rifle_w)
 	tree.set(LOCO + "crouch/st_pistol/blend_amount", pistol_w)
+	# (The rifle's aim clip while the gun is up - the gun pass then points it; the idle carried low for a sprint.)
+	var up := held_def != null and (UltraActionLayer.is_up(item_action) or item_action == UltraActionLayer.Action.EQUIPPING)
+	aim_w = _ease_w(&"st_aim", item_ready_pose if up else 0.0, delta)
+	tree.set(GROUND + "rifle_src/blend_amount", aim_w)
+	tree.set(LOCO + "crouch/rifle_src/blend_amount", aim_w)
 	if _cur_loco == "prone":
 		_mk_drive_prone(delta)
 
