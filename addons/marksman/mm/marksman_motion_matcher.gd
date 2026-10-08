@@ -199,7 +199,7 @@ func _search(wish: Vector2, speed: float, force: bool) -> void:
 	if follow != null and follow.db != null and follow.frame >= 0 and (clip < 0 or follow.switched):
 		q = db.query_follow(follow.db, follow.frame, traj, Vector2(bv.x, bv.z))
 	var t0 := Time.get_ticks_usec()
-	var r := db.search(q, clip, time)
+	var r := db.search(q, clip, time, 0.2, _speed_fit(speed) if follow != null else PackedByteArray())
 	search_us = maxi(search_us, Time.get_ticks_usec() - t0)
 	if OS.get_environment("MM_Q") != "" and Engine.get_physics_frames() % 30 < 6:
 		var per := {}
@@ -225,6 +225,24 @@ func _search(wish: Vector2, speed: float, force: bool) -> void:
 		time = db.frame_time[best]
 		switched = true
 		switches += 1
+
+
+## The limp layer's candidates: a moving clip only where it would play at FIT_RATE of its own speed (its features are
+## normalised over a few clips, so the speed hardly counts: the 1.59 m/s injured run backwards won at 0.75 m/s and its
+## small sway hid the limp); standing clips always. Empty (no filter) when nothing moving fits.
+const FIT_RATE := Vector2(0.7, 1.4)
+
+
+func _speed_fit(speed: float) -> PackedByteArray:
+	var ok := PackedByteArray()
+	ok.resize(db.clips.size())
+	var any := false
+	for i in db.clips.size():
+		var cs: float = db.clips[i].speed
+		var fits := cs < 0.15 or (speed >= cs * FIT_RATE.x and speed <= cs * FIT_RATE.y)
+		ok[i] = 1 if fits else 0
+		any = any or (fits and cs >= 0.15)
+	return ok if any else PackedByteArray()
 
 
 ## Stick direction (world xz, unit or zero).

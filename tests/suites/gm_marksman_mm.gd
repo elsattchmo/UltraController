@@ -525,7 +525,15 @@ func test_limp_in_stages() -> void:
 			var sk := c.skeleton
 			var gap := [9.0]
 			var lurch := [9.0, -9.0]
+			var clips := {}
 			var grab := func() -> void:
+				var mm: MarksmanMotionMatcher = drv.mm_pass.matcher if drv.mm_pass else null
+				if mm and mm.clip >= 0:
+					var cn := String(mm.db.clips[mm.clip].name)
+					clips[cn] = int(clips.get(cn, 0)) + 1
+				if drv.mm_limp and drv.mm_limp.clip >= 0 and drv.limp_w > 0.05:
+					var ln := "limp:" + String(drv.mm_limp.db.clips[drv.mm_limp.clip].name)
+					clips[ln] = int(clips.get(ln, 0)) + 1
 				var b := {}
 				for n in SinewMoveMetrics.BONES:
 					var bi := sk.find_bone(n)
@@ -544,8 +552,8 @@ func test_limp_in_stages() -> void:
 			sk.skeleton_updated.disconnect(grab)
 			var ratio := float(lurch[1]) - float(lurch[0])                   # the head's sideways swing over the hips (m)
 			var want := UltraInjury.leg_damage(c.state, true)
-			rows.append("%-9s left thigh %3.0f %%: damage %.2f, limp clip layer %.2f, procedural %.2f, head lurch %.1f cm, speed %.2f m/s, legs gap %.1f cm" % [
-					dir[0], hp, want, drv.limp_w, drv.mm_pass.limp_amount, ratio * 100.0, Vector2(c.state.vel.x, c.state.vel.z).length(), gap[0] * 100.0])
+			rows.append("%-9s left thigh %3.0f %%: damage %.2f, limp clip layer %.2f, procedural %.2f, head lurch %.1f cm, speed %.2f m/s, legs gap %.1f cm, clips %s" % [
+					dir[0], hp, want, drv.limp_w, drv.mm_pass.limp_amount, ratio * 100.0, Vector2(c.state.vel.x, c.state.vel.z).length(), gap[0] * 100.0, clips])
 			ratios.append(ratio)
 			check(gap[0] >= -0.02, "%s, left thigh at %.0f %%: legs clear (%.1f cm)" % [dir[0], hp, gap[0] * 100.0])
 			chars.erase(c)

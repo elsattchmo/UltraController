@@ -186,7 +186,8 @@ func query_follow(other: MarksmanMMDatabase, ofi: int, traj: PackedFloat32Array,
 
 ## Best frame for q: [index, cost]. Frames of `skip_clip` within `skip_t` s of `skip_time` are left out (a match
 ## that is where we already are is no match). Non-looping clips: not the last 0.2 s.
-func search(q: PackedFloat32Array, skip_clip := -1, skip_time := 0.0, skip_t := 0.2) -> Array:
+## `ok` (optional, per clip): only clips with a non-zero entry are candidates.
+func search(q: PackedFloat32Array, skip_clip := -1, skip_time := 0.0, skip_t := 0.2, ok := PackedByteArray()) -> Array:
 	var best := -1
 	var best_c := INF
 	var n := size()
@@ -207,6 +208,8 @@ func search(q: PackedFloat32Array, skip_clip := -1, skip_time := 0.0, skip_t := 
 		if c >= best_c:
 			continue
 		var ci := frame_clip[fi]
+		if not ok.is_empty() and ok[ci] == 0:
+			continue
 		if ci == skip_clip:
 			var cl := clips[ci]
 			var dt := absf(frame_time[fi] - skip_time)
@@ -230,20 +233,32 @@ func cost(q: PackedFloat32Array, fi: int) -> float:
 
 
 ## Ground velocity of an in-place clip (m/s, skeleton xz): the lower foot's slide back while it is down, averaged.
+## Its way = the mean slide; its speed = the MEDIAN slide along that way (as tools/anim_measure.gd). Each foot is judged
+## against its OWN floor. A limping clip's hurt foot stands higher and drags low through its swing: against the lower
+## floor its stance was dropped, and averaged its forward drag cancelled the stance - Injured_Walk_Back read 0.29 m/s
+## for 0.70, so the limp layer never picked it.
 func _ground_velocity(P: Dictionary, n: int, dt: float) -> Vector2:
-	var miny := minf(_min_y(P.lt), _min_y(P.rt))
+	var floor_y := {"lt": _min_y(P.lt), "rt": _min_y(P.rt)}
 	var sum := Vector2.ZERO
-	var k := 0
+	var slides: Array[Vector2] = []
 	for i in n:
-		var lo := "lt" if (P.lt[i] as Vector3).y <= (P.rt[i] as Vector3).y else "rt"
+		var lo := "lt" if (P.lt[i] as Vector3).y - float(floor_y.lt) <= (P.rt[i] as Vector3).y - float(floor_y.rt) else "rt"
 		var p: Vector3 = P[lo][i]
 		var q: Vector3 = P[lo][i + 1]
-		if p.y > miny + 0.04:
+		if p.y > float(floor_y[lo]) + 0.04:
 			continue
-		sum -= Vector2(q.x - p.x, q.z - p.z) / dt
-		k += 1
-	var v := sum / maxi(k, 1)
-	return v if v.length() > 0.08 else Vector2.ZERO
+		var v := -Vector2(q.x - p.x, q.z - p.z) / dt
+		sum += v
+		slides.append(v)
+	var mean_v := sum / maxi(slides.size(), 1)
+	if mean_v.length() <= 0.08:
+		return Vector2.ZERO
+	var way := mean_v.normalized()
+	var along: Array[float] = []
+	for v in slides:
+		along.append(maxf(v.dot(way), 0.0))
+	along.sort()
+	return way * along[along.size() / 2]
 
 
 func _normalise() -> void:
