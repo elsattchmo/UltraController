@@ -703,6 +703,9 @@ void SinewPhysics::character_gait_set_cycles(int character, const Array& cycles)
 			c.pelvis_height.push_back(h[k]);
 		}
 		c.length = float(double(d.get("length", 0.0)));
+		c.group = int(d.get("group", 0));
+		c.rolling_stance = bool(d.get("rolling_stance", false));
+		c.keep_apart = bool(d.get("keep_apart", false));
 		const char* keys[2][2] = { { "ankle_l", "toe_l" }, { "ankle_r", "toe_r" } };
 		for (int f = 0; f < 2; ++f) {
 			const PackedVector3Array an = d.get(keys[f][0], PackedVector3Array());
@@ -719,7 +722,7 @@ void SinewPhysics::character_gait_set_cycles(int character, const Array& cycles)
 	it->second->set_cycles(out);
 }
 
-void SinewPhysics::character_gait_set_idle(int character, const Array& locals, double pelvis_height) {
+void SinewPhysics::character_gait_set_idle(int character, const Array& locals, double pelvis_height, int group) {
 	auto it = _gaits.find(character);
 	if (it == _gaits.end()) {
 		return;
@@ -728,7 +731,14 @@ void SinewPhysics::character_gait_set_idle(int character, const Array& locals, d
 	for (int p = 0; p < locals.size(); ++p) {
 		qs.push_back(to_q(locals[p]));
 	}
-	it->second->set_idle_pose(qs, float(pelvis_height));
+	it->second->set_idle_pose(qs, float(pelvis_height), group);
+}
+
+void SinewPhysics::character_gait_set_group(int character, int group, double blend_s) {
+	auto it = _gaits.find(character);
+	if (it != _gaits.end()) {
+		it->second->set_group(group, float(blend_s));
+	}
 }
 
 void SinewPhysics::character_gait_reset(int character, const Transform3D& root) {
@@ -831,6 +841,7 @@ Array SinewPhysics::character_gait_clip_report(int character) const {
 		d["lift_max"] = r.lift_max;
 		d["yaw_range"] = r.yaw_range;
 		d["pelvis_bob"] = r.pelvis_bob;
+		d["group"] = r.group;
 		out.push_back(d);
 	}
 	return out;
@@ -862,6 +873,7 @@ Dictionary SinewPhysics::character_gait_state(int character) const {
 	d["pivoting"] = g.feet_pivoting();
 	d["feet_home"] = g.feet_home();
 	d["legs_gap"] = g.legs_gap();
+	d["group"] = g.group();
 	d["capture_margin"] = g.capture_margin();
 	Array sup;
 	for (const sinew::Vec3& p : g.support()) {
@@ -982,7 +994,8 @@ void SinewPhysics::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("character_balance_state", "character"), &SinewPhysics::character_balance_state);
 	ClassDB::bind_method(D_METHOD("character_gait_enable", "character", "on", "settings"), &SinewPhysics::character_gait_enable, DEFVAL(Dictionary()));
 	ClassDB::bind_method(D_METHOD("character_gait_set_cycles", "character", "cycles"), &SinewPhysics::character_gait_set_cycles);
-	ClassDB::bind_method(D_METHOD("character_gait_set_idle", "character", "locals", "pelvis_height"), &SinewPhysics::character_gait_set_idle);
+	ClassDB::bind_method(D_METHOD("character_gait_set_idle", "character", "locals", "pelvis_height", "group"), &SinewPhysics::character_gait_set_idle, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("character_gait_set_group", "character", "group", "blend_s"), &SinewPhysics::character_gait_set_group, DEFVAL(0.35));
 	ClassDB::bind_method(D_METHOD("character_gait_reset", "character", "root"), &SinewPhysics::character_gait_reset);
 	ClassDB::bind_method(D_METHOD("character_gait_update", "character", "root", "velocity", "dt", "command", "home_feet"),
 			&SinewPhysics::character_gait_update, DEFVAL(Variant()), DEFVAL(Variant()));

@@ -39,6 +39,44 @@ static func build(drv: UltraAnimDriver, parts: Array) -> Array:
 	return out
 
 
+## Cycles for one group of roles (a stance): `upper_from` role -> [roles] borrows that cycle's upper body (see
+## _borrow_upper); every cycle carries `group`. Clips are sampled once per skeleton and clip (cached).
+static func build_group(drv: UltraAnimDriver, parts: Array, roles: Array, upper_from: Dictionary, group: int) -> Array:
+	var out := []
+	var seen := {}
+	for r in roles:
+		var role := StringName(r)
+		var clip := String(drv.anim_set.clip(role))
+		if clip == "" or seen.has(clip):
+			continue
+		seen[clip] = true
+		var a := drv._role_anim(role)
+		if a == null:
+			continue
+		var c := _cached_cycle(a, drv.skeleton, parts, float(drv.anim_set.plant_phase.get(clip, 0.0)), clip).duplicate(true)
+		c["speed"] = drv.anim_set.speed_of(role, 1.3)
+		c["clip"] = clip
+		c["group"] = group
+		var borrow: Array = upper_from.get(String(role), upper_from.get(role, []))
+		if not borrow.is_empty():
+			var typed: Array[StringName] = []
+			for b in borrow:
+				typed.append(StringName(b))
+			_borrow_upper(c, drv, parts, typed)
+		out.append(c)
+	return out
+
+
+static var _cache := {}
+
+
+static func _cached_cycle(a: Animation, sk: Skeleton3D, parts: Array, plant_phase: float, clip: String) -> Dictionary:
+	var key := "%d|%s|%d" % [sk.get_bone_count(), clip, parts.size()]
+	if not _cache.has(key):
+		_cache[key] = sample_cycle(a, sk, parts, plant_phase)
+	return _cache[key]
+
+
 ## Replaces a cycle's upper-body locals (everything but the pelvis and legs) with the average of other
 ## roles' cycles at the same phase (all sampled from the left heel strike).
 static func _borrow_upper(c: Dictionary, drv: UltraAnimDriver, parts: Array, roles: Array[StringName]) -> void:
@@ -67,8 +105,8 @@ static func _borrow_upper(c: Dictionary, drv: UltraAnimDriver, parts: Array, rol
 
 
 ## The idle pose (the clip's first frame) as gait locals: {locals, pelvis_height}.
-static func idle_pose(drv: UltraAnimDriver, parts: Array) -> Dictionary:
-	var a := drv._role_anim(&"idle")
+static func idle_pose(drv: UltraAnimDriver, parts: Array, role: StringName = &"idle") -> Dictionary:
+	var a := drv._role_anim(role)
 	if a == null:
 		return {}
 	var g := _globals(a, drv.skeleton, 0.0)

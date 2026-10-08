@@ -219,7 +219,7 @@ func _update_gait(dt: float) -> void:
 		_gait_running = false        # (restarts from where the body stepped to)
 		gait_w = 0.0
 	# (Not while staggering: the balancer has the legs.)
-	var want := not active and _stagger_t < 0.0 and st.is_grounded() and st.state in [Id.IDLE, Id.MOVE, Id.TURN_IN_PLACE, Id.LAND]
+	var want := not active and _stagger_t < 0.0 and st.is_grounded() and st.state in _gait_states()
 	if want and not _gait_running:
 		world.physics.call("character_gait_reset", _id, _gait_root())
 		gait_now = []
@@ -242,7 +242,7 @@ func _update_gait(dt: float) -> void:
 	var drv := character.anim as SinewAnimDriver
 	var busy := st.held_uid != 0 or st.held_id != 0 or (drv != null and drv.upper_busy())
 	var speed := Vector2(st.vel.x, st.vel.z).length()
-	var upper := 0.0 if busy else smoothstep(0.1, 0.6, speed)
+	var upper := _gait_upper_weight(busy, speed)
 	# Standing and settled, the legs are the clip's own (its width, its stance - the gait put the feet
 	# under the hips with bent knees); stepping or moving, the gait's - eased both ways (a step lifts
 	# off the clip's spot, where the gait's feet already are).
@@ -258,6 +258,17 @@ func _update_gait(dt: float) -> void:
 			gait_part_w[i] = move_toward(gait_part_w[i], legs, dt / (0.12 if stepping else 0.3))
 		else:
 			gait_part_w[i] = move_toward(gait_part_w[i], upper, dt / 0.25)
+
+
+## The motor states the gait walks in (a controller built on Sinew adds crouching).
+func _gait_states() -> Array:
+	return [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TURN_IN_PLACE, MotorState.Id.LAND]
+
+
+## How much of the upper body (spine, arms) the gait's cycles show: none while the hands are busy (an item,
+## a carried prop, a one-shot), the cycles' arm swing from a slow walk on.
+func _gait_upper_weight(busy: bool, speed: float) -> float:
+	return 0.0 if busy else smoothstep(0.1, 0.6, speed)
 
 
 ## The clip's feet as world transforms (the gait's standing spots), or null before the first frame.

@@ -1,0 +1,191 @@
+[gd_resource type="Resource" script_class="MarksmanStanceSet" format=3]
+
+[ext_resource type="Script" path="res://addons/ultra_controller/animation/root_motion_curve.gd" id="1_a5fnq"]
+[ext_resource type="Script" path="res://addons/marksman/marksman_stance_set.gd" id="2_qg3xj"]
+
+[resource]
+script = ExtResource("2_qg3xj")
+groups = Array[Dictionary]([{
+"cycles": ["walk_f", "jog_f", "sprint_f", "walk_b", "strafe_l", "strafe_r"],
+"idle": "idle",
+"name": "unarmed_stand",
+"posture": "stand",
+"stance": "unarmed",
+"upper_from": {
+"jog_f": ["walk_f", "sprint_f", "sprint_f"]
+}
+}, {
+"cycles": ["rc_walk_b", "rc_walk_f", "rc_walk_l", "rc_walk_r"],
+"idle": "crouch_idle",
+"name": "unarmed_crouch",
+"posture": "crouch",
+"stance": "unarmed",
+"upper_from": {
+"rc_walk_b": ["crouch_f"],
+"rc_walk_f": ["crouch_f"],
+"rc_walk_l": ["crouch_f"],
+"rc_walk_r": ["crouch_f"]
+}
+}, {
+"aim": "r_aim",
+"cycles": ["r_run_b", "r_run_bl", "r_run_br", "r_run_f", "r_run_fl", "r_run_fr", "r_run_l", "r_run_r", "r_sprint_f", "r_sprint_fl", "r_sprint_fr", "r_sprint_l", "r_sprint_r", "r_walk_b", "r_walk_bl", "r_walk_br", "r_walk_f", "r_walk_fl", "r_walk_fr", "r_walk_l", "r_walk_r"],
+"idle": "r_idle",
+"name": "rifle_stand",
+"posture": "stand",
+"stance": "rifle",
+"turn_l": "r_turn_l",
+"turn_r": "r_turn_r",
+"upper_from": {}
+}, {
+"aim": "rc_aim",
+"cycles": ["rc_walk_b", "rc_walk_f", "rc_walk_l", "rc_walk_r"],
+"idle": "rc_idle",
+"name": "rifle_crouch",
+"posture": "crouch",
+"stance": "rifle",
+"turn_l": "rc_turn_l",
+"turn_r": "rc_turn_r",
+"upper_from": {}
+}, {
+"cycles": ["p_walk_f", "p_run_f", "p_sprint_f", "p_walk_b", "p_strafe_l", "p_strafe_r"],
+"idle": "p_idle",
+"name": "pistol_stand",
+"posture": "stand",
+"stance": "pistol",
+"upper_from": {
+"p_sprint_f": ["p_run_f"],
+"p_strafe_l": ["p_idle"],
+"p_strafe_r": ["p_idle"],
+"p_walk_f": ["p_walk_arms"]
+}
+}, {
+"cycles": ["rc_walk_b", "rc_walk_f", "rc_walk_l", "rc_walk_r"],
+"idle": "pc_idle",
+"name": "pistol_crouch",
+"posture": "crouch",
+"stance": "pistol",
+"upper_from": {
+"rc_walk_b": ["p_idle"],
+"rc_walk_f": ["p_idle"],
+"rc_walk_l": ["p_idle"],
+"rc_walk_r": ["p_idle"]
+}
+}])
+overrides = {
+"jog_f": "mixamo/U_Run_F",
+"p_idle": "mixamo/PST_PistolIdle",
+"p_run_f": "mixamo/PST_PistolRun",
+"p_sprint_f": "mixamo/S_Fast",
+"p_strafe_l": "mixamo/Strafe_Walk_L",
+"p_strafe_r": "mixamo/Strafe_Walk_R",
+"p_walk_arms": "mixamo/PST_PistolWalk",
+"p_walk_b": "mixamo/PST_PistolWalkBackward",
+"p_walk_f": "mixamo/N_StdWalk2",
+"pc_idle": "mixamo/PST_PistolKneelingIdle",
+"r_aim": "mixamo/RFP_IdleAiming",
+"r_idle": "mixamo/RFP_Idle",
+"r_run_b": "mixamo/RFP_RunBackward",
+"r_run_bl": "mixamo/RFP_RunBackwardLeft",
+"r_run_br": "mixamo/RFP_RunBackwardRight",
+"r_run_f": "mixamo/RFP_RunForward",
+"r_run_fl": "mixamo/RFP_RunForwardLeft",
+"r_run_fr": "mixamo/RFP_RunForwardRight",
+"r_run_l": "mixamo/RFP_RunLeft",
+"r_run_r": "mixamo/RFP_RunRight",
+"r_sprint_f": "mixamo/RFP_SprintForward",
+"r_sprint_fl": "mixamo/RFP_SprintForwardLeft",
+"r_sprint_fr": "mixamo/RFP_SprintForwardRight",
+"r_sprint_l": "mixamo/RFP_SprintLeft",
+"r_sprint_r": "mixamo/RFP_SprintRight",
+"r_turn_l": "mixamo/RFP_Turn90Left",
+"r_turn_r": "mixamo/RFP_Turn90Right",
+"r_walk_b": "mixamo/RFP_WalkBackward",
+"r_walk_bl": "mixamo/RFP_WalkBackwardLeft",
+"r_walk_br": "mixamo/RFP_WalkBackwardRight",
+"r_walk_f": "mixamo/RFP_WalkForward",
+"r_walk_fl": "mixamo/RFP_WalkForwardLeft",
+"r_walk_fr": "mixamo/RFP_WalkForwardRight",
+"r_walk_l": "mixamo/RFP_WalkLeft",
+"r_walk_r": "mixamo/RFP_WalkRight",
+"rc_aim": "mixamo/RFP_IdleCrouchingAiming",
+"rc_idle": "mixamo/RFP_IdleCrouching",
+"rc_turn_l": "mixamo/RFP_CrouchingTurn90Left",
+"rc_turn_r": "mixamo/RFP_CrouchingTurn90Right",
+"rc_walk_b": "mixamo/RFP_WalkCrouchingBackward",
+"rc_walk_f": "mixamo/RFP_WalkCrouchingForward",
+"rc_walk_l": "mixamo/RFP_WalkCrouchingLeft",
+"rc_walk_r": "mixamo/RFP_WalkCrouchingRight",
+"sprint_f": "mixamo/S_Fast",
+"walk_f": "mixamo/N_StdWalk2"
+}
+gait_run_upper = Array[StringName]([&"walk_f", &"sprint_f", &"sprint_f"])
+authored_speed = {
+"Walk_Backwards": 0.972,
+"mixamo/N_StdWalk2": 1.453,
+"mixamo/PST_PistolRun": 4.522,
+"mixamo/PST_PistolWalkBackward": 1.347,
+"mixamo/RFP_RunBackward": 4.374,
+"mixamo/RFP_RunBackwardLeft": 4.3420000000000005,
+"mixamo/RFP_RunBackwardRight": 3.737,
+"mixamo/RFP_RunForward": 4.601,
+"mixamo/RFP_RunForwardLeft": 4.428,
+"mixamo/RFP_RunForwardRight": 4.541,
+"mixamo/RFP_RunLeft": 4.16,
+"mixamo/RFP_RunRight": 4.397,
+"mixamo/RFP_SprintForward": 6.351,
+"mixamo/RFP_SprintForwardLeft": 6.5040000000000004,
+"mixamo/RFP_SprintForwardRight": 6.7490000000000006,
+"mixamo/RFP_SprintLeft": 6.6610000000000005,
+"mixamo/RFP_SprintRight": 6.642,
+"mixamo/RFP_WalkBackward": 1.7530000000000001,
+"mixamo/RFP_WalkBackwardLeft": 1.758,
+"mixamo/RFP_WalkBackwardRight": 1.7510000000000001,
+"mixamo/RFP_WalkCrouchingBackward": 1.863,
+"mixamo/RFP_WalkCrouchingForward": 1.934,
+"mixamo/RFP_WalkCrouchingLeft": 1.877,
+"mixamo/RFP_WalkCrouchingRight": 1.9060000000000001,
+"mixamo/RFP_WalkForward": 1.813,
+"mixamo/RFP_WalkForwardLeft": 1.7550000000000001,
+"mixamo/RFP_WalkForwardRight": 1.716,
+"mixamo/RFP_WalkLeft": 1.736,
+"mixamo/RFP_WalkRight": 1.7530000000000001,
+"mixamo/S_Fast": 5.531,
+"mixamo/Strafe_Walk_L": 1.622,
+"mixamo/Strafe_Walk_R": 1.614,
+"mixamo/U_Run_F": 3.6310000000000002
+}
+plant_phase = {
+"Walk_Backwards": 0.5,
+"mixamo/N_StdWalk2": 0.325,
+"mixamo/PST_PistolRun": 0.338,
+"mixamo/PST_PistolWalkBackward": 0.2,
+"mixamo/RFP_RunBackward": 0.279,
+"mixamo/RFP_RunBackwardLeft": 0.28300000000000003,
+"mixamo/RFP_RunBackwardRight": 0.229,
+"mixamo/RFP_RunForward": 0.633,
+"mixamo/RFP_RunForwardLeft": 0.4,
+"mixamo/RFP_RunForwardRight": 0.4,
+"mixamo/RFP_RunLeft": 0.333,
+"mixamo/RFP_RunRight": 0.404,
+"mixamo/RFP_SprintForward": 0.5630000000000001,
+"mixamo/RFP_SprintForwardLeft": 0.47100000000000003,
+"mixamo/RFP_SprintForwardRight": 0.383,
+"mixamo/RFP_SprintLeft": 0.354,
+"mixamo/RFP_SprintRight": 0.4,
+"mixamo/RFP_WalkBackward": 0.17500000000000002,
+"mixamo/RFP_WalkBackwardLeft": 0.20800000000000002,
+"mixamo/RFP_WalkBackwardRight": 0.179,
+"mixamo/RFP_WalkCrouchingBackward": 0.20800000000000002,
+"mixamo/RFP_WalkCrouchingForward": 0.429,
+"mixamo/RFP_WalkCrouchingLeft": 0.213,
+"mixamo/RFP_WalkCrouchingRight": 0.304,
+"mixamo/RFP_WalkForward": 0.321,
+"mixamo/RFP_WalkForwardLeft": 0.329,
+"mixamo/RFP_WalkForwardRight": 0.417,
+"mixamo/RFP_WalkLeft": 0.28300000000000003,
+"mixamo/RFP_WalkRight": 0.233,
+"mixamo/S_Fast": 0.529,
+"mixamo/Strafe_Walk_L": 0.488,
+"mixamo/Strafe_Walk_R": 0.304,
+"mixamo/U_Run_F": 0.5670000000000001
+}
