@@ -1383,13 +1383,20 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   chest (0.6 m over the hips); their legs play under borrowed arms (N_StdWalk2 for the strafe walks, LMM_StandardRun for
   the runs) on the mm node's filtered `carms` layer, seeked in step (each clip's left footfall = `left_down` /
   `arms_left_down`, MarksmanMMDatabase._lowest_t). gm test_unarmed_arms_hang_every_way.
-- **Rope swing** (MarksmanRagdoll, ROPE): powered in the air (`_rope_phys`), the arms the climb clip's (kinematic: hands
-  on the rope), everything below them physics at `rope_tone` 0.45 - it lags the swing and swings out (hips up to 0.5 m off
-  the clip's). Letting go: physics eases back over `rope_release` 0.4 s, the rope node's cross-fades are 0.5 s (the
-  arms came off the grip 17 cm a frame), and `MarksmanCharacter._sync_visual` eases the UltraController's rope tilt /
-  16 cm offset out over 0.3 s (it stood the skeleton up in ONE frame: 1.1 m, read by Sinew as a teleport -> snap).
-  gm test_rope_swing_is_physical (measured on the SHOWN bones in the skeleton frame at skeleton_updated - the raw
-  physics bodies include the swing's own speed and invisible kinematic snaps).
+- **Rope swing**: the hands on the rope (the climb clip), the legs pump the swing (`MarksmanRopePass`, a pose pass: out
+  along the rope's angle 0.25 s ahead, x1.2, -0.55 .. 0.95 rad, like UltraTraversalVisual._rope_legs). A physical hanging
+  body was tried and dropped (the user: "looks terrible"). Letting go: `MarksmanCharacter._sync_visual` eases the
+  UltraController's rope tilt / 16 cm offset out over 0.3 s (it stood the skeleton up in ONE frame, 1.1 m) and the rope
+  node's cross-fades are 0.5 s (the arms came off the grip 17 cm a frame). gm test_rope_legs_pump_the_swing (shown bones
+  in the skeleton frame at skeleton_updated), tour `marksman_rope_review`.
+- **Limp in every direction**: `MarksmanMMPass._limp` - while the hurt leg carries the weight the trunk leans out over it
+  (`LIMP_LEAN` 0.26 rad x damage) and the hips dip (5 cm), the swinging bad knee is straightened by 55 % x damage - on top
+  of the forward / back limp clips, alone sideways (no sideways limp clips: a hurt strafe was a slow plain walk). The
+  limp CLIP layer only shows a moving limp clip going the walk's way (the matcher's injured idle under a strafe was 19 cm of
+  lurch at 70 %). gm test_limp_in_stages: forward 6.7 / 13.3 / 31 cm at 70 / 55 / 25 %, strafe 7.8 / 8.3 / 14.7.
+- **Pistol at the hip** (`MarksmanGunPass._hold_out`): placed gun-first - the gun hand at `PISTOL_HIP` (0.13 right, 0.22
+  down, 0.45 ahead of the eye along the view), barrel onto the aim point, arm by IK. The PST clips hold it up in front of
+  the face: in first person it covered the view (17-19 deg above the centre; now 7-9 below). g3 test_hip_gun_clears_the_view.
 - **Foot IK (ground fit)**: each foot onto the ground under its ankle / ball (higher of the two), followed (rise 3.5, fall
   2 m/s); hips down only as far as a leg can't reach (`REACH` 0.97); planted soles tilt to the surface (<= 28 deg). Leg IK
   swings the knee WITH the leg onto the new hip->foot line, plus the thigh's forward only when the knee is nearly straight

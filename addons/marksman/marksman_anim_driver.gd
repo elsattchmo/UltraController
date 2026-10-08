@@ -261,8 +261,10 @@ func _drive_limp(key: String, delta: float) -> void:
 			# (Only as far as the limp clip goes the way the walk does: there are no sideways limps.)
 			var a: Vector2 = mm.clip_velocity()
 			var b: Vector2 = lc.vel
-			if a.length() > 0.3 and b.length() > 0.3:
-				want *= clampf(a.normalized().dot(b.normalized()), 0.0, 1.0)
+			if a.length() > 0.3:
+				# (A limp clip standing still under a walk - the matcher's idle for a sideways query - is no limp: the
+				# procedural limp in MarksmanMMPass shows it then.)
+				want *= clampf(a.normalized().dot(b.normalized()), 0.0, 1.0) if b.length() > 0.3 else 0.0
 	limp_w = _ease_w(&"mm_limp", want, delta)
 	tree.set(LOCO + "mm/limp/blend_amount", limp_w)
 

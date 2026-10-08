@@ -13,6 +13,8 @@ var group := -1
 
 ## The gun pass over the animated pose (aim, support hand): see MarksmanGunPass.
 var gun_pass: MarksmanGunPass
+## The legs on a swing rope (MarksmanRopePass).
+var rope_pass: MarksmanRopePass
 
 
 func setup(c: UltraCharacter) -> void:
@@ -20,6 +22,8 @@ func setup(c: UltraCharacter) -> void:
 	if modifier != null and not parts.is_empty():
 		gun_pass = MarksmanGunPass.new(c, self)
 		modifier.passes.append(gun_pass)
+		rope_pass = MarksmanRopePass.new(c, self)
+		modifier.passes.append(rope_pass)
 
 
 func _setup_gait() -> void:
@@ -197,7 +201,7 @@ func _standing_target() -> void:
 func _powered_in_air() -> bool:
 	if _over_edge and _stagger_t < 0.0:
 		_over_edge = false
-	return _over_edge or _powered_in_air_for_landing() or _rope_phys()
+	return _over_edge or _powered_in_air_for_landing()
 
 
 ## A hard landing is coming (MarksmanCharacter._predict_landing, a moment before touchdown at `speed` m/s down): the
@@ -233,7 +237,6 @@ func _powered_in_air_for_landing() -> bool:
 
 func sinew_pre_step(dt: float) -> void:
 	_track_hips(dt)
-	_update_rope(dt)
 	var bracing := _land_brace and not active
 	super.sinew_pre_step(dt)
 	if not bracing:
@@ -442,68 +445,3 @@ func _relax_hit_limbs(dt: float) -> void:
 	super._relax_hit_limbs(dt)
 	for part: int in held:
 		_hit_relax[part] = held[part]
-
-
-# ------------------------------------------------------------------ rope swing: a body hanging from its hands
-# On a rope (ROPE: the motor's pendulum carries the capsule) the arms are the animation's - the climb clip's hands on the
-# rope - and everything below them hangs as physics from them: torso, head, pelvis and legs swing on their own, lag the
-# swing and swing out at its ends (muscles at `rope_tone` keep the clip's shape loosely). Letting go, the physics eases
-# back into the animation over `rope_release` s (the body stays powered in the air meanwhile).
-
-## Muscle tone of the hanging body (1 = holds the clip's pose stiffly).
-@export var rope_tone := 0.45
-@export var rope_release := 0.4
-var _on_rope := false
-var _rope_left := -1.0           ## s since letting go (< 0: not easing out)
-
-
-func on_rope_physics() -> bool:
-	return _on_rope
-
-
-func _rope_phys() -> bool:
-	return _on_rope or _rope_left >= 0.0
-
-
-func _rope_arm(i: int) -> bool:
-	var n: String = parts[i].name
-	return n.contains("Shoulder") or n.contains("Arm") or n.contains("Hand")
-
-
-func _update_rope(dt: float) -> void:
-	var on := character != null and character.state.state == MotorState.Id.ROPE and powered and not active and _id != 0
-	if on and not _on_rope:
-		_on_rope = true
-		_rope_left = -1.0
-		for i in parts.size():
-			if not _rope_arm(i):
-				world.physics.call("character_set_part_tone", _id, i, rope_tone)
-	elif not on and _on_rope:
-		_on_rope = false
-		_rope_left = 0.0
-		for i in parts.size():
-			world.physics.call("character_set_part_tone", _id, i, 1.0)
-	elif _rope_left >= 0.0:
-		_rope_left += dt
-		if _rope_left > rope_release or active:
-			_rope_left = -1.0
-
-
-func _update_parts(dt: float) -> void:
-	if not _rope_phys():
-		super._update_parts(dt)
-		return
-	if _dyn.size() != parts.size():
-		_all_parts(false, 0.0)
-	_hit_t.clear()
-	for i in parts.size():
-		if not bool(world.physics.call("character_attached", _id, i)):
-			part_w[i] = 1.0
-			continue
-		if _on_rope and not _rope_arm(i):
-			_set_dyn(i, true)
-			part_w[i] = minf(part_w[i] + dt / 0.15, 1.0)
-		else:
-			part_w[i] = maxf(part_w[i] - dt / maxf(rope_release * 0.75, 0.05), 0.0)
-			if part_w[i] <= 0.0:
-				_set_dyn(i, false)
