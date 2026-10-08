@@ -657,3 +657,174 @@ func test_jumps_and_landings() -> void:
 		chars.erase(c)
 		c.queue_free()
 		await ticks(3)
+
+
+## Shot in the leg at a sprint: it stumbles or goes down with the momentum it HAS - never flung faster than it ran.
+func test_shot_while_sprinting() -> void:
+	load_playground()
+	var worst := 0.0
+	var rows := []
+	var falls := {}
+	for dmg: float in [16.0, 30.0, 60.0]:
+		for delay: int in [0, 7, 14, 21]:
+			var t := _marksman(marker("spawn").global_position + Vector3(-20 + delay * 0.3, 0, 10 - dmg * 0.05))
+			await ticks(40)
+			var r := t.ragdoll as MarksmanRagdoll
+			bot(t).set_steps([{"ticks": 400, "move": Vector2(0, 1), "yaw": 0.0, "buttons": InputFrame.B_SPRINT}])
+			await ticks(100 + delay)
+			var v0 := Vector2(t.state.vel.x, t.state.vel.z).length()
+			t.react_to_hit(UltraLimbs.Region.THIGH_R, Vector3(0, 0, 1), dmg)
+			var prev := (r.pose_now[0] as Transform3D).origin
+			var top := 0.0
+			var fell := false
+			for i in 150:
+				await ticks(1)
+				if OS.get_environment("GM_DUMP") != "" and i < 60:
+					var gs: Dictionary = r.world.physics.call("character_gait_state", r._id)
+					print("t%d %s v %.2f margin %s stepping %s stumble %s" % [i, Id.keys()[t.state.state], Vector2(t.state.vel.x, t.state.vel.z).length(),
+							gs.get("capture_margin", "-"), gs.get("stepping", "-"), t.stumbling()])
+				var h := (r.pose_now[0] as Transform3D).origin
+				top = maxf(top, Vector2(h.x - prev.x, h.z - prev.z).length() * 60.0)
+				prev = h
+				fell = fell or t.state.state == Id.RAGDOLL
+			worst = maxf(worst, top - v0)
+			rows.append("%2.0f dmg +%d: ran %.1f m/s, hips up to %.1f m/s, %s" % [dmg, delay, v0, top, "fell" if fell else "kept up"])
+			falls[dmg] = int(falls.get(dmg, 0)) + (1 if fell else 0)
+			chars.erase(t)
+			t.queue_free()
+			await ticks(3)
+	for line: String in rows:
+		info(line)
+	check(worst < 2.5, "never flung: the hips at most %.1f m/s over the running speed" % worst)
+	info("falls of 4 by damage: %s" % [falls])
+	check(int(falls[16.0]) == 0 and int(falls[16.0]) <= int(falls[30.0]) and int(falls[30.0]) <= int(falls[60.0]) and int(falls[60.0]) > 0,
+			"a graze runs on; harder hits trip more often (%s)" % [falls])
+
+
+## Unarmed, the arms are the same kind of arms whichever way it walks or runs: the U_* strafe / run clips hold both hands
+## up at the chest - their legs play under borrowed natural arms (MarksmanMotionMatcher.CLIP_ARMS).
+func test_unarmed_arms_hang_every_way() -> void:
+	load_playground()
+	var rows := []
+	var hands := {}
+	for spec: Array in [["walk fwd", Vector2(0, 1), 0], ["strafe R", Vector2(1, 0), 0], ["strafe L", Vector2(-1, 0), 0],
+			["run fwd", Vector2(0, 1), -1], ["run R", Vector2(1, 0), -1], ["run L", Vector2(-1, 0), -1]]:
+		var c := _marksman(marker("spawn").global_position + Vector3(-10, 0, 6))
+		if int(spec[2]) < 0:
+			c.profile.default_gait = MovementProfile.Gait.JOG      # (a run: the U_Run_* clips)
+			spec[2] = 0
+		await ticks(40)
+		var sk := c.skeleton
+		var top := [-INF]
+		var grab := func() -> void:
+			var hy := (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Hips"))).origin.y
+			for b in ["LeftHand", "RightHand"]:
+				top[0] = maxf(top[0], (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(b))).origin.y - hy)
+		bot(c).set_steps([{"ticks": 200, "move": spec[1], "yaw": 0.0, "buttons": spec[2]}])
+		await ticks(60)
+		sk.skeleton_updated.connect(grab)
+		await ticks(60)
+		sk.skeleton_updated.disconnect(grab)
+		var drv := c.anim as MarksmanAnimDriver
+		hands[spec[0]] = top[0]
+		rows.append("%-9s hands up to %.2f m over the hips (clip %s)" % [spec[0], top[0], String(drv._mm_clip).get_file()])
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+	for r: String in rows:
+		info(r)
+	for k: String in ["strafe R", "strafe L"]:
+		check(float(hands[k]) < float(hands["walk fwd"]) + 0.12, "%s: the hands hang as walking forward (%.2f vs %.2f m)" % [k, hands[k], hands["walk fwd"]])
+	# (A run pumps the arms - the sprint clip to 0.37 m; the U_Run clips' own guard held them at 0.6-0.68.)
+	check(float(hands["run R"]) < 0.5 and float(hands["run L"]) < 0.5 and float(hands["run fwd"]) < 0.5 \
+			and absf(float(hands["run R"]) - float(hands["run fwd"])) < 0.1 and absf(float(hands["run L"]) - float(hands["run fwd"])) < 0.1,
+			"running: natural arms every way (forward %.2f, right %.2f, left %.2f m over the hips)" % [hands["run fwd"], hands["run R"], hands["run L"]])
+
+
+## On a rope the body hangs from its hands: the arms are the climb clip's, everything below them physics - it lags the
+## swing and swings out at its ends - and letting go it eases back into the animation (no snap).
+func test_rope_swing_is_physical() -> void:
+	load_playground()
+	var c := _marksman(marker("parkour_rope").global_position)
+	var r := c.ragdoll as MarksmanRagdoll
+	var on_rope := [-1]
+	var tick := [0]
+	bot(c).driver = func(_t: int, _b: BotInputSource) -> InputFrame:
+		tick[0] += 1
+		var f := InputFrame.new()
+		if c.state.state == Id.ROPE:
+			if on_rope[0] < 0:
+				on_rope[0] = tick[0]
+			var k: int = tick[0] - on_rope[0]
+			f.move = Vector2(0, 1.0 if c.state.vel.z < 0.0 else -1.0)
+			# (Let go swinging back toward the start platform, near the top of the swing: a short drop.)
+			if k > 300 and c.state.vel.z > 0.0 and absf(c.state.vel.z) < 1.5:
+				f.buttons = InputFrame.B_JUMP
+			return f
+		if on_rope[0] >= 0:
+			return f
+		f.move = Vector2(0, 1)
+		f.buttons = InputFrame.B_SPRINT | (InputFrame.B_JUMP if c.state.pos.z < -55.4 and c.state.is_grounded() else 0)
+		return f
+	# The pose as shown, in the skeleton's frame (relative to the character): how fast the limbs move about the body.
+	var sk := c.skeleton
+	var bones: Array[int] = []
+	for b in ["Hips", "Head", "LeftHand", "RightHand", "LeftFoot", "RightFoot"]:
+		bones.append(sk.find_bone(b))
+	var shown := {"prev": [], "step": 0.0, "bone": 0}
+	var grab := func() -> void:
+		var now := []
+		for b in bones:
+			now.append(sk.get_bone_global_pose(b).origin)
+		var st := 0.0
+		if not (shown.prev as Array).is_empty():
+			for k in now.size():
+				var d := (now[k] as Vector3).distance_to(shown.prev[k])
+				if d > st:
+					st = d
+					shown.bone = k
+		shown.step = st
+		shown.prev = now
+	sk.skeleton_updated.connect(grab)
+	var lag := 0.0
+	var phys := false
+	var rel_fast := 0.0
+	var pop := 0.0
+	var released := -1
+	for i in 900:
+		await ticks(1)
+		if on_rope[0] < 0 or r.pose_now.is_empty():
+			continue
+		if c.state.state == Id.ROPE:
+			phys = phys or r.on_rope_physics()
+			var anim := r._anim_world()
+			if not anim.is_empty():
+				lag = maxf(lag, (r.pose_now[0] as Transform3D).origin.distance_to((anim[0] as Transform3D).origin))
+			if tick[0] - on_rope[0] > 30:
+				rel_fast = maxf(rel_fast, float(shown.step) * 60.0)
+				if OS.get_environment("GM_DUMP") != "" and float(shown.step) * 60.0 > 4.0:
+					print("R%d step %.1f m/s (%s) vz %.2f y %.2f" % [tick[0] - on_rope[0], float(shown.step) * 60.0, sk.get_bone_name(bones[int(shown.bone)]), c.state.vel.z, c.state.pos.y])
+		elif released < 0:
+			released = i
+		if OS.get_environment("GM_DUMP") != "" and (released < 0 or i - released < 6) and r._anim_world().size() > 0:
+			var ah: Vector3 = (r._anim_world()[0] as Transform3D).origin - sk.global_position
+			print("A%d %s loco %s anim hips %s phys hips %s" % [i, Id.keys()[c.state.state], (c.anim as MarksmanAnimDriver)._cur_loco, ah.snappedf(0.01),
+					((r.pose_now[0] as Transform3D).origin - sk.global_position).snappedf(0.01)])
+		if released >= 0 and i - released < 40:
+			pop = maxf(pop, float(shown.step))
+			if OS.get_environment("GM_DUMP") != "":
+				var drv := c.anim as MarksmanAnimDriver
+				print("t%d %s loco %s step %.1f cm (%s) hips %s skel %s phys %s left %.2f" % [i - released, Id.keys()[c.state.state], drv._cur_loco, float(shown.step) * 100.0,
+						sk.get_bone_name(bones[int(shown.bone)]),
+						(shown.prev[0] as Vector3).snappedf(0.01), sk.global_position.snappedf(0.01), r.on_rope_physics(), r._rope_left])
+		if released >= 0 and i - released > 60:
+			break
+	sk.skeleton_updated.disconnect(grab)
+	info("rope: caught %s, hanging physics %s, hips swung up to %.2f m off the clip's, limbs about the body up to %.1f m/s, letting go: worst %.1f cm/frame, state %s" % [
+			on_rope[0] >= 0, phys, lag, rel_fast, pop * 100.0, Id.keys()[c.state.state]])
+	if not check(on_rope[0] >= 0, "caught the rope"):
+		return
+	check(phys and lag > 0.04, "the body below the hands hangs as physics (hips %.2f m off the clip's)" % lag)
+	# (Caught at a run the legs swing on up past the hands - 8-9 m/s about the tilting body, smoothly - then 4-6 a swing.)
+	check(rel_fast < 10.0, "nothing flails (limbs about the body <= %.1f m/s)" % rel_fast)
+	check(released >= 0 and pop < 0.08, "letting go eases back into the animation (worst %.1f cm/frame about the body)" % (pop * 100.0))

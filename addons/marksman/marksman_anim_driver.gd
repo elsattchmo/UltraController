@@ -48,6 +48,11 @@ func _build_sinew() -> AnimationNodeBlendTree:
 	air.connect_node("ready", 0, "clip_ts")
 	air.connect_node("ready", 1, "ready_ts")
 	air.connect_node("output", 0, "ready")
+	# --- letting go of a rope: the arms come down off it slowly (the grip pose is overhead; at the plain cross-fade the
+	# hands swept down 17 cm a frame)
+	for ti in loco.get_transition_count():
+		if loco.get_transition_from(ti) == &"rope":
+			loco.get_transition(ti).xfade_time = ROPE_LET_GO_XFADE
 	# --- landing: as deep as the impact (Jump_Land squats 45 cm - for a hop, a little of it over the idle)
 	var land := loco.get_node("land") as AnimationNodeBlendTree
 	land.disconnect_node("output", 0)
@@ -94,7 +99,20 @@ func _build_sinew() -> AnimationNodeBlendTree:
 		m.connect_node("limp", 1, "limp_rate")
 		m.connect_node("arms", 0, "limp")
 		m.connect_node("arms", 1, "arms_mix")
-		m.connect_node("output", 0, "arms")
+		# (Per clip, natural arms over a clip that holds its hands up - MarksmanMotionMatcher.CLIP_ARMS - seeked in step.)
+		var ca := AnimationNodeAnimation.new()
+		ca.animation = _clip(&"idle")
+		m.add_node("carms_clip", ca, Vector2(200, 520))
+		m.add_node("carms_seek", AnimationNodeTimeSeek.new(), Vector2(400, 520))
+		m.connect_node("carms_seek", 0, "carms_clip")
+		var carms := AnimationNodeBlend2.new()
+		carms.filter_enabled = true
+		for b in _arm_bones():
+			carms.set_filter_path(NodePath("%" + String(skeleton.name) + ":" + b), true)
+		m.add_node("carms", carms, Vector2(800, 0))
+		m.connect_node("carms", 0, "arms")
+		m.connect_node("carms", 1, "carms_seek")
+		m.connect_node("output", 0, "carms")
 		loco.add_node("mm", m, Vector2(0, 200))
 		for n in loco.get_node_list():
 			if n == &"mm" or n == &"Start" or n == &"End":
@@ -250,6 +268,25 @@ func _drive_limp(key: String, delta: float) -> void:
 
 
 ## The set's own arms over its matched clip (MarksmanMotionMatcher.ARMS: still / moving by speed), else none.
+## The playing clip's borrowed arms (MarksmanMotionMatcher.CLIP_ARMS): the source clip at the same point of the stride -
+## both locked on their left footfall - so the arms swing against the legs as they would in the source.
+func _drive_clip_arms(delta: float) -> void:
+	var c: Dictionary = mm.db.clips[mm.clip]
+	var on := c.has("arms")
+	if on:
+		if c.arms != _carms_clip:
+			_carms_clip = c.arms
+			var node := ((tree.tree_root as AnimationNodeBlendTree).get_node("loco") as AnimationNodeStateMachine).get_node("mm") as AnimationNodeBlendTree
+			(node.get_node("carms_clip") as AnimationNodeAnimation).animation = c.arms
+		var phase := (mm.time - float(c.left_down)) / maxf(float(c.length), 1e-3)
+		var al: float = c.arms_length
+		tree.set(LOCO + "mm/carms_seek/seek_request", fposmod(float(c.arms_left_down) + phase * al, al))
+	tree.set(LOCO + "mm/carms/blend_amount", _ease_w(&"mm_carms", 1.0 if on else 0.0, delta))
+
+
+var _carms_clip := &""
+
+
 func _drive_mm_arms(key: String, delta: float) -> void:
 	var arms: Array = MarksmanMotionMatcher.ARMS.get(key, [])
 	if key != _mm_arms_key:
@@ -328,6 +365,7 @@ func _drive_mm(delta: float) -> void:
 		tree.set(LOCO + "mm/seek/seek_request", mm.time)
 		inertial.trigger(MM_BLEND)
 	tree.set(LOCO + "mm/rate/scale", mm.rate)
+	_drive_clip_arms(delta)
 	_drive_limp(key, delta)
 	if OS.get_environment("MM_DUMP") != "":
 		var v := Vector2(velocity.x, velocity.z).length()
@@ -378,6 +416,7 @@ func _drive_air(delta: float) -> void:
 		tree.set(LOCO + "land/depth/blend_amount", smoothstep(LAND_DEPTH.x, LAND_DEPTH.y, land_impact))
 
 
+const ROPE_LET_GO_XFADE := 0.5
 ## Seconds before touchdown the legs are fully down .. start coming down.
 const LEGS_READY := Vector2(0.08, 0.4)
 ## Landing speed (m/s) for no squat .. the clip's full squat.

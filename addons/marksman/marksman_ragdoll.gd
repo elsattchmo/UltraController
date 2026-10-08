@@ -197,7 +197,7 @@ func _standing_target() -> void:
 func _powered_in_air() -> bool:
 	if _over_edge and _stagger_t < 0.0:
 		_over_edge = false
-	return _over_edge or _powered_in_air_for_landing()
+	return _over_edge or _powered_in_air_for_landing() or _rope_phys()
 
 
 ## A hard landing is coming (MarksmanCharacter._predict_landing, a moment before touchdown at `speed` m/s down): the
@@ -232,6 +232,8 @@ func _powered_in_air_for_landing() -> bool:
 
 
 func sinew_pre_step(dt: float) -> void:
+	_track_hips(dt)
+	_update_rope(dt)
 	var bracing := _land_brace and not active
 	super.sinew_pre_step(dt)
 	if not bracing:
@@ -323,9 +325,9 @@ func hit(region: int, dir: Vector3, amount: float) -> void:
 @export var moving_hit_speed := 0.8
 ## The stumble: m/s of lurch along the way it's going per N s of hit (a leg knocked from under a moving body - it
 ## pitches on over the other one), plus this share of it along the hit; at most `moving_hit_max`.
-@export var moving_hit_per_impulse := 0.11
+@export var moving_hit_per_impulse := 0.12
 @export var moving_hit_along := 0.5
-@export var moving_hit_max := 4.5
+@export var moving_hit_max := 1.6
 ## A leg hit while that leg swings (not carrying the weight) throws the body this share as much.
 @export var moving_hit_swinging := 0.4
 
@@ -340,8 +342,7 @@ func _stumble_hit(region: int, dir: Vector3, imp: float, hv: Vector3) -> bool:
 	var h := Vector3(dir.x, 0.0, dir.z)
 	h = h.normalized() if h.length() > 1e-3 else Vector3.ZERO
 	var leg := region in LEG_REGIONS
-	# (The faster it goes, the more a leg taken from under it throws it on: the momentum has nothing to stop on.)
-	# (And it matters which leg: the one carrying the weight buckles and the body pitches over it; one in the air swings
+	# (It matters which leg: the one carrying the weight buckles and the body pitches over it; one in the air swings
 	# on and lands short.)
 	var bearing := 1.0
 	if leg:
@@ -349,11 +350,20 @@ func _stumble_hit(region: int, dir: Vector3, imp: float, hv: Vector3) -> bool:
 		var side := 0 if region in [UltraLimbs.Region.THIGH_L, UltraLimbs.Region.SHIN_L, UltraLimbs.Region.FOOT_L] else 1
 		if drv != null and drv.mm != null and drv._cur_loco == "mm" and not drv.mm.planted(side):
 			bearing = moving_hit_swinging
-	var dv := minf(imp * moving_hit_per_impulse * (1.0 if leg else 0.7) * bearing * (1.0 + 0.4 * hv.length()), moving_hit_max)
+	# (A lurch, not a launch: the body already carries its momentum - a faster one trips more easily through the gait's
+	# capture margin, it isn't thrown harder. Scaled by speed it sped a sprinter up 4.5 m/s and the knock-down doubled
+	# that: flung at 15-21 m/s.)
+	var dv := minf(imp * moving_hit_per_impulse * (1.0 if leg else 0.7) * bearing, moving_hit_max)
 	var fwd := hv.normalized()
 	var push := fwd * dv + (h - fwd * h.dot(fwd)) * dv * moving_hit_along
-	if not c.receive_push(push):
+	_quiet_push = true                 # (the shot already struck the part: no chest jolt for the push on top)
+	var took := c.receive_push(push)
+	_quiet_push = false
+	if not took:
 		return false
+	if c is MarksmanCharacter:
+		var sev := clampf(imp / maxf(hit_impulse_max, 1e-3), 0.0, 1.0) * bearing
+		(c as MarksmanCharacter).moving_stumble = sev
 	if leg and _part_of_region.has(region):
 		var k := clampf((imp - leg_stagger_min_impulse) / maxf(hit_impulse_max - leg_stagger_min_impulse, 1e-3), 0.0, 1.0)
 		_leg_weak[int(_part_of_region[region])] = [lerpf(leg_weak_tone.x, leg_weak_tone.y, k), lerpf(leg_weak_time.x, leg_weak_time.y, k)]
@@ -363,6 +373,44 @@ func _stumble_hit(region: int, dir: Vector3, imp: float, hv: Vector3) -> bool:
 
 ## Hits taken on the move as stumbles (tests).
 var moving_hits := 0
+var _quiet_push := false
+
+
+func jolt(dir: Vector3, impulse: float) -> void:
+	if not _quiet_push:
+		super.jolt(dir, impulse)
+
+
+## Knocked down while powered: the body is already moving with the character (its kinematic legs and tracked upper body
+## carry the run), and Sinew adds the push ON TOP - a sprinter's 6 m/s went in twice. Only what the body doesn't already
+## have is added: along the way it's going, the excess; across it, the push as is.
+func start() -> void:
+	var st := character.state if character else null
+	if st == null or not _powered_on or active or _hips_v == Vector3.INF or modifier == null or modifier.blend < 0.99:
+		super.start()
+		return
+	var keep := st.vel
+	var have := Vector3(_hips_v.x, 0.0, _hips_v.z)
+	var flat := Vector3(keep.x, 0.0, keep.z)
+	var extra := flat
+	if have.length() > 0.3:
+		var along := have.normalized()
+		extra = flat - along * clampf(flat.dot(along), 0.0, have.length())
+	st.vel = Vector3(extra.x, keep.y, extra.z)
+	super.start()
+	st.vel = keep
+
+
+var _hips_v := Vector3.INF
+var _hips_last := Vector3.INF
+
+
+func _track_hips(dt: float) -> void:
+	if pose_now.is_empty() or dt <= 0.0:
+		return
+	var h := (pose_now[0] as Transform3D).origin
+	_hips_v = (h - _hips_last) / dt if _hips_last != Vector3.INF else Vector3.INF
+	_hips_last = h
 
 
 func _relax_floor(part: int) -> float:
@@ -394,3 +442,68 @@ func _relax_hit_limbs(dt: float) -> void:
 	super._relax_hit_limbs(dt)
 	for part: int in held:
 		_hit_relax[part] = held[part]
+
+
+# ------------------------------------------------------------------ rope swing: a body hanging from its hands
+# On a rope (ROPE: the motor's pendulum carries the capsule) the arms are the animation's - the climb clip's hands on the
+# rope - and everything below them hangs as physics from them: torso, head, pelvis and legs swing on their own, lag the
+# swing and swing out at its ends (muscles at `rope_tone` keep the clip's shape loosely). Letting go, the physics eases
+# back into the animation over `rope_release` s (the body stays powered in the air meanwhile).
+
+## Muscle tone of the hanging body (1 = holds the clip's pose stiffly).
+@export var rope_tone := 0.45
+@export var rope_release := 0.4
+var _on_rope := false
+var _rope_left := -1.0           ## s since letting go (< 0: not easing out)
+
+
+func on_rope_physics() -> bool:
+	return _on_rope
+
+
+func _rope_phys() -> bool:
+	return _on_rope or _rope_left >= 0.0
+
+
+func _rope_arm(i: int) -> bool:
+	var n: String = parts[i].name
+	return n.contains("Shoulder") or n.contains("Arm") or n.contains("Hand")
+
+
+func _update_rope(dt: float) -> void:
+	var on := character != null and character.state.state == MotorState.Id.ROPE and powered and not active and _id != 0
+	if on and not _on_rope:
+		_on_rope = true
+		_rope_left = -1.0
+		for i in parts.size():
+			if not _rope_arm(i):
+				world.physics.call("character_set_part_tone", _id, i, rope_tone)
+	elif not on and _on_rope:
+		_on_rope = false
+		_rope_left = 0.0
+		for i in parts.size():
+			world.physics.call("character_set_part_tone", _id, i, 1.0)
+	elif _rope_left >= 0.0:
+		_rope_left += dt
+		if _rope_left > rope_release or active:
+			_rope_left = -1.0
+
+
+func _update_parts(dt: float) -> void:
+	if not _rope_phys():
+		super._update_parts(dt)
+		return
+	if _dyn.size() != parts.size():
+		_all_parts(false, 0.0)
+	_hit_t.clear()
+	for i in parts.size():
+		if not bool(world.physics.call("character_attached", _id, i)):
+			part_w[i] = 1.0
+			continue
+		if _on_rope and not _rope_arm(i):
+			_set_dyn(i, true)
+			part_w[i] = minf(part_w[i] + dt / 0.15, 1.0)
+		else:
+			part_w[i] = maxf(part_w[i] - dt / maxf(rope_release * 0.75, 0.05), 0.0)
+			if part_w[i] <= 0.0:
+				_set_dyn(i, false)

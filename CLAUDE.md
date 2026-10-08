@@ -1373,7 +1373,23 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   is a stumble the way it's going (`_stumble_hit`: receive_push = the gait's catch steps with the momentum + a lurch along
   the travel, `moving_hit_per_impulse` 0.11 x (1 + 0.4 x speed), x0.4 if the struck leg was swinging (MM contact), <= 4.5
   m/s; the leg still weakened) - the balancer stagger froze the animation in place (the user: "stays in that pose").
-  Outcome = simulation (gm walking: 8/16 dmg stumble, 30 falls 2 in 8, 60 falls 3 in 8 - which leg carries the weight).
+  The lurch is NOT scaled by speed and the push's chest jolt is skipped (`_quiet_push`: the shot already struck the part);
+  the run command sags only by severity (`MarksmanCharacter.moving_stumble_sag` 0.7 via Sinew's additive
+  `_stumble_command_share` hook - Sinew's own rule asks for NOTHING right after a push, so every sprinter tripped);
+  a powered knock-down adds only the velocity the body doesn't already have (`MarksmanRagdoll.start`: Sinew added the
+  run on top of the moving body - a sprinter shot in the leg flew at 15-21 m/s). gm test_shot_while_sprinting: hips
+  <= run + 2.3 m/s; graze runs on, 60 dmg trips 1 in 4.
+- **Unarmed arms per clip** (`MarksmanMotionMatcher.CLIP_ARMS`): the U_* walk strafes / runs hold both hands up at the
+  chest (0.6 m over the hips); their legs play under borrowed arms (N_StdWalk2 for the strafe walks, LMM_StandardRun for
+  the runs) on the mm node's filtered `carms` layer, seeked in step (each clip's left footfall = `left_down` /
+  `arms_left_down`, MarksmanMMDatabase._lowest_t). gm test_unarmed_arms_hang_every_way.
+- **Rope swing** (MarksmanRagdoll, ROPE): powered in the air (`_rope_phys`), the arms the climb clip's (kinematic: hands
+  on the rope), everything below them physics at `rope_tone` 0.45 - it lags the swing and swings out (hips up to 0.5 m off
+  the clip's). Letting go: physics eases back over `rope_release` 0.4 s, the rope node's cross-fades are 0.5 s (the
+  arms came off the grip 17 cm a frame), and `MarksmanCharacter._sync_visual` eases the UltraController's rope tilt /
+  16 cm offset out over 0.3 s (it stood the skeleton up in ONE frame: 1.1 m, read by Sinew as a teleport -> snap).
+  gm test_rope_swing_is_physical (measured on the SHOWN bones in the skeleton frame at skeleton_updated - the raw
+  physics bodies include the swing's own speed and invisible kinematic snaps).
 - **Foot IK (ground fit)**: each foot onto the ground under its ankle / ball (higher of the two), followed (rise 3.5, fall
   2 m/s); hips down only as far as a leg can't reach (`REACH` 0.97); planted soles tilt to the surface (<= 28 deg). Leg IK
   swings the knee WITH the leg onto the new hip->foot line, plus the thigh's forward only when the knee is nearly straight

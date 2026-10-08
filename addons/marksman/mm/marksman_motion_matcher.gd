@@ -49,6 +49,15 @@ const SETS := {
 	"pistol_crouch": RFP_CROUCH,
 }
 ## Arms laid over the matched clip (still, moving - blended by speed), per set; none = the clip's own.
+## Per clip: the clip whose arms show over it. The U_* walk strafes / runs hold both hands up at the chest (a guard,
+## 0.6 m over the hips - the forward walk's hang at the hips): their legs, the forward walk's / a natural run's arms,
+## in step with the legs (MarksmanAnimDriver._drive_clip_arms, locked on each clip's left footfall).
+const CLIP_ARMS := {
+	"mixamo/U_Walk_R": "mixamo/N_StdWalk2", "mirror:mixamo/U_Walk_R": "mixamo/N_StdWalk2",
+	"mixamo/U_Run_F": "mixamo/LMM_StandardRun", "mixamo/U_Run_B": "mixamo/LMM_StandardRun",
+	"mixamo/U_Run_L": "mixamo/LMM_StandardRun", "mixamo/U_Run_R": "mixamo/LMM_StandardRun",
+}
+
 const ARMS := {
 	"unarmed_crouch": ["Crouch_Idle", "mixamo/N_StdWalk2"],
 	"pistol_crouch": ["mixamo/PST_PistolKneelingIdle", "mixamo/PST_PistolKneelingIdle"],
@@ -114,7 +123,12 @@ func database(st: String) -> MarksmanMMDatabase:
 				pn = driver._mirrored(pn)
 			var a := driver.player.get_animation(pn) if driver.player.has_animation(pn) else null
 			if a:
-				list.append({"name": pn, "anim": a})
+				var spec := {"name": pn, "anim": a}
+				var an := _player_name(String(CLIP_ARMS.get(name, "")))
+				if CLIP_ARMS.has(name) and driver.player.has_animation(an):
+					spec.arms = StringName(an)
+					spec.arms_anim = driver.player.get_animation(an)
+				list.append(spec)
 		var d := MarksmanMMDatabase.new()
 		d.build(sk, list)
 		_cache[key] = d

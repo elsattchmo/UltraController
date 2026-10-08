@@ -70,7 +70,17 @@ func build(sk: Skeleton3D, list: Array) -> void:
 		# Where this clip's floor is (the lower sole's 5th percentile): clips are authored a few cm off the ground.
 		lows.sort()
 		var c := {"name": spec.name, "anim": a, "loop": loop, "length": a.length, "vel": vel, "ground": lows[int(lows.size() * 0.05)],
-				"start": frame_clip.size(), "count": 0, "speed": vel.length()}
+				"start": frame_clip.size(), "count": 0, "speed": vel.length(), "left_down": _lowest_t(P.lf, dt60)}
+		# (Arms from another clip, in step: its own left footfall time.)
+		if spec.has("arms_anim"):
+			var aa: Animation = spec.arms_anim
+			var m := maxi(2, int(ceil(aa.length * 60.0)))
+			var al := []
+			for i in m + 1:
+				al.append((SinewGaitCycles._globals(aa, sk, minf(i * aa.length / m, aa.length))[lf] as Transform3D).origin)
+			c.arms = spec.arms
+			c.arms_length = aa.length
+			c.arms_left_down = _lowest_t(al, aa.length / m)
 		var miny := [_min_y(P.lf), _min_y(P.rf), _min_y(P.lt), _min_y(P.rt)]
 		var nf := maxi(1, int(floor(a.length * FPS)))
 		var root_v := Vector3(vel.x, 0.0, vel.y)
@@ -113,6 +123,15 @@ func build(sk: Skeleton3D, list: Array) -> void:
 			c.count += 1
 		clips.append(c)
 	_normalise()
+
+
+## When a foot track is lowest (s): the footfall a clip's cycle is locked on.
+static func _lowest_t(track: Array, dt: float) -> float:
+	var best := 0
+	for i in track.size():
+		if (track[i] as Vector3).y < (track[best] as Vector3).y:
+			best = i
+	return best * dt
 
 
 func size() -> int:

@@ -221,9 +221,25 @@ func _drop_below() -> float:
 	return state.pos.y - (hit.position as Vector3).y if not hit.is_empty() else 9.0
 
 
+## A hit on the move (MarksmanRagdoll._stumble_hit) doesn't stop the runner: the body still wants its run, held back
+## only by how bad the hit was (`moving_stumble_sag` x severity at the hit, back over the stumble) - the gait's catching
+## steps then judge the lurch against a run, not a stop (Sinew's push rule asks for nothing at first: every sprinter
+## shot in the leg tripped). -1 = a plain push.
+var moving_stumble := -1.0
+@export var moving_stumble_sag := 0.7
+
+
+func _stumble_command_share() -> float:
+	if moving_stumble < 0.0 or _stumble_t <= 0.0:
+		moving_stumble = -1.0
+		return super._stumble_command_share()
+	return 1.0 - moving_stumble * moving_stumble_sag * _stumble_t / STUMBLE_TIME
+
+
 ## A push under motion matching: the legs go to Sinew's gait for the stumble (its catching steps under physical
 ## motion, the trip rule), then back to the matcher (MarksmanRagdoll.stumble_start).
 func receive_push(dv: Vector3) -> bool:
+	moving_stumble = -1.0          # (a hit on the move sets it again after its push)
 	var r := ragdoll as MarksmanRagdoll
 	var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
 	if not _motion_on and r != null and r.mm_legs() and physical_motion and offline and is_authority() \
@@ -233,6 +249,40 @@ func receive_push(dv: Vector3) -> bool:
 			_motion_on = true
 			_motion_vel = Vector3(state.vel.x, 0.0, state.vel.z)
 	return super.receive_push(dv)
+
+
+# ------------------------------------------------------------------ rope: letting go without a snap
+
+## On a rope the body is drawn along it (UltraCharacter._sync_visual: tilted to the rope, 16 cm behind it); letting go it
+## stood straight up in one frame - the whole skeleton turned up to 60 deg and moved 1.1 m in a frame (Sinew read it as a
+## teleport and snapped the hanging body onto the animation). The tilt and offset ease out over ROPE_LET_GO s instead.
+const ROPE_LET_GO := 0.3
+var _rope_vis := Transform3D()
+var _rope_off := Vector3.INF          ## the rope pose's offset from the upright one at the release (INF: none)
+var _rope_ease := -1.0
+
+
+func _sync_visual(alpha: float) -> void:
+	super._sync_visual(alpha)
+	if visual_root == null:
+		return
+	if state.state == MotorState.Id.ROPE:
+		_rope_vis = visual_root.global_transform
+		_rope_ease = 0.0
+		_rope_off = Vector3.INF
+		return
+	if _rope_ease < 0.0:
+		return
+	var up := visual_root.global_transform
+	if _rope_off == Vector3.INF:
+		_rope_off = _rope_vis.origin - up.origin
+	_rope_ease += get_process_delta_time()
+	var k := smoothstep(0.0, 1.0, _rope_ease / ROPE_LET_GO)
+	if k >= 1.0:
+		_rope_ease = -1.0
+		return
+	var b := _rope_vis.basis.get_rotation_quaternion().slerp(up.basis.get_rotation_quaternion(), k)
+	visual_root.global_transform = Transform3D(Basis(b), up.origin + _rope_off * (1.0 - k))
 
 
 func _new_anim_driver() -> SinewAnimDriver:
