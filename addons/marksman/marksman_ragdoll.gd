@@ -11,6 +11,17 @@ var group := -1
 @export var stance_blend := 0.35
 
 
+## The gun pass over the animated pose (aim, support hand): see MarksmanGunPass.
+var gun_pass: MarksmanGunPass
+
+
+func setup(c: UltraCharacter) -> void:
+	super.setup(c)
+	if modifier != null and not parts.is_empty():
+		gun_pass = MarksmanGunPass.new(c, self)
+		modifier.passes.append(gun_pass)
+
+
 func _setup_gait() -> void:
 	_gait_on = false
 	_gait_running = false

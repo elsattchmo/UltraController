@@ -1342,3 +1342,13 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   clip's hips while the clip holds the legs; eases away 0.25 s after), heel strikes lowered into through the swing,
   drop released at 0.6 + 1.2 x speed m/s, the cycle pose's share at low speed eased (`_step_w`). s10 KNOWN: chaos
   sprint (thigh roots brush < 1 cm).
+- **Gun pass (V2)** (`MarksmanGunPass`, a `SinewPoseModifier.passes` entry: procedural passes on `anim_pose` after the
+  gait + torso twist, before physics - Sinew's hook, empty for Sinew): aims at where `gun_ray()` meets the world (60 m
+  else). Shouldered guns (two-handed + `M_Stock`: rifle, shotgun) are placed gun-first - stock in the right shoulder's
+  pocket (`POCKET` off the RightUpperArm joint in the chest's frame), barrel onto the aim point, no cant - and the gun
+  hand IK'd onto its grip (the RFP clips' hands held THEIR rifle across the chest, stock past the left shoulder); held-
+  out guns (pistol) turn the barrel by spine (<= 0.6 rad) -> gun arm -> wrist (iterated: a close aim point moves with
+  each turn). Support hand by two-bone IK on `support_offset` (else the clip's own hand relative to the gun). Weight =
+  raised x (1 - gun_low), eased. The rifle stance plays its aim clip (r_aim / rc_aim) when the gun is up. Suite g2
+  (barrel <= 1 deg standing / 2 moving, support hand <= 1.5 cm, stock in the pocket <= 3 cm, arms animated), tour
+  `marksman_aim_review` (red = barrel line, green = aim ray).

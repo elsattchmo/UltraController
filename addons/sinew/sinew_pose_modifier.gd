@@ -15,6 +15,10 @@ var blend := 0.0
 var anim_pose: Array[Transform3D] = []
 ## The clip's own pose (before the gait goes over it), skeleton space: the gait's standing feet.
 var clip_pose: Array[Transform3D] = []
+## Procedural passes over the animated pose (a controller built on Sinew adds them: Marksman's gun pass), run after
+## the gait and the torso twist, before the physics: what they make is what shows AND what the body tracks. Each is
+## an object with `apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool` (true = it changed `anim_pose`).
+var passes: Array = []
 ## Torso twist shares, by bone (the head's part sits on the neck bone).
 const TWIST_SHARE := {"Spine": 0.15, "Chest": 0.15, "UpperChest": 0.2, "Neck": 0.5}
 var _twist_parts: Array = []     ## [[part index, share, [subtree part indices]], ...]
@@ -59,6 +63,9 @@ func _process_modification_with_delta(_delta: float) -> void:
 	var twisted := absf(ragdoll.torso_twist) > 1e-4
 	if twisted:
 		_twist(sk, n)
+	for p in passes:
+		if p.apply(self, sk):
+			twisted = true      # (written below like the twist)
 	if blend <= 0.0 or ragdoll.pose_now.size() != n:
 		if gait or twisted:
 			for i in n:
