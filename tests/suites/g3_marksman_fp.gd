@@ -3,8 +3,9 @@ extends UltraTestSuite
 ## (MarksmanEye after the camera rig); in ADS the gun pass bends the neck toward the stock and puts the gun's sight
 ## line on the eye, so the rear and front sights sit on the line to the aim point.
 
-func _marksman(at: Vector3) -> MarksmanCharacter:
+func _marksman(at: Vector3, mm := false) -> MarksmanCharacter:
 	var c := MarksmanCharacter.new()
+	c.motion_matching = mm
 	c.profile = (load("res://addons/ultra_controller/profiles/fps.tres") as MovementProfile).duplicate(true)
 	c.body_profile = CharacterModels.body_profile("mannequin")
 	c.build_visuals = true
@@ -36,8 +37,17 @@ func _rig(c: MarksmanCharacter) -> UltraCameraRig:
 
 
 func test_first_person_eye_and_sights() -> void:
+	await _fp(false)
+
+
+## The same with motion matching on.
+func test_first_person_with_motion_matching() -> void:
+	await _fp(true)
+
+
+func _fp(mm: bool) -> void:
 	load_playground()
-	var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+	var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3), mm)
 	var rig := _rig(c)
 	await ticks(60)
 	if not check(c.eye != null, "a MarksmanEye follows the camera rig"):
@@ -55,7 +65,7 @@ func test_first_person_eye_and_sights() -> void:
 			# At the hip.
 			bot(c).set_steps([{"ticks": 200, "slot": sl, "yaw": 0.0, "pitch": -0.05, "buttons": buttons}])
 			await ticks(80)
-			var label := "%s %s" % [item, "crouched" if crouch else "standing"]
+			var label := "%s%s %s" % ["MM " if mm else "", item, "crouched" if crouch else "standing"]
 			var cam := rig.camera.global_position
 			check(cam.distance_to(c.eye.eye) <= 0.001 and c.eye.weight > 0.99,
 					"%s: the first-person camera is the head's eye (%.1f mm, weight %.2f)" % [label, cam.distance_to(c.eye.eye) * 1000.0, c.eye.weight])

@@ -408,3 +408,57 @@ func test_gaps_are_strides() -> void:
 	info("sprinting the gap walk: crossed %s, fell at z %.1f, feet planted in a gap %d frames, states %s" % [run.crossed, run.fell_at, run.foot_in_gap, (run.states as Dictionary).keys()])
 	check(run.crossed == [true, true, true, true] and run.fell_at < 0, "sprinting, every gap up to 1.4 m is a stride")
 	check(run.foot_in_gap == 0, "no foot put down in a gap (%d frames)" % run.foot_in_gap)
+
+
+## Motion matching covers every stance and posture: pistol standing, unarmed / rifle / pistol crouched - 8 ways each,
+## the matched clips show (not the gait), the body goes where it's told, the legs don't go through each other.
+func test_crouch_and_pistol_are_matched() -> void:
+	load_playground()
+	const D := 0.70710678
+	var dirs := {"f": Vector2(0, 1), "fr": Vector2(D, D), "r": Vector2(1, 0), "br": Vector2(D, -D), "b": Vector2(0, -1),
+			"bl": Vector2(-D, -D), "l": Vector2(-1, 0), "fl": Vector2(-D, D)}
+	var spot := marker("spawn").global_position + Vector3(-16, 0, -3)
+	for spec: Array in [[&"pistol", false], [&"", true], [&"rifle", true], [&"pistol", true]]:
+		var c := _marksman(spot, true)
+		await ticks(40)
+		var sl := 0
+		if spec[0] != &"":
+			UltraItems.give(c, spec[0])
+			for i in c.inventory.size():
+				var it := c.inventory.get_slot(i)
+				if it and it.def_id == spec[0]:
+					sl = i + 1
+		var buttons := InputFrame.B_CROUCH if spec[1] else 0
+		var r := c.ragdoll as MarksmanRagdoll
+		var drv := c.anim as MarksmanAnimDriver
+		var m := SinewMoveMetrics.new(c)
+		m.record_sinks = false
+		var name := "%s %s" % ["unarmed" if spec[0] == &"" else String(spec[0]), "crouched" if spec[1] else "standing"]
+		var bad := []
+		for d: String in dirs:
+			m.label = ""
+			c.teleport(spot, 0.0)
+			bot(c).live_yaw = 0.0
+			bot(c).set_steps([{"ticks": 40, "buttons": buttons, "slot": sl, "yaw": 0.0}])
+			await ticks(40)
+			var from := c.state.pos
+			m.label = d
+			var shown := true
+			bot(c).set_steps([{"ticks": 76, "move": dirs[d], "buttons": buttons, "slot": sl, "yaw": 0.0}])
+			for i in 75:
+				await ticks(1)
+				if i > 15:
+					shown = shown and drv._cur_loco == "mm" and r.gait_w < 0.05
+			var moved := c.state.pos - from
+			var want := Vector3(dirs[d].x, 0, -dirs[d].y)
+			var s := m.summary(d)
+			var ok: bool = shown and moved.normalized().dot(want) > 0.9 and moved.length() > 0.5 and float(s.gap_min) >= -0.02
+			if not ok:
+				bad.append("%s (shown %s, moved %.2f m at %.0f deg off, gap %.1f cm)" % [d, shown, moved.length(), rad_to_deg(moved.normalized().angle_to(want)), float(s.gap_min) * 100.0])
+		m.label = ""
+		m.detach()
+		info("%s matched:\n%s" % [name, m.table()])
+		check(bad.is_empty(), "%s: 8 ways on matched clips, legs clear (%s)" % [name, bad])
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)

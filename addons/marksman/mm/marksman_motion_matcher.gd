@@ -16,9 +16,14 @@ const SWITCH_MARGIN := 0.4
 const RATE_MIN := 0.5
 const RATE_MAX := 1.35
 
-## Clips per stance (the player's animation names, "library/clip"; "mirror:" = mirrored left / right). Picked by their own
-## legs' closest approach (thighs, shins, feet as capsules): not the crossover side steps Strafe_Walk_L / R (cross by
-## design), U_Walk_L (-6.2 cm: the left step is a mirrored U_Walk_R, +2.5), U_Walk_F (-2.5; N_StdWalk2 +1.8).
+## Clips per stance and posture (key "<stance>" standing, "<stance>_crouch" crouched; the player's animation names,
+## "library/clip"; "mirror:" = mirrored left / right). Picked by their own legs' closest approach (thighs, shins, feet as
+## capsules): not the crossover side steps Strafe_Walk_L / R (cross by design), U_Walk_L (-6.2 cm: the left step is a
+## mirrored U_Walk_R, +2.5), U_Walk_F (-2.5; N_StdWalk2 +1.8). Crouched, every stance walks the rifle pack's 8-way crouch
+## legs; ARMS (below) lays calmer arms over them where the rifle's would show.
+const RFP_CROUCH := ["mixamo/RFP_IdleCrouching", "mixamo/RFP_WalkCrouchingForward", "mixamo/RFP_WalkCrouchingForwardLeft",
+	"mixamo/RFP_WalkCrouchingForwardRight", "mixamo/RFP_WalkCrouchingLeft", "mixamo/RFP_WalkCrouchingRight",
+	"mixamo/RFP_WalkCrouchingBackward", "mixamo/RFP_WalkCrouchingBackwardLeft", "mixamo/RFP_WalkCrouchingBackwardRight"]
 const SETS := {
 	"unarmed": ["Idle_A", "mixamo/N_StdWalk2", "mixamo/U_Walk_R", "mirror:mixamo/U_Walk_R", "Walk_Backwards", "mixamo/U_Run_F", "mixamo/U_Run_B",
 		"mixamo/U_Run_L", "mixamo/U_Run_R", "mixamo/S_Fast"],
@@ -28,7 +33,28 @@ const SETS := {
 		"mixamo/RFP_RunLeft", "mixamo/RFP_RunRight", "mixamo/RFP_RunBackward", "mixamo/RFP_RunBackwardLeft",
 		"mixamo/RFP_RunBackwardRight", "mixamo/RFP_SprintForward", "mixamo/RFP_SprintForwardLeft",
 		"mixamo/RFP_SprintForwardRight"],
+	# (The pistol pack: walk 2.4 m/s (played down to 1.2), back, strafes 1.0 left / 2.2 right - mirrored for the other
+	# sides - run, run back; the sprint is the unarmed one (the gun is lowered). Not the plain walk: its free left arm
+	# swung the support hand 12 cm off the gun.)
+	"pistol": ["mixamo/PST_PistolIdle", "mixamo/PST_PistolWalk", "mixamo/PST_PistolWalkBackward",
+		"mixamo/PST_PistolStrafe", "mirror:mixamo/PST_PistolStrafe", "mixamo/PST_PistolStrafe2", "mirror:mixamo/PST_PistolStrafe2",
+		"mixamo/PST_PistolRun", "mixamo/PST_PistolRunBackward", "mixamo/S_Fast"],
+	"unarmed_crouch": RFP_CROUCH,
+	"rifle_crouch": RFP_CROUCH,
+	"pistol_crouch": RFP_CROUCH,
 }
+## Arms laid over the matched clip (still, moving - blended by speed), per set; none = the clip's own.
+const ARMS := {
+	"unarmed_crouch": ["Crouch_Idle", "mixamo/N_StdWalk2"],
+	"pistol_crouch": ["mixamo/PST_PistolKneelingIdle", "mixamo/PST_PistolKneelingIdle"],
+}
+
+
+## The set for a character now: its stance, crouched or not.
+static func key_for(c: UltraCharacter) -> String:
+	var st := MarksmanStance.of_item(c.held_def())
+	return st + "_crouch" if c.state.stance == MotorState.Stance.CROUCH else st
+
 
 var character: UltraCharacter
 var driver: UltraAnimDriver

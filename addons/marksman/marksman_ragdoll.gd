@@ -78,17 +78,25 @@ const GROUND_STATES := [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TU
 
 
 func _gait_states() -> Array:
-	# (Motion matching has the legs standing in a stance it has clips for - unless a stumble handed them to the gait's
-	# catching steps: the gait then only crouches.)
-	if mm_legs() and not _stumble:
-		return [MotorState.Id.CROUCH]
-	return super._gait_states() + [MotorState.Id.CROUCH]
+	# (Motion matching has the legs in whatever stance and posture it has clips for - unless a stumble handed them to the
+	# gait's catching steps.)
+	var all := super._gait_states() + [MotorState.Id.CROUCH]
+	var drv := character.anim as MarksmanAnimDriver if character else null
+	if _stumble or drv == null or drv.mm == null:
+		return all
+	var st := MarksmanStance.of(character)
+	var out := []
+	for s in all:
+		var crouched: bool = s == MotorState.Id.CROUCH
+		if not drv.mm.has_stance(st + "_crouch" if crouched else st):
+			out.append(s)
+	return out
 
 
-## Motion matching walks this stance (the gait stands by for stumbles).
+## Motion matching walks the stance and posture the character is in (the gait stands by for stumbles).
 func mm_legs() -> bool:
 	var drv := character.anim as MarksmanAnimDriver if character else null
-	return drv != null and drv.mm != null and drv.mm.has_stance(MarksmanStance.of(character))
+	return drv != null and drv.mm != null and drv.mm.has_stance(MarksmanMotionMatcher.key_for(character))
 
 
 # ------------------------------------------------------------------ stumbles under motion matching

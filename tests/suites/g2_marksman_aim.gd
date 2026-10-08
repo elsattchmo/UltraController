@@ -8,8 +8,9 @@ const MOVES := {"standing": Vector2.ZERO, "walking": Vector2(0, 1), "strafing": 
 const PITCHES := [-0.35, 0.0, 0.3]
 
 
-func _marksman(at: Vector3) -> MarksmanCharacter:
+func _marksman(at: Vector3, mm := false) -> MarksmanCharacter:
 	var c := MarksmanCharacter.new()
+	c.motion_matching = mm
 	c.profile = (load("res://addons/ultra_controller/profiles/fps.tres") as MovementProfile).duplicate(true)
 	c.body_profile = CharacterModels.body_profile("mannequin")
 	c.build_visuals = true
@@ -78,16 +79,26 @@ func _worst(a: Array) -> float:
 
 
 func test_barrel_on_the_aim_and_support_hand_on_the_gun() -> void:
+	await _aim_matrix(false, [&"rifle", &"shotgun", &"pistol"], MOVES.keys(), PITCHES)
+
+
+## The same with motion matching on (the gun pass runs after the matching pass): every gun, standing / crouched,
+## still and walking, level.
+func test_barrel_on_the_aim_with_motion_matching() -> void:
+	await _aim_matrix(true, [&"rifle", &"shotgun", &"pistol"], ["standing", "walking"], [0.0])
+
+
+func _aim_matrix(mm: bool, items: Array, moves: Array, pitches: Array) -> void:
 	load_playground()
-	var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+	var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3), mm)
 	await ticks(40)
 	if not check((c.ragdoll as MarksmanRagdoll).gun_pass != null, "the gun pass is in place"):
 		return
-	for item: StringName in [&"rifle", &"shotgun", &"pistol"]:
+	for item: StringName in items:
 		var sl := _slot(c, item)
 		for crouch in [false, true]:
-			for mv: String in MOVES:
-				for pitch: float in PITCHES:
+			for mv: String in moves:
+				for pitch: float in pitches:
 					c.teleport(marker("spawn").global_position + Vector3(-16, 0, -3), 0.0)
 					bot(c).live_yaw = 0.0
 					var buttons := InputFrame.B_CROUCH if crouch else 0
@@ -96,11 +107,14 @@ func test_barrel_on_the_aim_and_support_hand_on_the_gun() -> void:
 					bot(c).set_steps([{"ticks": 61, "slot": sl, "yaw": 0.0, "pitch": pitch, "buttons": buttons, "move": MOVES[mv]}])
 					await ticks(20)
 					var m := await _measure(c, 40)
-					var label := "%s %s %s pitch %+.2f" % [item, "crouched" if crouch else "standing", mv, pitch]
+					var label := "%s%s %s %s pitch %+.2f" % ["MM " if mm else "", item, "crouched" if crouch else "standing", mv, pitch]
 					var aim := rad_to_deg(_worst(m.aim))
 					var sup := _worst(m.support) * 100.0
 					var limit := 1.0 if mv == "standing" else 2.0
-					info("%-40s barrel %.2f deg, support hand %.2f cm, pass %.2f, arms physical %.2f" % [label, aim, sup, _worst(m.weight), m.arm_w])
+					info("%-44s barrel %.2f deg, support hand %.2f cm, pass %.2f, arms physical %.2f" % [label, aim, sup, _worst(m.weight), m.arm_w])
+					if mm:
+						var drv := c.anim as MarksmanAnimDriver
+						check(drv._cur_loco == "mm", "%s: matched clips show (%s)" % [label, drv._cur_loco])
 					check(not (m.aim as Array).is_empty() and _worst(m.weight) > 0.99, "%s: the gun is up and the pass on" % label)
 					check(aim <= limit, "%s: the barrel on the aim point (%.2f deg, limit %.0f)" % [label, aim, limit])
 					check(sup <= 1.5, "%s: the support hand on its grip (%.2f cm)" % [label, sup])

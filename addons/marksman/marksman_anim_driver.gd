@@ -43,7 +43,22 @@ func _build_sinew() -> AnimationNodeBlendTree:
 		m.add_node("rate", AnimationNodeTimeScale.new(), Vector2(400, 0))
 		m.connect_node("seek", 0, "clip")
 		m.connect_node("rate", 0, "seek")
-		m.connect_node("output", 0, "rate")
+		# (Arms laid over it for the sets that borrow another stance's legs: MarksmanMotionMatcher.ARMS.)
+		var arms := AnimationNodeBlend2.new()
+		arms.filter_enabled = true
+		for b in _arm_bones():
+			arms.set_filter_path(NodePath("%" + String(skeleton.name) + ":" + b), true)
+		m.add_node("arms", arms, Vector2(600, 0))
+		for an: String in ["arms_still", "arms_move"]:
+			var a := AnimationNodeAnimation.new()        # (plain: each clip's own length and loop)
+			a.animation = _clip(&"idle")
+			m.add_node(an, a, Vector2(200, 160 if an == "arms_still" else 280))
+		m.add_node("arms_mix", AnimationNodeBlend2.new(), Vector2(400, 200))
+		m.connect_node("arms_mix", 0, "arms_still")
+		m.connect_node("arms_mix", 1, "arms_move")
+		m.connect_node("arms", 0, "rate")
+		m.connect_node("arms", 1, "arms_mix")
+		m.connect_node("output", 0, "arms")
 		loco.add_node("mm", m, Vector2(0, 200))
 		for n in loco.get_node_list():
 			if n == &"mm" or n == &"Start" or n == &"End":
@@ -148,6 +163,25 @@ func setup(p: AnimationPlayer, sk: Skeleton3D) -> void:
 
 # ------------------------------------------------------------------ motion matching (spike)
 
+var _mm_arms_key := ""
+
+
+## The set's own arms over its matched clip (MarksmanMotionMatcher.ARMS: still / moving by speed), else none.
+func _drive_mm_arms(key: String, delta: float) -> void:
+	var arms: Array = MarksmanMotionMatcher.ARMS.get(key, [])
+	if key != _mm_arms_key:
+		_mm_arms_key = key
+		if not arms.is_empty():
+			var node := ((tree.tree_root as AnimationNodeBlendTree).get_node("loco") as AnimationNodeStateMachine).get_node("mm") as AnimationNodeBlendTree
+			for k in 2:
+				var pn := String(arms[k])
+				var full := StringName(pn if pn.contains("/") or library_name == &"" else "%s/%s" % [library_name, pn])
+				(node.get_node("arms_still" if k == 0 else "arms_move") as AnimationNodeAnimation).animation = full
+	var on := 0.0 if arms.is_empty() else 1.0
+	tree.set(LOCO + "mm/arms/blend_amount", _ease_w(&"mm_arms", on, delta))
+	var sp := Vector2(velocity.x, velocity.z).length()
+	tree.set(LOCO + "mm/arms_mix/blend_amount", _ease_w(&"mm_arms_move", smoothstep(0.15, 0.6, sp), delta))
+
 ## Seconds a matched switch dead-blends over.
 const MM_BLEND := 0.25
 var mm: MarksmanMotionMatcher
@@ -161,14 +195,16 @@ func _mm_on() -> bool:
 	return c != null and c.motion_matching
 
 
-## Standing on the ground in a stance the matcher has clips for.
+## On the ground, standing or crouched, in a stance and posture the matcher has clips for.
 func mm_active() -> bool:
-	return mm != null and mm.has_stance(MarksmanStance.of_item(held_def)) and state in MarksmanRagdoll.GROUND_STATES
+	var c := get_parent() as UltraCharacter
+	return mm != null and c != null and mm.has_stance(MarksmanMotionMatcher.key_for(c)) \
+			and (state in MarksmanRagdoll.GROUND_STATES or state == MotorState.Id.CROUCH)
 
 
 func _wanted() -> String:
 	var w := super._wanted()
-	return "mm" if w == "ground" and mm_active() else w
+	return "mm" if (w == "ground" or w == "crouch") and mm_active() else w
 
 
 func _drive_mm(delta: float) -> void:
@@ -189,7 +225,9 @@ func _drive_mm(delta: float) -> void:
 	if r and (r.staggering() or r._handback_t >= 0.0):
 		tree.set(LOCO + "mm/rate/scale", 0.0)
 		return
-	if mm.update(delta, MarksmanStance.of_item(held_def)) or mm.db.clips[mm.clip].name != _mm_clip:
+	var key := MarksmanMotionMatcher.key_for(get_parent() as UltraCharacter)
+	_drive_mm_arms(key, delta)
+	if mm.update(delta, key) or mm.db.clips[mm.clip].name != _mm_clip:
 		var c: Dictionary = mm.db.clips[mm.clip]
 		var node := ((tree.tree_root as AnimationNodeBlendTree).get_node("loco") as AnimationNodeStateMachine).get_node("mm") as AnimationNodeBlendTree
 		(node.get_node("clip") as AnimationNodeAnimation).animation = c.name
