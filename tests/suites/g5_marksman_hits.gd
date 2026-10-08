@@ -37,7 +37,10 @@ func _hit(c: UltraCharacter, region: int, amount: float, dir: Vector3) -> void:
 	d.kind = &"bullet"
 	d.dir = dir
 	d.point = c.state.pos + Vector3.UP * 1.3
+	var limb_hp := c.state.limb_hp[region]
 	c.apply_damage(d)
+	# (The knock, not the injury: a crippled arm would put the gun in one hand - V6, suite g7.)
+	c.state.limb_hp[region] = limb_hp
 	c.react_to_hit(region, dir, amount, d.kind)        # (UltraEffects does it on every machine: not in a test scene)
 
 

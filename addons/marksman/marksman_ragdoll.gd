@@ -433,13 +433,44 @@ func armed_hold() -> bool:
 
 
 func _part_wants_physics(i: int, want: bool) -> bool:
+	if _limp_arm(i):
+		return true
 	if want and armed_hold() and String(parts[i].name) in ARM_PARTS:
 		return false
 	return want
 
 
+## V6: an arm that's out (crippled, or what's left of it once severed) hangs: physical in every state at LIMP_TONE.
+## The shoulder stays the animation's (the clavicle carries the chest's motion).
+const LIMP_TONE := 0.08
+const LIMP_PARTS := ["UpperArm", "LowerArm", "Hand"]
+var _limp: Dictionary = {}           ## part -> true while held limp (its tone restored when the arm heals)
+
+
+func _limp_arm(i: int) -> bool:
+	var n := String(parts[i].name)
+	var left := n.begins_with("Left")
+	if not left and not n.begins_with("Right"):
+		return false
+	if not n.trim_prefix("Left" if left else "Right") in LIMP_PARTS:
+		return false
+	return character != null and UltraLimbs.arm(character.state, left) >= UltraLimbs.Status.CRIPPLED
+
+
+func _hold_limp() -> void:
+	for i in parts.size():
+		var on := _limp_arm(i)
+		if on:
+			world.physics.call("character_set_part_tone", _id, i, LIMP_TONE)
+			_limp[i] = true
+		elif _limp.has(i):
+			_limp.erase(i)
+			world.physics.call("character_set_part_tone", _id, i, 1.0)
+
+
 func _hit_chain(part: int) -> Array:
 	var chain := super._hit_chain(part)
+	chain = chain.filter(func(i: int) -> bool: return not _limp_arm(i))
 	if not armed_hold():
 		return chain
 	return chain.filter(func(i: int) -> bool: return not String(parts[i].name) in ARM_PARTS)
@@ -474,6 +505,7 @@ func _relax_hit_limbs(dt: float) -> void:
 	super._relax_hit_limbs(dt)
 	for part: int in held:
 		_hit_relax[part] = held[part]
+	_hold_limp()
 
 
 # ------------------------------------------------------------------ getting up: the clip for how the body lies
