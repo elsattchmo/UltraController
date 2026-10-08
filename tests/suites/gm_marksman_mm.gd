@@ -337,6 +337,24 @@ func test_ledges() -> void:
 	chars.erase(c)
 	c.queue_free()
 	await ticks(3)
+	# Below the ledge height (0.6 m) a drop is a step down: off the 0.5 m wall plainly; off the 1.0 m wall, Sinew.
+	for wall: Array in [[0.5, 58.0, false], [1.0, 63.0, true]]:
+		c = _marksman(Vector3(float(wall[1]), float(wall[0]) + 0.05, -30.0), true)
+		r = c.ragdoll as MarksmanRagdoll
+		bot(c).live_yaw = PI
+		await ticks(40)
+		bot(c).set_steps([{"ticks": 150, "move": Vector2(0, 1), "yaw": PI}])
+		var took := false
+		var landed := false
+		for i in 150:
+			await ticks(1)
+			took = took or r.staggering()
+			landed = landed or c.state.pos.y < 0.2
+		info("walked off the %.1f m wall: Sinew took the body %s" % [wall[0], took])
+		check(landed and took == bool(wall[2]), "off the %.1f m wall: %s" % [wall[0], "Sinew takes the body (a ledge)" if wall[2] else "a plain step down (under the ledge height)"])
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
 
 
 ## Gaps (the gap walk: a 0.6 m high path with gaps of 0.4 / 0.7 / 1.0 / 1.4 m): one the legs can span along the way the

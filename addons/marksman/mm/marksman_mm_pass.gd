@@ -185,8 +185,8 @@ const TILT_MAX := deg_to_rad(28.0)
 ## far short of it (m).
 const GAP_HEEL := 0.09
 const GAP_BALL := 0.03
-## A foot over a drop deeper than this (m) below the ground under its own ankle is over an edge; only a body slower than
-## EDGE_STILL (m/s) keeps its feet on the lip.
+## A foot over a drop at least the character's `ledge_height` (else this, m) below the ground under its own ankle is over
+## an edge; only a body slower than EDGE_STILL (m/s) keeps its feet on the lip.
 const EDGE_DROP := 0.3
 const EDGE_STILL := 0.6
 ## Per foot: how far a planted foot over an edge is drawn back onto the lip (skeleton space).
@@ -257,13 +257,14 @@ func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 			var ball_hit := _probe(space, ball, floor_y)
 			var ankle_hit := _probe(space, ankle, floor_y)
 			var own := float(ankle_hit.y) if not ankle_hit.is_empty() else floor_y
-			var ball_over := ball_hit.is_empty() or float(ball_hit.y) < own - EDGE_DROP
+			var ledge: float = character.get("ledge_height") if character.get("ledge_height") != null else EDGE_DROP
+			var ball_over := ball_hit.is_empty() or float(ball_hit.y) < own - ledge
 			if ball_over:
 				var centre := Vector3(xf.origin.x, ball.y, xf.origin.z)
 				for k in range(1, 9):
 					var p := ball.lerp(centre, k / 8.0)
 					var h := _probe(space, p, floor_y)
-					if not h.is_empty() and float(h.y) > own - EDGE_DROP:
+					if not h.is_empty() and float(h.y) > own - ledge:
 						_edge_pull[side] = to_sk * (ball.lerp(centre, minf((k + 0.3) / 8.0, 1.0)) - ball)
 						want[side] = clampf(float(h.y) - floor_y, -FIT_DOWN, FIT_UP)
 						normals[side] = h.n

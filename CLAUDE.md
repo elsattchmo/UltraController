@@ -1376,7 +1376,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   (a fixed forward pull crossed the rifle stance's out-turned knees; the old offset against a far-moved line flipped knees).
 - **Ledges**: climb-downs only crouched (or crouch pressed) - `_traversal_hook` vetoes the down moves standing (restores the
   state copy); standing at a lip a planted foot's ball is drawn back onto solid ground (the lock follows it); the tick the
-  capsule leaves the ground from a ground state over a drop > 0.3 m, Sinew takes the body (`over_edge` -> stagger, kept
+  capsule leaves the ground from a ground state over a drop >= `ledge_height` (0.6 m; lower = a plain step down, and
+  the lip rule uses it too, measured from the foot's own ground, only for a body standing still), Sinew takes the body (`over_edge` -> stagger, kept
   powered in the air by Sinew's additive `_powered_in_air` hook) - it lands and recovers or falls.
 - **Gaps**: `MarksmanCharacter._cross_gaps` scans ahead along the travel; a gap (ground back within 0.25 m) no wider than the
   span (0.9 m walking .. 1.8 m sprinting) is crossed held at the edges' height; the fit pass keeps feet level over it and

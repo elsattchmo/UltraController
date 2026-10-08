@@ -47,7 +47,9 @@ func _traversal_hook(m: UltraMotor, s: MotorState, inp: InputFrame) -> int:
 ## Walking off an edge standing (motion matching, single player): Sinew has the body from the moment the capsule
 ## leaves the ground - the legs physical in the air, the balancer meeting the ground - so how it lands (a stagger
 ## caught, or down) is the simulation's, not the fall clip's. Kerbs and stair steps are the motor's snap (never airborne).
-const OVER_EDGE_MIN := 0.3        ## m of drop below the feet before it counts (smaller: a step down)
+## A drop at least this high (m) is a ledge: standing at it the feet keep to the lip (MarksmanMMPass), walking off it
+## Sinew takes the body. Lower is a step down - walked off like a kerb.
+@export var ledge_height := 0.6
 
 
 var _prev_state := -1
@@ -68,7 +70,7 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	# (Walking off: the tick the capsule leaves the ground from a ground state - not a jump. The motor only says FALL a
 	# moment later, by when Sinew had already let the body go to the animation for the air.)
 	if was in MOTION_STATES and was_grounded and not state.is_grounded() and state.state in [MotorState.Id.FALL, MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TURN_IN_PLACE] and r != null and r.mm_legs() and offline and is_authority() \
-			and state.stance != MotorState.Stance.CROUCH and _drop_below() > OVER_EDGE_MIN:
+			and state.stance != MotorState.Stance.CROUCH and _drop_below() >= ledge_height:
 		r.over_edge()
 
 
