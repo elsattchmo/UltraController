@@ -31,6 +31,15 @@ struct GaitCycle {
 	/// gait takes its stride, ground contact, landing point, swing lift and foot roll from the clip.
 	std::vector<Vec3> ankle[2], toe[2];         ///< [foot][sample] (0 left, 1 right)
 	float length = 0.0f;                        ///< the clip's length, s (one stride at `speed`)
+	/// Which set of cycles it belongs to (a stance: unarmed / rifle / pistol, standing / crouched). The gait
+	/// walks on one group at a time (`Gait::set_group`); a gait given one group behaves exactly as before.
+	int group = 0;
+	/// The feet roll onto their balls through the stance (a crouched walk): a foot still sliding back under the
+	/// hips, low, counts as down even with its heel and ball risen.
+	bool rolling_stance = false;
+	/// Never let its feet cross, even settled sideways (a crouched side step: bent knees put the thighs
+	/// through each other where a standing crossover clears).
+	bool keep_apart = false;
 };
 
 struct GaitSettings {
@@ -64,6 +73,7 @@ struct GaitSettings {
 	/// the hips sit `pelvis_follow` of the way from the feet's facing to the body's.
 	float step_turn = 1.3f, turn_cadence = 1.5f, cadence_turn_max = 3.4f, pelvis_follow = 0.5f;
 	float foot_clear = 0.16f;                   ///< a swinging ankle keeps this far from the standing one, m
+	float land_clear = 0.11f;                   ///< .. and its foothold this far (the swing narrows to it as it lands), m
 	float pick_hysteresis = 0.1f;
 	float side_bias = 0.18f;                    ///< rad a side clip counts as further off (diagonals: forward / back clips)
 	float path_turn_rate = 5.0f;                ///< rad/s a swinging foot's way of travel turns toward the body's
@@ -95,6 +105,8 @@ struct GaitSettings {
 	float tread_fit = 0.25f;                    ///< a foothold straddling a step edge moves up to this onto one tread (m)
 	float pivot_rate = 4.0f;                    ///< a planted foot swivels toward the way it should face this fast (rad/s)
 	float pivot_max = 0.6f;                     ///< .. and at most this far from the facing it was put down with (rad)
+	float swing_turn_rate = 12.0f;              ///< a swinging foot turns toward its landing facing at most this fast (rad/s)
+	float swing_turn_rate_run = 30.0f;          ///< .. at a run (a short swing: a sprint's 180 flick needs the feet round)
 	float pivot_slack = 0.12f;                  ///< a pivoted foot may sit this much further off its standing spot (m)
 	float leg_push_max = 0.25f;                 ///< a swinging leg is pushed clear of the other by at most this a tick (m)
 	float side_reach_strafe = 0.2f;             ///< the same on a side-step clip (its trailing foot)
@@ -170,10 +182,22 @@ public:
 
 	/// Reference cycles, any order (kept sorted by speed). Empty: procedural.
 	void set_cycles(std::vector<GaitCycle> cycles);
-	/// The standing pose (local rotations per part, root in model space); empty = the rig's rest.
-	void set_idle_pose(std::vector<Quat> locals, float pelvis_height = -1.0f);
+	/// The standing pose (local rotations per part, root in model space); empty = the rig's rest. Per group
+	/// (a stance's own standing pose; a group without one uses group 0's).
+	void set_idle_pose(std::vector<Quat> locals, float pelvis_height = -1.0f, int group = 0);
+	/// Walk on another group of cycles (a stance change: drawing a rifle, crouching). Swings already in the
+	/// air finish on the clip they lifted with; the body's pose cross-fades over `blend_s`.
+	void set_group(int group, float blend_s = 0.35f);
+	int group() const { return _group; }
+	/// The reference cycles mixed into the walk now: {cycle index (sorted by speed), weight} (debug / tests).
+	std::vector<std::pair<size_t, float>> cycle_mix() const { return cycle_weights(_speed, _theta); }
+	float cycle_speed(size_t i) const { return i < _cycles.size() ? _cycles[i].speed : 0.0f; }
+	int cycle_group(size_t i) const { return i < _cycles.size() ? _cycles[i].group : -1; }
 	/// Feet planted at their home spots under `root`, standing still.
 	void reset(const Transform& root);
+	/// Standing, both feet down: the next update puts them exactly on the standing feet it's given (nothing else
+	/// starts again - phase, pelvis, lean carry on). For handing the legs to a clip and back without a jump.
+	void reseat_feet();
 	void update(const GaitInput& in);
 
 	/// World transform of every part (rig order).
@@ -224,6 +248,7 @@ public:
 		float lift_max = 0.0f;       ///< highest swing lift (m)
 		float yaw_range = 0.0f;      ///< how far a planted foot turns over its stance (rad)
 		float pelvis_bob = 0.0f;     ///< pelvis height range over the cycle (m)
+		int group = 0;               ///< the cycle's group (stance)
 	};
 	std::vector<ClipReport> clip_report() const;
 	/// Per reference cycle: {authored speed, measured ground speed, stride m, duty, travel angle off the facing, rad} (debug).
@@ -277,8 +302,10 @@ private:
 		int down_t = 100;    ///< ticks since it was put down
 		float lift_p = 0.62f; ///< the foot's phase when it lifted (the swing runs from there to 1)
 		float p = 0.0f;      ///< foot phase last tick
+		float off = 0.0f;    ///< the foot's phase offset from the cycle's, latched while it swings
 		Vec3 lift_off;       ///< swing on the clip's path: where it lifted, off that path (flat, world)
 		Quat land_yaw;       ///< the facing it will be put down with (the clip's foot angle on its path)
+		Quat swing_yaw;      ///< the facing a swinging foot has now (turning toward land_yaw, rate-limited)
 		Vec3 path_dir;       ///< swinging: its own way of travel (turns toward the body's at a foot's pace)
 		bool overreach = false; ///< planted beyond the leg's reach at a run: it lifts next tick
 		bool held_back = false; ///< this swing's drawn foot was slowed by the speed cap (it lands where it is)
@@ -313,11 +340,12 @@ private:
 		float foot_off = 0.5f;   ///< the right foot's touchdown, as a phase after the left's
 		float duty_f[2] = { 0.6f, 0.6f };  ///< each foot's share of the cycle on the ground
 		float width_min = 0.13f; ///< the feet's narrowest sideways spacing over the cycle (m, body frame; < 0 = crossed)
+		bool keep_apart = false; ///< its feet never cross (GaitCycle::keep_apart)
 	};
 	std::vector<ClipLegs> _clip;
 	ClipLegs _cl;                ///< this tick's (blended for the speed)
 	ClipLegs _foot_cl[2];        ///< each swinging foot's, latched when it lifted (a step never changes clip mid-air)
-	int _pick = -1;              ///< the directional clip walking now (cycle index; -1 = the forward ones)
+	int _pick = -1;              ///< the directional clips walking now (a cycle index at that angle; -1 = the forward ones)
 	float _pick_angle = 0.0f;    ///< its way of travel off the facing (rad)
 	void pick_direction(float speed);   ///< nearest directional clip to _theta, with hysteresis
 	/// The clip legs blended for a speed and a direction of travel off the facing (empty `ok` = none);
@@ -325,7 +353,7 @@ private:
 	ClipLegs clip_legs(float speed, float theta) const;
 	/// Which cycles, how much: forward ones by speed, directional (back / side) ones by the angle of
 	/// travel (rad, + left), fading out above their own speed.
-	std::vector<std::pair<size_t, float>> cycle_weights(float speed, float theta) const;
+	std::vector<std::pair<size_t, float>> cycle_weights(float speed, float theta, int group = -1) const;
 	float _theta = 0.0f;         ///< travel off the facing (rad, + left), last time it moved
 	float _turn = 0.0f;          ///< standing: the facing off the feet's (rad, + left)
 	float _prev_speed = 0.0f, _speed_acc = 0.0f;
@@ -341,8 +369,12 @@ private:
 	float yaw_off(const Quat& q) const;  ///< a facing's yaw off the legs' (rad, + left)
 	float turn_step_yaw(int foot) const; ///< standing: the facing (off the legs') a turning step puts this foot down at
 	static float sample_at(const std::vector<float>& v, float phase);
-	std::vector<Quat> _idle;
-	float _idle_height = -1.0f;
+	std::vector<std::vector<Quat>> _idle;   ///< [group] standing pose (empty: none)
+	std::vector<float> _idle_height;        ///< [group]
+	int _group = 0, _group_prev = 0;
+	float _group_t = 1.0f, _group_blend = 0.35f;   ///< cross-fade from the previous group (0..1)
+	int active_group(int g) const;          ///< g if any cycle is in it, else 0
+	void base_pose_group(int g, std::vector<Quat>& local, Quat& pelvis_model, float& pelvis_h) const;
 	std::vector<Quat> _rest_local;
 	std::vector<Transform> _pose;
 	Foot _feet[2];

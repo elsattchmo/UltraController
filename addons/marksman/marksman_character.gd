@@ -13,3 +13,7 @@ func _new_anim_driver() -> SinewAnimDriver:
 
 func _new_ragdoll() -> SinewRagdoll:
 	return MarksmanRagdoll.new()
+
+
+func _default_anim_set() -> String:
+	return "res://addons/marksman/marksman_animset.tres"

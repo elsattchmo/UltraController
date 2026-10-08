@@ -640,3 +640,100 @@ TEST_CASE("gait: standing tall - straight legs at rest, and back up after a walk
 	CHECK(before > rest_h - 0.01f);
 	CHECK(after > rest_h - 0.015f);
 }
+
+namespace {
+
+/// A clip-like cycle for the tests: feet sliding back under the hips through the stance, swinging forward
+/// over an arc (model space: +Z forward, +X left), at `speed` along `angle` (rad off forward, + left).
+GaitCycle synthetic_cycle(const Rig& rig, float speed, float angle, int group, float length, float width = 0.1f) {
+	GaitCycle c;
+	c.speed = speed;
+	c.length = length;
+	c.group = group;
+	const int n = 24;
+	const float duty = speed > 2.5f ? 0.4f : 0.62f;
+	const float stride = speed * length;
+	const Vec3 dir{ std::sin(angle), 0.0f, std::cos(angle) };
+	const Vec3 side{ std::cos(angle), 0.0f, -std::sin(angle) };
+	for (int k = 0; k < n; ++k) {
+		c.samples.push_back(std::vector<Quat>(rig.parts.size(), Quat{}));
+		c.pelvis_height.push_back(rig.parts[0].rest.p.y);
+		for (int f = 0; f < 2; ++f) {
+			const float p = std::fmod(float(k) / float(n) + (f == 0 ? 0.0f : 0.5f), 1.0f);
+			float along, lift;
+			if (p < duty) {
+				along = stride * 0.5f * (0.5f - p / duty);           // planted: slides back at the speed
+				lift = 0.0f;
+			} else {
+				const float s = (p - duty) / (1.0f - duty);
+				along = stride * 0.5f * (-0.5f + s);
+				lift = 0.12f * std::sin(PI * s);
+			}
+			const Vec3 a = dir * along + side * (f == 0 ? width : -width) + Vec3{ 0, 0.08f + lift, 0 };
+			c.ankle[f].push_back(a);
+			c.toe[f].push_back(a + Vec3{ 0, -0.06f, 0.15f });
+		}
+	}
+	return c;
+}
+
+} // namespace
+
+TEST_CASE("gait groups: a stance change mid-walk slides no planted foot and picks the new group's clips") {
+	Walker w;
+	std::vector<GaitCycle> cs;
+	cs.push_back(synthetic_cycle(*w.rig, 1.4f, 0.0f, 0, 1.1f));
+	cs.push_back(synthetic_cycle(*w.rig, 1.0f, PI, 0, 1.1f));
+	cs.push_back(synthetic_cycle(*w.rig, 1.6f, 0.0f, 1, 1.0f, 0.14f));
+	cs.push_back(synthetic_cycle(*w.rig, 1.2f, PI, 1, 1.0f, 0.14f));
+	w.gait->set_cycles(cs);
+	w.run(Vec3{ 0, 0, 1.4f }, 2.0f);
+	auto groups_in_mix = [&]() {
+		int g = -2;
+		for (auto& [i, wt] : w.gait->cycle_mix()) {
+			if (wt > 1e-3f) {
+				g = g == -2 ? w.gait->cycle_group(i) : (g == w.gait->cycle_group(i) ? g : -1);
+			}
+		}
+		return g;
+	};
+	CHECK(groups_in_mix() == 0);
+	const float slide0 = w.worst_slide, reach0 = w.worst_reach;
+	MESSAGE("group 0 alone: worst ankle miss ", reach0 * 100.0f, " cm");
+	w.gait->set_group(1, 0.35f);
+	w.run(Vec3{ 0, 0, 1.4f }, 2.0f);
+	MESSAGE("stance change mid-walk: worst planted slide ", w.worst_slide * 1000.0f, " mm, worst ankle miss ", w.worst_reach * 100.0f, " cm");
+	CHECK(w.gait->group() == 1);
+	CHECK(groups_in_mix() == 1);
+	CHECK(w.worst_slide <= slide0 + 1e-4f);
+	CHECK(w.worst_reach < reach0 + 0.01f);       // the switch itself costs no reach
+	// Backing in the new stance: its own back clip, not the first group's.
+	w.run(Vec3{ 0, 0, -1.2f }, 2.0f);
+	CHECK(groups_in_mix() == 1);
+}
+
+TEST_CASE("gait groups: several speeds one way (walk, run backwards) blend by speed") {
+	Walker w;
+	std::vector<GaitCycle> cs;
+	cs.push_back(synthetic_cycle(*w.rig, 1.4f, 0.0f, 0, 1.1f));
+	cs.push_back(synthetic_cycle(*w.rig, 3.6f, 0.0f, 0, 0.7f));
+	cs.push_back(synthetic_cycle(*w.rig, 1.0f, PI, 0, 1.1f));
+	cs.push_back(synthetic_cycle(*w.rig, 3.0f, PI, 0, 0.7f));
+	w.gait->set_cycles(cs);
+	auto back_speed = [&]() {
+		float s = 0.0f, t = 0.0f;
+		for (auto& [i, wt] : w.gait->cycle_mix()) {
+			s += w.gait->cycle_speed(i) * wt;
+			t += wt;
+		}
+		return t > 0.0f ? s / t : 0.0f;
+	};
+	w.run(Vec3{ 0, 0, -1.0f }, 2.0f);
+	const float slow = back_speed();
+	w.run(Vec3{ 0, 0, -3.0f }, 2.0f);
+	const float fast = back_speed();
+	MESSAGE("backing 1.0 m/s mixes clips of ", slow, " m/s; 3.0 m/s: ", fast, " m/s");
+	CHECK(slow == doctest::Approx(1.0f).epsilon(0.15f));
+	CHECK(fast > 2.5f);
+	CHECK(w.worst_reach < 0.08f);     // (the synthetic cycles alone miss ~6 cm: their poses are bare)
+}

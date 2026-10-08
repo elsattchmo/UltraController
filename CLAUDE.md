@@ -1313,3 +1313,28 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   can't take knocks it down, light hits don't stagger) / s6 (no IK on the skeleton, clips play, references
   re-point, a gun still shows) / s7 (gait: cycles, planted feet while walking / sprinting, stairs, off).
   Tours `sinew_review`, `sinew_debug_review`, `sinew_gait_review`.
+
+## Marksman (third controller: Sinew body + rifle / pistol packs; plan `addons/marksman/README.md`)
+- `MarksmanCharacter extends SinewCharacter` (addons/marksman/), key `marksman` in `CharacterModels`. Never edits the
+  UltraController; Sinew gets only additive hooks (`_new_anim_driver / _new_equipment / _new_ragdoll /
+  _default_anim_set`, `SinewRagdoll._gait_states / _gait_upper_weight`) - s0-s10 must stay green.
+- **Stance sets** (V1): `MarksmanStanceSet` groups = core gait groups (unarmed / rifle / pistol x stand / crouch;
+  prone = clip 8-way). Tables in `tools/marksman/build_stance_sets.gd` -> `addons/marksman/marksman_animset.tres`;
+  `MarksmanStance.of_item` (firearm with `fp_ads_eye` = rifle, else pistol; `stats.stance` overrides);
+  `MarksmanRagdoll._sync_group` switches over 0.35 s. Read `sinew/ANIMATION_GUIDE.md` "Stance sets" before
+  changing a clip. Suite g1 (8 ways x stance x posture, prone sweep, clip audit `addons/marksman/clip_audit.json`,
+  draw mid-walk). Tour `marksman_moves_review` (`--only=<stance>`, `--postures=`) + `tools/marksman/contact_sheet.py`.
+- A BlendTree node that only names a chain's end must be a pass-through TimeScale: a Blend2 with an input left
+  unconnected outputs nothing (crouched still showed the standing pose).
+- g1 planted slide = s7's measure plus the BALL (sole under the toe joint): the Toes bone is ~2.6 cm over the sole
+  and swings round the ball at push-off (read as 8-10 mm "slides").
+- **Feet pivot, never twist** (user: "we can pivot on the spot on the foot if needed, like real life"; read
+  `sinew/ANIMATION_GUIDE.md` "Feet pivot, never twist"): g1 `test_feet_pivot_not_twist` (planted foot turning with
+  neither ball nor heel held = twist <= 4 deg/frame; swinging foot <= 12 deg/frame; yaw off the foot's SIDEWAYS axis).
+  Sinew: `SinewRagdoll.guard_clip_feet` (pose modifier, every frame) - the clip's legs are watched from where they
+  stood, the gait re-seated on them (`character_gait_reseat_feet`, feet only), and takes the legs back at once if
+  they move (an armed body snapping to the aim, a stance cross-fade); `moved()` resets the gait on the next update.
+  Core: `yaw_quat` off the sideways axis, a start at the first foot's own duty, no fresh lift past phase 0.9
+  (`LATE_LIFT`), swing phase offset latched (`Foot::off`), swing yaw rate-limited (`swing_turn_rate` 12 / 30 at a
+  run, lands facing the way it faces), foothold kept `land_clear` 11 cm off the standing foot. s10 KNOWN: sprint
+  flick 180 (legs cross in the air, -3..-11 cm).

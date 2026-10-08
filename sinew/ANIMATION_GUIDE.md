@@ -103,7 +103,90 @@ would stretch it 69 %".
   of drop lifts instead, but only with the other foot down at a walk.
 - On a side clip the trailing foot hurries from 20 cm out to the side of its hip (35 cm otherwise).
 
+## Stance sets (Marksman)
+
+Marksman (`addons/marksman/`) walks a different set of reference cycles per stance and posture. Each set is a
+**group** in the core gait (`GaitCycle.group`, `Gait::set_group(g, blend_s)`):
+
+| # | group | cycles | arms from |
+|---|---|---|---|
+| 0 | unarmed_stand | Sinew's (walk / run / sprint / back / strafes) | the run's upper body from walk + sprint |
+| 1 | unarmed_crouch | RFP crouch walks f / b / l / r | UAL Crouch_Walk |
+| 2 | rifle_stand | RFP walk + run 8-way, sprint f / fl / fr / l / r | own |
+| 3 | rifle_crouch | RFP crouch walks f / b / l / r | own |
+| 4 | pistol_stand | N_StdWalk2, PST run / walk back, Strafe_Walk_L / R, S_Fast | PST walk / run / idle |
+| 5 | pistol_crouch | RFP crouch walks f / b / l / r | PST idle |
+
+Prone has no gait: it's an 8-way clip blend in `MarksmanAnimDriver`.
+
+- **Where the tables live.** Edit them in `tools/marksman/build_stance_sets.gd`, then run it
+  (`--script res://tools/marksman/build_stance_sets.gd`). It writes `addons/marksman/marksman_animset.tres` and
+  measures every clip's authored speed and plant phase.
+- **How a group is chosen.** `MarksmanStance.of_item`: a firearm with an ADS eye is a rifle, any other firearm a
+  pistol, anything else unarmed; `stats.stance` overrides it. The posture comes from the motor state; prone maps to
+  the crouch group. A draw or holster switches the group over 0.35 s. A swing already in the air lands on the clip
+  it lifted with.
+- **What stays per group.** Each group keeps its own idle pose. The foot-yaw reference is the group's slowest
+  forward clip. `cycle_weights` and `pick_direction` only look inside the active group.
+- **`rolling_stance`** (crouch groups only). The crouch walks never set a foot quite still: it rolls back along the
+  ground. With `rolling_stance`, a foot sliding back like the planted samples counts as down if it stays low
+  (toe < 5 cm over its lowest, ankle < 15 cm). Leave it off for upright clips: on them it changed the jog's duty
+  from 0.29 to 0.46.
+- **The clip audit.** `MarksmanClipAudit` runs per group, and a role's direction suffix must match the clip's
+  travel within 25°. Baseline: `addons/marksman/clip_audit.json`. These clips failed it and were taken out:
+  - RFP back sprints: two strides crammed into 0.5 s, the feet skating;
+  - RFP crouch diagonals: they skate or cross over;
+  - PST strafes and back run: the feet move at 55-60 % of the clip's pace.
+- **Legs crossing.** It's allowed (the user's call), as long as the legs don't pass through each other.
+  - g1 lets the thigh capsules graze at the roots (≤ 2 cm, ≤ 8 ticks) on crouched moves only. That's the RFP
+    crouch posture: its side steps turn the hips about 75°.
+  - Any other pair of leg capsules through each other fails.
+- **Measuring a planted foot.** As in s7: the foot has to be planted 4 frames running, and the slide is the
+  smallest move among the ankle, the toe bone, the heel and the ball, with the ball on the sole under the toe
+  joint. The Toes bone sits about 2.6 cm above the sole, so it swings round the ball at push-off and reads as a
+  slide of up to 10 mm.
+
+## Feet pivot, never twist
+
+The user's rule: a foot may pivot on the spot, on its ball or its heel, as in real life, but must never turn flat
+round its middle or spin in the air. Suite g1 `test_feet_pivot_not_twist` measures it per move and stance:
+- **twist:** a planted foot that turned while neither its ball nor its heel held still;
+- **spin:** how fast a swinging foot turns;
+- **pelvis:** for information only.
+
+A foot's yaw is read off its **sideways axis**, which its pitch leaves level. The forward axis of a foot up on its
+ball is nearly vertical, and flattened it is noise. That is also how the core's `Gait::yaw_quat` reads it now: a
+bladed stance's back foot read 150° off and was put down facing backwards.
+
+What made feet twist or spin, and what fixed each:
+- **The clip holds the legs while you stand settled.** Its feet turned with the body: an armed body snapping to
+  the aim turned them 35-111° in a frame. A change of stance or posture cross-faded two idles' feet in place.
+  - Fix: `SinewRagdoll.guard_clip_feet`, called by the pose modifier every frame.
+  - Once the clip has the legs, the gait is re-seated exactly on the clip's feet.
+  - If those feet move or turn, the gait takes the legs back at once, from the same spots, and steps or pivots.
+  - Not while the clip's feet aren't trusted (`_home_hold`, the first 0.25 s powered).
+- **The hand-over blended a standing clip foot with the gait's lifting one, joint by joint.**
+  - Fix: the gait takes the legs back at once (no fade); its feet are where the clip's stood.
+- **The core:**
+  - **Late lifts.** A start set the phase from the shared duty while each foot lifts at its own `duty_f`. The
+    other foot lifted at phase 0.98 with no swing left, and was drawn landed (and turned) in a frame.
+    - Fix: the first foot starts at its own duty, and there is no fresh lift past `LATE_LIFT` 0.9.
+  - **Phase offset changing mid-swing.** A swinging foot's phase offset changed under it (0.5 standing, the
+    clip's own once moving). The phase stepped back, so the swing read as wrapped.
+    - Fix: the offset is latched (`Foot::off`).
+  - **Late landing facing.** The landing facing changed late in a swing (stopping: the stance's turned-out
+    foot).
+    - Fix: a swinging foot turns at most `swing_turn_rate` 12 rad/s (30 at a run) and lands facing the way it
+      faces. The stance pivot turns it the rest of the way on the ball.
+- **Teleports.** `SinewRagdoll.moved()` resets the gait on the next update, whatever the distance. A teleport
+  onto the same spot facing another way kept the old footholds.
+
 ## Known open problems
+
+- A 180° flick at a run (s10 `sprint flick 180`): the feet swap sides in the air and the legs pass through each
+  other, -3 to -11 cm for 4-11 ticks depending on where the stride was (s10 `KNOWN`). The swing-clearance push
+  and the knees-out pass can't undo a crossing that deep within their per-tick limits. Was +1.6 cm before the
+  pivot / twist work: the margin was thin.
 
 - Strafing left from standing, and backing straight out of it: hips sag 15-17 cm (`KNOWN` in s10).
 - Stair treads shorter than the foot leave a toe or heel in a riser (stairs sink limit 20 cm).

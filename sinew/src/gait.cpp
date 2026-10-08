@@ -13,6 +13,7 @@ namespace {
 
 constexpr int MIN_STANCE_TICKS = 6;   // a foot just put down stays down this long before an early lift
 constexpr int MIN_SWING_TICKS = 4;    // and a foot just lifted stays up this long
+constexpr float LATE_LIFT = 0.9f;     // no fresh lift past this phase (no swing left before the wrap)
 constexpr int UNCROSS_HOLD_TICKS = 8; // a crossed touchdown waits this long at most for its foothold to uncross
 
 float frac(float x) { return x - std::floor(x); }
@@ -107,7 +108,7 @@ float segment_distance(Vec3 p0, Vec3 p1, Vec3 q0, Vec3 q1, Vec3& cp, Vec3& cq) {
 /// A foot's stance in a cycle: the longest unbroken run of samples it's down (ankle within 3 cm of
 /// its lowest, or the toes within 1.2 cm of theirs) - {first sample, length}. (A crossover side step's
 /// swinging foot passes low under the body: counted as a touchdown it put the stance mid-swing.)
-std::pair<size_t, size_t> stance_run(const std::vector<Vec3>& ankle, const std::vector<Vec3>& toe, Vec3 up) {
+std::pair<size_t, size_t> stance_run(const std::vector<Vec3>& ankle, const std::vector<Vec3>& toe, Vec3 up, bool rolling = false) {
 	const size_t n = ankle.size();
 	float amin = 1e9f, tmin = 1e9f;
 	for (size_t k = 0; k < n; ++k) {
@@ -118,6 +119,36 @@ std::pair<size_t, size_t> stance_run(const std::vector<Vec3>& ankle, const std::
 	size_t count = 0;
 	for (size_t k = 0; k < n; ++k) {
 		on[k] = dot(ankle[k], up) - amin < 0.03f || dot(toe[k], up) - tmin < 0.012f;
+	}
+	// A foot rolling onto its ball through the stance (a crouched walk: the heel rises 9 cm and the ball 3 cm
+	// while it's down) is still down while it slides back under the hips as the surely planted samples do:
+	// low, and moving their way at their pace. (Strictly by height, a crouch walk read 25-30 % on the ground.)
+	// Only for cycles marked `rolling_stance`: a run's foot also sweeps back low after toe-off.
+	if (rolling) {
+		Vec3 slide{};
+		int m = 0;
+		auto flat_d = [&](size_t k) {
+			const Vec3 d = toe[(k + 1) % n] - toe[k];
+			return d - up * dot(d, up);
+		};
+		for (size_t k = 0; k < n; ++k) {
+			if (on[k] && on[(k + 1) % n]) {
+				slide = slide + flat_d(k);
+				++m;
+			}
+		}
+		if (m > 0 && length(slide) > 1e-4f) {
+			const Vec3 dir = normalized(slide);
+			const float pace = length(slide) / float(m);
+			for (size_t k = 0; k < n; ++k) {
+				if (!on[k] && dot(toe[k], up) - tmin < 0.05f && dot(ankle[k], up) - amin < 0.15f &&
+						dot(flat_d(k), dir) > 0.6f * pace && dot(flat_d((k + n - 1) % n), dir) > 0.6f * pace) {
+					on[k] = true;
+				}
+			}
+		}
+	}
+	for (size_t k = 0; k < n; ++k) {
 		count += on[k] ? 1 : 0;
 	}
 	if (count == n || count == 0) {
@@ -157,7 +188,7 @@ void Gait::set_cycles(std::vector<GaitCycle> cycles) {
 		if (c.ankle[0].size() != n || c.toe[0].size() != n || c.ankle[1].size() != n || c.toe[1].size() != n || n < 4) {
 			continue;
 		}
-		const size_t best = stance_run(c.ankle[0], c.toe[0], _rig.up).first;
+		const size_t best = stance_run(c.ankle[0], c.toe[0], _rig.up, c.rolling_stance).first;
 		if (best == 0) {
 			continue;
 		}
@@ -247,7 +278,7 @@ void Gait::set_cycles(std::vector<GaitCycle> cycles) {
 				}
 				// This foot's own touchdown (the first sample down after its longest time in the air):
 				// a side step's feet aren't half a stride apart (the lead foot steps, the other closes).
-				const auto [shift, stance_len] = stance_run(c.ankle[f], c.toe[f], up);
+				const auto [shift, stance_len] = stance_run(c.ankle[f], c.toe[f], up, c.rolling_stance);
 				if (f == 1) {
 					L.foot_off = float(shift) / float(n);
 				}
@@ -293,14 +324,23 @@ void Gait::set_cycles(std::vector<GaitCycle> cycles) {
 				}
 			}
 			L.duty = std::clamp(down_share, 0.25f, 0.8f);
+			L.keep_apart = c.keep_apart;
 		}
 		_clip.push_back(L);
 	}
 	// Foot facing relative to the forward walk's (the drawn foot is that yaw on its rest orientation,
-	// which already has the walk's toe-out): a side step's feet turn only by their difference.
+	// which already has the walk's toe-out): a side step's feet turn only by their difference. Per group:
+	// each stance against its own slowest forward clip (a rifle stance's feet are turned with its hips).
+	std::vector<int> groups;
+	for (const GaitCycle& c : _cycles) {
+		if (std::find(groups.begin(), groups.end(), c.group) == groups.end()) {
+			groups.push_back(c.group);
+		}
+	}
+	for (const int g : groups)
 	for (size_t i = 0; i < _clip.size(); ++i) {
 		const ClipLegs& R = _clip[i];
-		if (!R.ok || std::fabs(R.angle) > 0.6f) {
+		if (_cycles[i].group != g || !R.ok || std::fabs(R.angle) > 0.6f) {
 			continue;
 		}
 		float ref[2] = { 0.0f, 0.0f };
@@ -310,14 +350,17 @@ void Gait::set_cycles(std::vector<GaitCycle> cycles) {
 				ref[f] += R.yaw[f][j] / float(m);
 			}
 		}
-		for (ClipLegs& C : _clip) {
+		for (size_t j = 0; j < _clip.size(); ++j) {
+			if (_cycles[j].group != g) {
+				continue;
+			}
 			for (int f = 0; f < 2; ++f) {
-				for (float& y : C.yaw[f]) {
+				for (float& y : _clip[j].yaw[f]) {
 					y -= ref[f];
 				}
 			}
 		}
-		break;     // (_cycles is sorted by speed: the slowest forward clip)
+		break;     // (_cycles is sorted by speed: the group's slowest forward clip)
 	}
 	// Each clip's narrowest sideways foot spacing (body frame; < 0 = its feet cross).
 	for (ClipLegs& C : _clip) {
@@ -347,46 +390,65 @@ float Gait::sample_at(const std::vector<float>& v, float phase) {
 	return v[i0] + (v[i1] - v[i0]) * t;
 }
 
-std::vector<std::pair<size_t, float>> Gait::cycle_weights(float speed, float theta) const {
+std::vector<std::pair<size_t, float>> Gait::cycle_weights(float speed, float theta, int group) const {
 	std::vector<std::pair<size_t, float>> out;
+	const int g = active_group(group < 0 ? _group : group);
 	std::vector<size_t> fw, dir;
 	for (size_t i = 0; i < _cycles.size(); ++i) {
+		if (_cycles[i].group != g) {
+			continue;
+		}
 		const bool side = i < _clip.size() && _clip[i].ok && std::fabs(_clip[i].angle) > 0.6f;
 		(side ? dir : fw).push_back(i);
 	}
 	if (fw.empty()) {
 		return out;
 	}
-	// Forward: the two either side of the speed (_cycles is sorted by speed).
-	std::vector<std::pair<size_t, float>> fwd_w;
-	if (speed <= _cycles[fw.front()].speed || fw.size() == 1) {
-		fwd_w.push_back({ fw.front(), 1.0f });
-	} else if (speed >= _cycles[fw.back()].speed) {
-		fwd_w.push_back({ fw.back(), 1.0f });
-	} else {
-		size_t k = 1;
-		while (k < fw.size() && _cycles[fw[k]].speed < speed) {
-			++k;
+	// Clips by speed: the two either side of it (lists sorted by speed: _cycles is).
+	auto by_speed = [&](const std::vector<size_t>& v) {
+		std::vector<std::pair<size_t, float>> o;
+		if (speed <= _cycles[v.front()].speed || v.size() == 1) {
+			o.push_back({ v.front(), 1.0f });
+		} else if (speed >= _cycles[v.back()].speed) {
+			o.push_back({ v.back(), 1.0f });
+		} else {
+			size_t k = 1;
+			while (k < v.size() && _cycles[v[k]].speed < speed) {
+				++k;
+			}
+			const float a = _cycles[v[k - 1]].speed, b = _cycles[v[k]].speed;
+			const float w = std::clamp((speed - a) / std::max(b - a, 0.05f), 0.0f, 1.0f);
+			o.push_back({ v[k - 1], 1.0f - w });
+			o.push_back({ v[k], w });
 		}
-		const float a = _cycles[fw[k - 1]].speed, b = _cycles[fw[k]].speed;
-		const float w = std::clamp((speed - a) / std::max(b - a, 0.05f), 0.0f, 1.0f);
-		fwd_w.push_back({ fw[k - 1], 1.0f - w });
-		fwd_w.push_back({ fw[k], w });
-	}
+		return o;
+	};
+	const auto fwd_w = by_speed(fw);
 	if (dir.empty()) {
 		return fwd_w;
 	}
-	// The directional clip picked for the way it's going (nearest, with hysteresis: pick_direction) -
-	// two different clips' foot paths blended halfway crossed the legs through each other. It fades
-	// out above its own speed (running sideways = the forward run, its hips warped).
+	// The directional clips picked for the way it's going (nearest angle, with hysteresis: pick_direction) -
+	// two different directions' foot paths blended halfway crossed the legs through each other. Several clips
+	// at that angle (a walk, a run and a sprint backwards) blend by speed, as the forward ones do; they fade
+	// out above the fastest's own speed (running sideways faster = the forward run, its hips warped).
 	float w_fwd = 1.0f;
-	if (_pick >= 0 && size_t(_pick) < _cycles.size()) {
-		const float own = _cycles[size_t(_pick)].speed;
-		const float k = 1.0f - smoothstep(1.3f * own, 2.2f * own, speed);
-		if (k > 0.0f) {
-			out.push_back({ size_t(_pick), k });
+	if (_pick >= 0 && size_t(_pick) < _cycles.size() && _cycles[size_t(_pick)].group == g) {
+		std::vector<size_t> at;
+		for (size_t i : dir) {
+			if (std::fabs(std::remainder(_clip[i].angle - _pick_angle, 2.0f * PI)) < 0.2f) {
+				at.push_back(i);
+			}
 		}
-		w_fwd = 1.0f - k;
+		if (!at.empty()) {
+			const float own = _cycles[at.back()].speed;
+			const float k = 1.0f - smoothstep(1.3f * own, 2.2f * own, speed);
+			if (k > 0.0f) {
+				for (auto& [i, w] : by_speed(at)) {
+					out.push_back({ i, w * k });
+				}
+			}
+			w_fwd = 1.0f - k;
+		}
 	}
 	(void)theta;
 	for (auto& [i, w] : fwd_w) {
@@ -401,9 +463,19 @@ void Gait::pick_direction(float speed) {
 		float angle;
 		int idx;
 	};
+	// One anchor per way of travel in the active group (clips within 0.2 rad of each other are one
+	// direction at several speeds: the slowest stands for them).
+	const int g = active_group(_group);
 	std::vector<Anchor> an{ { 0.0f, -1 } };
 	for (size_t i = 0; i < _clip.size() && i < _cycles.size(); ++i) {
-		if (_clip[i].ok && std::fabs(_clip[i].angle) > 0.6f) {
+		if (_cycles[i].group != g || !_clip[i].ok || std::fabs(_clip[i].angle) <= 0.6f) {
+			continue;
+		}
+		bool dup = false;
+		for (const Anchor& x : an) {
+			dup = dup || (x.idx >= 0 && std::fabs(std::remainder(x.angle - _clip[i].angle, 2.0f * PI)) < 0.2f);
+		}
+		if (!dup) {
 			an.push_back({ _clip[i].angle, int(i) });
 		}
 	}
@@ -484,6 +556,7 @@ Gait::ClipLegs Gait::clip_legs(float speed, float theta) const {
 		out.foot_off += C.foot_off * w;
 		if (w > 0.05f) {
 			out.width_min = std::min(out.width_min, C.width_min);
+			out.keep_apart = out.keep_apart || C.keep_apart;
 		}
 		out.duty_f[0] += C.duty_f[0] * w;
 		out.duty_f[1] += C.duty_f[1] * w;
@@ -501,9 +574,36 @@ Gait::ClipLegs Gait::clip_legs(float speed, float theta) const {
 	return out;
 }
 
-void Gait::set_idle_pose(std::vector<Quat> locals, float pelvis_height) {
-	_idle = locals.size() == _rig.parts.size() ? std::move(locals) : std::vector<Quat>{};
-	_idle_height = pelvis_height;
+void Gait::set_group(int group, float blend_s) {
+	group = std::max(group, 0);
+	if (group == _group) {
+		return;
+	}
+	// (Mid-fade: it fades on from wherever the pose is - the old group's share is what's left of it.)
+	_group_prev = _group_t < 0.5f ? _group_prev : _group;
+	_group = group;
+	_group_t = blend_s > 1e-3f ? 0.0f : 1.0f;
+	_group_blend = std::max(blend_s, 1e-3f);
+	_pick = -1;      // (re-picked among the new group's directional clips)
+}
+
+int Gait::active_group(int g) const {
+	for (const GaitCycle& c : _cycles) {
+		if (c.group == g) {
+			return g;
+		}
+	}
+	return 0;
+}
+
+void Gait::set_idle_pose(std::vector<Quat> locals, float pelvis_height, int group) {
+	group = std::max(group, 0);
+	if (size_t(group) >= _idle.size()) {
+		_idle.resize(size_t(group) + 1);
+		_idle_height.resize(size_t(group) + 1, -1.0f);
+	}
+	_idle[size_t(group)] = locals.size() == _rig.parts.size() ? std::move(locals) : std::vector<Quat>{};
+	_idle_height[size_t(group)] = pelvis_height;
 }
 
 Vec3 Gait::up() const {
@@ -523,6 +623,7 @@ std::vector<Gait::ClipReport> Gait::clip_report() const {
 		const GaitCycle& cy = _cycles[i];
 		ClipReport r;
 		r.speed = cy.speed;
+		r.group = cy.group;
 		if (!C.ok) {
 			out.push_back(r);
 			continue;
@@ -744,12 +845,16 @@ float Gait::turn_step_yaw(int i) const {
 
 Quat Gait::yaw_quat(const Quat& q) const {
 	const Vec3 U = up();
-	const Vec3 f = flat(rotate(q, _rig.forward), U);
+	// Read off the sideways axis, not the forward one: a foot's big rotation is its pitch (up on the ball, toes
+	// up on the heel), about the sideways axis, which it leaves level. A bladed stance's back foot stands nearly
+	// on point: its forward axis, flattened, was mostly noise - read 150 deg off, the gait put the foot down
+	// facing backwards and turned it 174 deg through the next swing.
+	const Vec3 m = normalized(cross(U, flat(_rig.forward, U)));
+	const Vec3 f = flat(rotate(q, m), U);
 	if (length(f) < 1e-5f) {
 		return legs_q();
 	}
-	const Vec3 m = flat(_rig.forward, U);
-	const Vec3 a = normalized(m), b = normalized(f);
+	const Vec3 a = m, b = normalized(f);
 	return axis_angle(U, std::atan2(dot(cross(a, b), U), dot(a, b)));
 }
 
@@ -775,7 +880,7 @@ void Gait::reset(const Transform& root) {
 		Foot& f = _feet[i];
 		f.pos = f.eff = f.lift = f.target = home(i);
 		f.pitch = f.lift_pitch = 0.0f;
-		f.yaw = f.lift_yaw = f.land_yaw = f.plant_yaw = root.q;
+		f.yaw = f.lift_yaw = f.land_yaw = f.plant_yaw = f.swing_yaw = root.q;
 		f.ground = f.lift_ground = f.land_ground = Quat{};
 		f.yaw_rel = 0.0f;
 		f.swinging = false;
@@ -786,6 +891,12 @@ void Gait::reset(const Transform& root) {
 	float ph;
 	base_pose(local, pm, ph);
 	solve(local, pm, ph);
+}
+
+void Gait::reseat_feet() {
+	if (!_stepping && !_feet[0].swinging && !_feet[1].swinging) {
+		_fresh = true;
+	}
 }
 
 void Gait::update(const GaitInput& in) {
@@ -814,7 +925,7 @@ void Gait::update(const GaitInput& in) {
 			for (int i = 0; i < 2; ++i) {
 				Foot& f = _feet[i];
 				f.pos = f.eff = f.lift = f.target = home(i);
-				f.yaw = f.lift_yaw = f.land_yaw = f.plant_yaw = _home_yaw[i];
+				f.yaw = f.lift_yaw = f.land_yaw = f.plant_yaw = f.swing_yaw = _home_yaw[i];
 				f.ground = f.lift_ground = f.land_ground = Quat{};
 			}
 			_fresh = false;
@@ -868,6 +979,7 @@ void Gait::update_lean(float dt) {
 
 void Gait::step_feet(float dt) {
 	const Vec3 U = up();
+	_group_t = std::min(1.0f, _group_t + dt / _group_blend);
 	_speed = length(_vel);
 	const float want_speed = std::max(_speed, length(_cmd));
 	const bool moving = want_speed > _s.stop_speed;
@@ -1046,7 +1158,11 @@ void Gait::step_feet(float dt) {
 				}
 			}
 		}
-		_phase = frac(_duty + (first == 0 ? 0.0f : (_cl.ok && moving ? _cl.foot_off : 0.5f)));
+		// (The first foot at its own lift point: on a clip each foot has its own duty. Started at the shared one,
+		// the other foot stood past its lift point at phase 0.98 and went up with no swing left - drawn landed
+		// the next frame, its yaw spun 75 deg.)
+		const bool own_start = _cl.ok && moving;
+		_phase = frac((own_start ? _cl.duty_f[first] : _duty) + (first == 0 ? 0.0f : (own_start ? _cl.foot_off : 0.5f)));
 	}
 	// A standing foot stretched out behind the motion hurries the cycle (so it gets its turn to
 	// lift sooner) - continuous, unlike a jump in phase, so a swinging foot never skips.
@@ -1123,7 +1239,7 @@ void Gait::step_feet(float dt) {
 		const Foot& f = _feet[size_t(i)];
 		const Foot& o = _feet[size_t(1 - i)];
 		const ClipLegs& C = _foot_cl[i].ok ? _foot_cl[i] : _cl;
-		const bool side_step = on_path && C.ok && std::fabs(std::fabs(C.angle) - 0.5f * PI) < 0.6f && _side_time >= _s.side_settle;
+		const bool side_step = on_path && C.ok && !C.keep_apart && std::fabs(std::fabs(C.angle) - 0.5f * PI) < 0.6f && _side_time >= _s.side_settle;
 		const float side = i == 0 ? 1.0f : -1.0f;
 		const float gap = side * dot(f.target - (o.swinging ? o.target : o.pos), Lv);
 		const float min_gap = on_path ? std::clamp(C.width_min, _s.min_stance_gap, _s.stance_gap) : _s.stance_gap;
@@ -1133,7 +1249,12 @@ void Gait::step_feet(float dt) {
 		Foot& f = _feet[i];
 		// (The right foot's touchdown and stance share are the clip's own: a side step isn't symmetric.)
 		const bool own = _cl.ok && moving;
-		const float p = frac(_phase - (i == 0 ? 0.0f : (own ? _cl.foot_off : 0.5f)));
+		// (A swinging foot keeps the phase offset it lifted with: the right foot's offset is the clip's own once
+		// moving and 0.5 standing, and a start switched it mid-swing - the phase stepped back under where the
+		// foot lifted, the swing read as wrapped, and the foot was drawn at its landing yaw at once: a 75 deg
+		// spin in a frame.)
+		const float off_now = i == 0 ? 0.0f : (own ? _cl.foot_off : 0.5f);
+		const float p = frac(_phase - (f.swinging ? f.off : off_now));
 		const float duty_i = own ? _cl.duty_f[i] : _duty;
 		// Up when the foot's stance share is over; down only when its swing is through (the cycle
 		// wraps) - a duty that changes mid-swing (braking from a run) never drops a foot early.
@@ -1159,6 +1280,12 @@ void Gait::step_feet(float dt) {
 		if (!f.swinging && f.overreach && moving && p > 0.3f * duty_i && (_speed > 2.0f || !_feet[size_t(1 - i)].swinging)) {
 			swing = true;
 		}
+		// (Never a fresh lift with the cycle all but over: the swing runs from the lift to the wrap, so a foot
+		// lifting at 0.98 was through at once - put down at its foothold, turned to its landing yaw, in a frame.
+		// It waits for the next cycle.)
+		if (!f.swinging && swing && p > LATE_LIFT) {
+			swing = false;
+		}
 		f.overreach = false;
 		const float m = moving ? std::clamp(_speed / std::max(_s.walk_speed, 0.1f), 0.0f, 1.0f) : 0.0f;
 		// Heel strike and roll only walking forward (backing / side-stepping: flat-footed).
@@ -1169,7 +1296,7 @@ void Gait::step_feet(float dt) {
 		if (swing && !f.swinging) {
 			f.swinging = true;
 			f.lift = f.eff;
-			f.lift_yaw = f.yaw;
+			f.lift_yaw = f.swing_yaw = f.yaw;
 			f.lift_ground = f.ground;
 			f.lift_pitch = f.pitch;
 			f.lift_t = 0;
@@ -1178,6 +1305,7 @@ void Gait::step_feet(float dt) {
 			f.wrapped = false;
 			f.side_lift = _cl.ok && std::fabs(std::fabs(_cl.angle) - 0.5f * PI) < 0.6f;
 			f.lift_p = std::min(p, 0.98f);
+			f.off = off_now;
 			_foot_cl[i] = _cl;
 			f.path_dir = path_dir;
 			f.lift_off = on_path ? flat(f.lift, U) - path_at(_cl, i, f.lift_p) : Vec3{};
@@ -1206,6 +1334,9 @@ void Gait::step_feet(float dt) {
 				f.land_ground = g;
 			}
 			f.pos = f.target;
+			// (Down facing the way it faces: a landing facing that changed late in the swing - stopping, the
+			// stance's turned-out foot - is reached by pivoting on the ground, not by a spin in the last frames.)
+			f.land_yaw = f.swing_yaw;
 			f.yaw = f.plant_yaw = f.land_yaw;
 			f.ground = f.land_ground;
 			f.yaw_rel = yaw_off(f.yaw);
@@ -1329,7 +1460,7 @@ void Gait::step_feet(float dt) {
 			const float gap = side * dot(land - op, Lv);
 			// (A side step's feet come and go across the travel itself: they follow the clip's path - whose feet
 			// close but never cross, see the clip audit - and the knees-out guard keeps the legs apart.)
-			const bool side_step = on_path && std::fabs(std::fabs(C.angle) - 0.5f * PI) < 0.6f && _side_time >= _s.side_settle;
+			const bool side_step = on_path && !C.keep_apart && std::fabs(std::fabs(C.angle) - 0.5f * PI) < 0.6f && _side_time >= _s.side_settle;
 			if (!side_step && gap < min_gap) {
 				land = land + Lv * (side * (min_gap - gap));
 			}
@@ -1345,6 +1476,23 @@ void Gait::step_feet(float dt) {
 			f.target = length(d) > lim ? f.target + d * (lim / length(d)) : land;
 		}
 		f.lift_t++;
+		// The foothold itself clear of the standing foot (heel to ball): retargeted late onto it, the swing - kept
+		// round the foot - snapped 15 cm onto it at touchdown and the feet stood through each other.
+		{
+			const Foot& o = _feet[1 - i];
+			if (!o.swinging) {
+				Vec3 of = flat(rotate(o.yaw, _rig.forward), U);
+				of = length(of) > 1e-4f ? normalized(of) : Vec3{ 0, 0, 1 };
+				const Vec3 a = flat(o.pos, U) - of * (_heel_d * 0.5f), b = flat(o.pos, U) + of * _ball_d;
+				const Vec3 tf = flat(f.target, U);
+				const float t = std::clamp(dot(tf - a, b - a) / std::max(dot(b - a, b - a), 1e-6f), 0.0f, 1.0f);
+				const Vec3 d = tf - (a + (b - a) * t);
+				const float dl = length(d);
+				if (dl < _s.land_clear && dl > 1e-4f) {
+					f.target = f.target + d * ((_s.land_clear - dl) / dl);
+				}
+			}
+		}
 		land = f.target;
 		// Put down facing as the clip's foot does at its contact (a side step's toes point off the travel).
 		if (on_path) {
@@ -1385,8 +1533,9 @@ void Gait::step_feet(float dt) {
 				const float t = std::clamp(dot(hf - a, b - a) / std::max(dot(b - a, b - a), 1e-6f), 0.0f, 1.0f);
 				const Vec3 d = hf - (a + (b - a) * t);
 				const float dl = length(d);
-				if (dl < _s.foot_clear && dl > 1e-4f) {
-					h = h + d * ((_s.foot_clear - dl) / dl);
+				const float clear = _s.foot_clear + (_s.land_clear - _s.foot_clear) * smoothstep(0.7f, 1.0f, s);
+				if (dl < clear && dl > 1e-4f) {
+					h = h + d * ((clear - dl) / dl);
 				}
 			}
 		}
@@ -1403,6 +1552,17 @@ void Gait::step_feet(float dt) {
 		// In the air the foot turns from its push-off roll to toes up for the landing.
 		const float land_pitch = -toe_up * (1.0f - run) + fore * run;    // heel first walking, forefoot running
 		f.pitch = f.lift_pitch + (land_pitch - f.lift_pitch) * smooth(s);
+		// The foot turns toward its landing facing over the swing, never faster than a foot turns: a landing
+		// facing that changes late (stopping, the travel turning) would otherwise spin it 80 deg in two frames.
+		{
+			const Quat want = normalized(slerp(f.lift_yaw, f.land_yaw, smooth(s)));
+			const Vec3 a = flat(rotate(f.swing_yaw, _rig.forward), U), b = flat(rotate(want, _rig.forward), U);
+			if (length(a) > 1e-5f && length(b) > 1e-5f) {
+				const float d = std::atan2(dot(cross(a, b), U), dot(a, b));
+				const float lim = (_s.swing_turn_rate + (_s.swing_turn_rate_run - _s.swing_turn_rate) * run) * dt;
+				f.swing_yaw = normalized(axis_angle(U, std::clamp(d, -lim, lim)) * f.swing_yaw);
+			}
+		}
 		if (_cl.ok && moving) {
 			// The clip's foot through the swing (from where it actually lifted, joined smoothly).
 			const float m1 = std::clamp(_speed / std::max(_s.walk_speed, 0.1f), 0.0f, 1.0f);
@@ -1430,7 +1590,7 @@ void Gait::step_feet(float dt) {
 		// The drawn sole (toe tip, heel) out of the ground: the ankle alone cleared it, but a foot just off the
 		// ground behind, pitched toes down, dragged its toes through a downhill ramp (9-11 cm in).
 		{
-			const Quat yq = normalized(slerp(f.lift_yaw, f.land_yaw, smooth(s)));
+			const Quat yq = f.swing_yaw;
 			const Quat tq = normalized(slerp(f.lift_ground, f.land_ground, smooth(s)));
 			Vec3 ff = flat(rotate(yq, _rig.forward), U);
 			ff = length(ff) > 1e-4f ? normalized(ff) : path_dir;
@@ -1469,10 +1629,31 @@ void Gait::roll(Foot& f, float pitch) const {
 }
 
 void Gait::base_pose(std::vector<Quat>& local, Quat& pelvis_model, float& pelvis_h) const {
-	const size_t n = _rig.parts.size();
-	local = _idle.empty() ? _rest_local : _idle;
+	base_pose_group(_group, local, pelvis_model, pelvis_h);
+	if (_group_t >= 1.0f || _group_prev == _group) {
+		return;
+	}
+	// A stance change: from the old group's pose to the new one's.
+	std::vector<Quat> old_local;
+	Quat old_pm;
+	float old_h = pelvis_h;
+	base_pose_group(_group_prev, old_local, old_pm, old_h);
+	const float w = smoothstep(0.0f, 1.0f, _group_t);
+	for (size_t k = 0; k < local.size() && k < old_local.size(); ++k) {
+		local[k] = normalized(slerp(old_local[k], local[k], w));
+	}
 	pelvis_model = local[0];
-	pelvis_h = _idle_height > 0.0f ? _idle_height : dot(_rig.parts[0].rest.p, _rig.up);
+	pelvis_h = old_h + (pelvis_h - old_h) * w;
+}
+
+void Gait::base_pose_group(int group, std::vector<Quat>& local, Quat& pelvis_model, float& pelvis_h) const {
+	const size_t n = _rig.parts.size();
+	const int g = active_group(group);
+	const size_t gi = size_t(g) < _idle.size() && !_idle[size_t(g)].empty() ? size_t(g) : 0;
+	const bool has_idle = gi < _idle.size() && !_idle[gi].empty();
+	local = has_idle ? _idle[gi] : _rest_local;
+	pelvis_model = local[0];
+	pelvis_h = has_idle && _idle_height[gi] > 0.0f ? _idle_height[gi] : dot(_rig.parts[0].rest.p, _rig.up);
 	if (_cycles.empty()) {
 		return;
 	}
@@ -1496,7 +1677,7 @@ void Gait::base_pose(std::vector<Quat>& local, Quat& pelvis_model, float& pelvis
 		}
 	};
 	// The cycles for the speed and the way it's going (below their speed: blended with standing).
-	const auto ws = cycle_weights(_speed, _theta);
+	const auto ws = cycle_weights(_speed, _theta, g);
 	std::vector<Quat> acc, one;
 	float h = 0.0f, ref = 0.0f, cum = 0.0f;
 	for (auto& [i, w] : ws) {
@@ -1886,7 +2067,7 @@ void Gait::solve(const std::vector<Quat>& local, Quat pelvis_model, float pelvis
 		Quat tilt = f.ground;
 		if (f.swinging) {
 			const float s = swing_s(f, f.p);
-			yaw = normalized(slerp(f.lift_yaw, f.land_yaw, smooth(s)));
+			yaw = f.swing_yaw;
 			tilt = normalized(slerp(f.lift_ground, f.land_ground, smooth(s)));
 		}
 		Vec3 ffwd = flat(rotate(yaw, rig.forward), U);
