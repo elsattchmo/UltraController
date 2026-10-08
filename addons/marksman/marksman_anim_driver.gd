@@ -56,7 +56,18 @@ func _build_sinew() -> AnimationNodeBlendTree:
 		m.add_node("arms_mix", AnimationNodeBlend2.new(), Vector2(400, 200))
 		m.connect_node("arms_mix", 0, "arms_still")
 		m.connect_node("arms_mix", 1, "arms_move")
-		m.connect_node("arms", 0, "rate")
+		# (The limp layer: a second matched clip, blended over by how hurt the worse leg is - _drive_limp.)
+		var lc := AnimationNodeAnimation.new()
+		lc.animation = _clip(&"idle")
+		m.add_node("limp_clip", lc, Vector2(0, 400))
+		m.add_node("limp_seek", AnimationNodeTimeSeek.new(), Vector2(200, 400))
+		m.add_node("limp_rate", AnimationNodeTimeScale.new(), Vector2(400, 400))
+		m.connect_node("limp_seek", 0, "limp_clip")
+		m.connect_node("limp_rate", 0, "limp_seek")
+		m.add_node("limp", AnimationNodeBlend2.new(), Vector2(500, 100))
+		m.connect_node("limp", 0, "rate")
+		m.connect_node("limp", 1, "limp_rate")
+		m.connect_node("arms", 0, "limp")
 		m.connect_node("arms", 1, "arms_mix")
 		m.connect_node("output", 0, "arms")
 		loco.add_node("mm", m, Vector2(0, 200))
@@ -153,6 +164,8 @@ func setup(p: AnimationPlayer, sk: Skeleton3D) -> void:
 		tree.set(e[0], e[1])
 	if _mm_on():
 		mm = MarksmanMotionMatcher.new(get_parent() as UltraCharacter, self)
+		mm_limp = MarksmanMotionMatcher.new(get_parent() as UltraCharacter, self)
+		mm_limp.follow = mm
 		# Switches dead-blend (first in the stack, so on the clip pose).
 		inertial = InertialBlendModifier.new()
 		inertial.name = "MMInertial"
@@ -164,6 +177,35 @@ func setup(p: AnimationPlayer, sk: Skeleton3D) -> void:
 # ------------------------------------------------------------------ motion matching (spike)
 
 var _mm_arms_key := ""
+
+
+## How badly the worse leg is hurt shows as a limp in stages: UltraInjury.leg_damage (0 at 85 % hp .. 1 at 25 % / crippled /
+## gone) is the limp layer's weight - a graze favours the leg a little, a ruined one is the full limp. Standing only
+## (crouched, the crouch carries it); the layer's matcher follows the walk's (its feet in step) and picks from the bad
+## leg's set (limp_l / limp_r, mirrored). Fades with a direction the limp clips don't have (sideways).
+func _drive_limp(key: String, delta: float) -> void:
+	var c := get_parent() as UltraCharacter
+	var dl := UltraInjury.leg_damage(c.state, true)
+	var dr := UltraInjury.leg_damage(c.state, false)
+	var want := maxf(dl, dr) if not key.ends_with("_crouch") else 0.0
+	if want > 0.01 or limp_w > 0.01:
+		var lkey := "limp_l" if dl >= dr else "limp_r"
+		var switched := mm_limp.update(delta, lkey)
+		if mm_limp.clip >= 0:
+			var lc: Dictionary = mm_limp.db.clips[mm_limp.clip]
+			if switched or lc.name != _limp_clip:
+				var node := ((tree.tree_root as AnimationNodeBlendTree).get_node("loco") as AnimationNodeStateMachine).get_node("mm") as AnimationNodeBlendTree
+				(node.get_node("limp_clip") as AnimationNodeAnimation).animation = lc.name
+				_limp_clip = lc.name
+				tree.set(LOCO + "mm/limp_seek/seek_request", mm_limp.time)
+			tree.set(LOCO + "mm/limp_rate/scale", mm_limp.rate)
+			# (Only as far as the limp clip goes the way the walk does: there are no sideways limps.)
+			var a: Vector2 = mm.clip_velocity()
+			var b: Vector2 = lc.vel
+			if a.length() > 0.3 and b.length() > 0.3:
+				want *= clampf(a.normalized().dot(b.normalized()), 0.0, 1.0)
+	limp_w = _ease_w(&"mm_limp", want, delta)
+	tree.set(LOCO + "mm/limp/blend_amount", limp_w)
 
 
 ## The set's own arms over its matched clip (MarksmanMotionMatcher.ARMS: still / moving by speed), else none.
@@ -186,6 +228,10 @@ func _drive_mm_arms(key: String, delta: float) -> void:
 const MM_BLEND := 0.25
 var mm: MarksmanMotionMatcher
 var mm_pass: MarksmanMMPass
+## The limp layer's matcher (in step with `mm`) and how much of it shows (0..1, eased: the limp's stage).
+var mm_limp: MarksmanMotionMatcher
+var limp_w := 0.0
+var _limp_clip := &""
 ## (`inertial`, UltraAnimDriver's member - unused under Sinew - is the matcher's dead blend.)
 var _mm_clip := &""
 
@@ -235,6 +281,7 @@ func _drive_mm(delta: float) -> void:
 		tree.set(LOCO + "mm/seek/seek_request", mm.time)
 		inertial.trigger(MM_BLEND)
 	tree.set(LOCO + "mm/rate/scale", mm.rate)
+	_drive_limp(key, delta)
 	if OS.get_environment("MM_DUMP") != "":
 		var v := Vector2(velocity.x, velocity.z).length()
 		print("MM t%d v %.2f %s t %.2f rate %.2f cost %.2f keep %.2f contact %d lock %s warp %.0f" % [Engine.get_physics_frames(), v,

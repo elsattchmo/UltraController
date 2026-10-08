@@ -462,3 +462,59 @@ func test_crouch_and_pistol_are_matched() -> void:
 		chars.erase(c)
 		c.queue_free()
 		await ticks(3)
+
+
+## A hurt leg limps in stages: the limp layer's weight is the leg's damage (UltraInjury.leg_damage), and the body
+## lurches more over the stride the worse the leg (the injured walk's limp is in the body: its feet stay down equally long).
+func test_limp_in_stages() -> void:
+	load_playground()
+	var rows := []
+	var ratios := []
+	for hp: float in [100.0, 70.0, 55.0, 25.0]:
+		var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3), true)
+		await ticks(30)
+		c.state.limb_hp[UltraLimbs.Region.THIGH_L] = hp
+		var drv := c.anim as MarksmanAnimDriver
+		var sk := c.skeleton
+		var down := [0, 0]
+		var gap := [9.0]
+		var clips := {}
+		var lurch := [9.0, -9.0]
+		var grab := func() -> void:
+			var b := {}
+			for n in SinewMoveMetrics.BONES:
+				var i := sk.find_bone(n)
+				if i >= 0:
+					b[n] = (sk.global_transform * sk.get_bone_global_pose(i)).origin
+			gap[0] = minf(gap[0], SinewMoveMetrics.legs_gap(b))
+			# The lurch: the head's sideways offset over the hips (body frame), its swing over the stride.
+			var y := c.state.body_yaw
+			var side := ((b.Head as Vector3) - (b.Hips as Vector3)).dot(Vector3(cos(y), 0, -sin(y)))
+			lurch[0] = minf(lurch[0], side)
+			lurch[1] = maxf(lurch[1], side)
+			# (Down = planted in what shows: the clips' own contacts, the walk's or the limp's once it is most of it.)
+			for k in 2:
+				if drv.mm_pass._planted(k):
+					down[k] += 1
+			if drv.mm_limp.clip >= 0:
+				var cn := String(drv.mm_limp.db.clips[drv.mm_limp.clip].name).get_file()
+				clips[cn] = int(clips.get(cn, 0)) + 1
+		bot(c).set_steps([{"ticks": 200, "move": Vector2(0, 1), "yaw": 0.0}])
+		await ticks(50)
+		sk.skeleton_updated.connect(grab)
+		await ticks(150)
+		sk.skeleton_updated.disconnect(grab)
+		var ratio := float(lurch[1]) - float(lurch[0])                   # the head's sideways swing over the hips (m)
+		var want := UltraInjury.leg_damage(c.state, true)
+		rows.append("left thigh %3.0f %%: damage %.2f, limp layer %.2f, head lurch %.1f cm, feet down R %d / L %d, speed %.2f m/s, legs gap %.1f cm" % [hp, want, drv.limp_w, ratio * 100.0, down[1], down[0], Vector2(c.state.vel.x, c.state.vel.z).length(), gap[0] * 100.0])
+		ratios.append(ratio)
+		rows.append("   limp clips: %s" % [clips])
+		check(absf(drv.limp_w - want) < 0.1, "left thigh at %.0f %%: the limp shows as much as the leg is hurt (%.2f vs %.2f)" % [hp, drv.limp_w, want])
+		check(gap[0] >= -0.02, "left thigh at %.0f %%: legs clear (%.1f cm)" % [hp, gap[0] * 100.0])
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+	for r: String in rows:
+		info(r)
+	check(ratios[1] >= ratios[0] - 0.005 and ratios[2] >= ratios[1] - 0.005 and ratios[3] > ratios[0] * 1.5,
+			"the worse the leg, the bigger the lurch (%.1f / %.1f / %.1f / %.1f cm)" % [ratios[0] * 100.0, ratios[1] * 100.0, ratios[2] * 100.0, ratios[3] * 100.0])

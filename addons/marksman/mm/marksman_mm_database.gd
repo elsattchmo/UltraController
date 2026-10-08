@@ -148,6 +148,23 @@ func query_from(fi: int, traj: PackedFloat32Array, body_v := Vector2.INF) -> Pac
 	return q
 
 
+## The query as another database's frame `ofi` (in `other`) shows it - its feet and hips as the body moves them -
+## normalised for this database: a second matcher that picks frames in step with the first (the limp layer).
+func query_follow(other: MarksmanMMDatabase, ofi: int, traj: PackedFloat32Array, body_v: Vector2) -> PackedFloat32Array:
+	var q := PackedFloat32Array()
+	q.resize(DIM)
+	var dv := body_v - (other.clips[other.frame_clip[ofi]].vel as Vector2)
+	for d in 15:
+		var v := other.raw[ofi * DIM + d]
+		if d >= 6:
+			var k := (d - 6) % 3
+			v += dv.x if k == 0 else (dv.y if k == 2 else 0.0)
+		q[d] = (v - mean[d]) * scale[d]
+	for d in 12:
+		q[15 + d] = (traj[d] - mean[15 + d]) * scale[15 + d]
+	return q
+
+
 ## Best frame for q: [index, cost]. Frames of `skip_clip` within `skip_t` s of `skip_time` are left out (a match
 ## that is where we already are is no match). Non-looping clips: not the last 0.2 s.
 func search(q: PackedFloat32Array, skip_clip := -1, skip_time := 0.0, skip_t := 0.2) -> Array:

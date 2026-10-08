@@ -39,6 +39,11 @@ const SETS := {
 	"pistol": ["mixamo/PST_PistolIdle", "mixamo/PST_PistolWalk", "mixamo/PST_PistolWalkBackward",
 		"mixamo/PST_PistolStrafe", "mirror:mixamo/PST_PistolStrafe", "mixamo/PST_PistolStrafe2", "mirror:mixamo/PST_PistolStrafe2",
 		"mixamo/PST_PistolRun", "mixamo/PST_PistolRunBackward", "mixamo/S_Fast"],
+	# Limping (a second matcher, in step with the first: see `follow`, MarksmanAnimDriver._drive_limp), by the bad leg:
+	# Injured_Walk favours the left (UltraController's measure), Injured_Walk_Back the right, the INJ pack's hurting
+	# idle stands on the right (129 of 181 frames) - mirrored for the other leg.
+	"limp_l": ["mixamo/INJ_InjuredHurtingIdle", "mixamo/Injured_Walk", "mirror:mixamo/Injured_Walk_Back", "mixamo/INJ_InjuredRun"],
+	"limp_r": ["mirror:mixamo/INJ_InjuredHurtingIdle", "mirror:mixamo/Injured_Walk", "mixamo/Injured_Walk_Back", "mirror:mixamo/INJ_InjuredRun"],
 	"unarmed_crouch": RFP_CROUCH,
 	"rifle_crouch": RFP_CROUCH,
 	"pistol_crouch": RFP_CROUCH,
@@ -77,6 +82,10 @@ var switches := 0
 var search_us := 0
 ## The predicted trajectory (world, xz offsets from the body) of the last search - for debug drawing.
 var predicted: Array[Vector3] = []
+
+## A matcher this one keeps in step with: starting, and whenever that one switches, its query's pose is that one's frame
+## (the limp layer follows the walk).
+var follow: MarksmanMotionMatcher
 
 var _t_search := 0.0
 var _last_wish := Vector2.ZERO
@@ -167,6 +176,10 @@ func _search(wish: Vector2, speed: float, force: bool) -> void:
 	var cur := frame if clip >= 0 else 0
 	var bv := driver.skeleton.global_transform.basis.orthonormalized().inverse() * Vector3(character.state.vel.x, 0.0, character.state.vel.z)
 	var q := db.query_from(cur, traj, Vector2(bv.x, bv.z))
+	# (In step with the followed matcher where this one starts or that one has just switched; between, its own pose:
+	# re-taking the other's pose at every search pinned it to the same few frames and its stride never played.)
+	if follow != null and follow.db != null and follow.frame >= 0 and (clip < 0 or follow.switched):
+		q = db.query_follow(follow.db, follow.frame, traj, Vector2(bv.x, bv.z))
 	var t0 := Time.get_ticks_usec()
 	var r := db.search(q, clip, time)
 	search_us = maxi(search_us, Time.get_ticks_usec() - t0)

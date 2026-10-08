@@ -50,6 +50,21 @@ func _init(c: UltraCharacter, r: SinewRagdoll, m: MarksmanMotionMatcher) -> void
 		_p[String(r.parts[i].name)] = i
 
 
+## How much of the limp layer shows (MarksmanAnimDriver), 0 without one.
+func _limp_w() -> float:
+	var drv := character.anim as MarksmanAnimDriver
+	if drv == null or drv.mm_limp == null or drv.mm_limp.db == null or drv.mm_limp.clip < 0:
+		return 0.0
+	return drv.limp_w
+
+
+## Is the foot planted in what shows: the walk's frame, or the limp's once it is most of the picture.
+func _planted(side: int) -> bool:
+	if _limp_w() > 0.5:
+		return (character.anim as MarksmanAnimDriver).mm_limp.planted(side)
+	return matcher.planted(side)
+
+
 func _part(n: String) -> int:
 	return int(_p.get(n, -1))
 
@@ -77,6 +92,10 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	_w = w
 	# The clip's floor onto the real one (eased: a switch between clips authored at different heights glides).
 	var want: float = matcher.db.clips[matcher.clip].ground
+	var lw := _limp_w()
+	if lw > 0.0:
+		var lm: MarksmanMotionMatcher = (character.anim as MarksmanAnimDriver).mm_limp
+		want = lerpf(want, float(lm.db.clips[lm.clip].ground), lw)
 	ground = move_toward(ground, want, GROUND_RATE * dt) if dt > 0.0 and _ground_set else want
 	_ground_set = true
 	if absf(ground) > 1e-5:
@@ -135,7 +154,7 @@ func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> vo
 		return
 	var xf := sk.global_transform
 	var foot_w: Vector3 = xf * pose[ft_i].origin
-	var planted := matcher.planted(side) and not _physics_legs
+	var planted := _planted(side) and not _physics_legs
 	# Where the foot shows now: the clip's, plus what is left of a released lock's offset.
 	var shown := foot_w
 	if not locked[side] and release_t[side] > 0.0:
@@ -242,14 +261,14 @@ func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 			if (a_ank > -0.02 and a_ank < width + 0.02) or (a_ball > -0.02 and a_ball < width + 0.02):
 				want[side] = float(gd.y) - floor_y
 				normals[side] = Vector3.UP
-				if matcher.planted(side):
+				if _planted(side):
 					var to_far := a_ank > width * 0.5 - 0.1
 					# (Far edge: the heel just onto it; near edge: the ball just short of it.)
 					var shift := (width + GAP_HEEL - a_ank) if to_far else (-GAP_BALL - a_ball)
 					_edge_pull[side] = to_sk * (dir * shift)
 				continue
 		var still := Vector2(character.state.vel.x, character.state.vel.z).length() < EDGE_STILL
-		if matcher.planted(side) and still:
+		if _planted(side) and still:
 			# The ball first (the foot's front over the lip), then the whole foot: drawn back toward the body's centre
 			# until the ball is on solid ground. A drop is measured from the ground under the foot's own ankle (going
 			# down stairs or a slope, the ball's ground is lower than the body's floor without any edge), and only for a
@@ -307,7 +326,7 @@ func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 		var lift := fit_off[side] * k - pelvis_off
 		var b: Basis = pose[ft_i].basis
 		# A planted sole onto the surface (its normal in the skeleton's frame), limited.
-		if matcher.planted(side):
+		if _planted(side):
 			var n_sk := (to_sk * fit_normal[side]).normalized()
 			var q := _arc(Vector3.UP, n_sk)
 			var ang := q.get_angle()
