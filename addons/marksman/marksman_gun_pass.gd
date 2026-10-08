@@ -152,9 +152,14 @@ func _apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	# working arm the gun is pinned against the body while the hand loads it: _one_hand_reload.)
 	var reloading := armed and st.action == UltraActionLayer.Action.RELOADING and def.kind == ItemDefinition.Kind.FIREARM
 	var want := (1.0 if reloading else UltraActionLayer.raised(st) * (1.0 - st.gun_low)) if armed else 0.0
+	var drv := character.anim as UltraAnimDriver
+	if drv and drv.prone_transitioning():
+		want = 0.0             # (getting down to prone / up: the transition clip carries the gun)
 	weight = move_toward(weight, want, 6.0 * dt)
 	reload_w = move_toward(reload_w, 1.0 if reloading else 0.0, 4.0 * dt)
 	_lean_e0 = Vector3.INF
+	_lean_a = 0.0
+	_pocket_pre = Vector3.INF
 	_armed_now = false
 	var leaned := _lean(sk, mod.anim_pose, dt)
 	if weight <= 0.001 or not armed:
@@ -212,7 +217,9 @@ func _apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	_apply_gun_kick(pose, rh, grip)
 	if leaned:
 		_lean_settle(sk, pose)
+		_lean_cant(pose, rh, grip)
 	var gun: Transform3D = pose[rh] * grip
+
 	aim_error = _barrel_turn(gun, target_sk).get_angle()
 	_grip_grip = grip
 	_armed_now = true
@@ -484,6 +491,9 @@ func _lean(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> bool:
 		_eye_setup(sk)
 	var side := fwd.cross(Vector3.UP).normalized()          # (the view's right, skeleton space)
 	var e0 := _eye(sk, pose, neck) if neck >= 0 and _head_bone >= 0 else Vector3.INF
+	var uc0 := _part("UpperChest")
+	var sh0 := _gpart("UpperArm")
+	_pocket_pre = _pocket(pose, uc0, sh0) if uc0 >= 0 and sh0 >= 0 else Vector3.INF
 	_bend(pose, fwd, a)
 	for _r in (2 if e0 != Vector3.INF else 0):
 		var went := (_eye(sk, pose, neck) - e0).dot(side) * signf(a)
@@ -493,6 +503,8 @@ func _lean(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> bool:
 					else clampf(a * (want_out / went - 1.0), -absf(a) * 0.6, absf(a) * 0.5)
 			_bend(pose, fwd, more)
 			a += more
+	_lean_a = a
+	_lean_fwd = fwd
 	if e0 != Vector3.INF:
 		var went := (_eye(sk, pose, neck) - e0).dot(side)
 		_lean_e0 = e0
@@ -504,6 +516,8 @@ func _lean(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> bool:
 
 
 var _lean_e0 := Vector3.INF
+var _lean_a := 0.0                 ## the bend the lean put on the upper chest (rad, about _lean_fwd)
+var _pocket_pre := Vector3.INF     ## the stock's pocket before the lean bent the body (skeleton space)
 var _lean_fwd := Vector3.ZERO
 var _lean_side := Vector3.ZERO
 var _lean_gain := 0.0
@@ -528,6 +542,38 @@ func _lean_settle(sk: Skeleton3D, pose: Array[Transform3D]) -> void:
 			break
 		_bend(pose, _lean_fwd, more)
 		total += more
+
+
+## Leaning, the gun cants with the body: its top tipped toward the lean by LEAN_CANT of the lean's bend (placed level
+## gun-first, the eye's settle then rolled it whichever way it bent - leaning right the pistol canted 10-16 deg LEFT).
+## Closed on the final pose: the gun hand turned about the barrel through the gun, the arm re-solved onto it.
+const LEAN_CANT := 0.5
+## Leaning, the stock goes at least this share of the eye's way out.
+const LEAN_GUN := 0.85
+
+
+func _lean_cant(pose: Array[Transform3D], rh: int, grip: Transform3D) -> void:
+	if absf(_lean_a) < 1e-3 or _lean_fwd == Vector3.ZERO:
+		return
+	var gun: Transform3D = pose[rh] * grip
+	var bar := (-gun.basis.z).normalized()
+	# (The gun's up against the vertical plane through the barrel: + = top to the view's right.)
+	var level_x := Vector3.UP.cross(-bar)
+	if level_x.length() < 1e-3:
+		return
+	level_x = level_x.normalized()                      # (the gun's level right: x of a level gun on this barrel)
+	var level_up := (-bar).cross(level_x).normalized()
+	var up := gun.basis.y.normalized()
+	var roll := atan2(up.dot(level_x), up.dot(level_up))     # (+ = top tipped toward the gun's right)
+	# (+ lean tips the top to the view's right; the gun's right is the view's right when it points ahead.)
+	var want := _lean_a * LEAN_CANT * weight
+	var turn := angle_difference(roll, want)
+	if absf(turn) < 1e-3:
+		return
+	# (About the barrel - forward - a positive turn tips the top to the right, as the lean's bend does.)
+	var q := Quaternion(bar, turn)
+	var g2 := Transform3D(Basis(q) * gun.basis, gun.origin)
+	_two_bone(pose, _gpart("UpperArm"), _gpart("LowerArm"), rh, g2 * grip.affine_inverse(), 1.0)
 
 
 func _bend(pose: Array[Transform3D], fwd: Vector3, a: float) -> void:
@@ -1296,6 +1342,13 @@ func _shoulder(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transfor
 ## off the line from the pocket). Sets `pocket` / `stock`.
 func _place_stock(pose: Array[Transform3D], uc: int, sh: int, target_sk: Vector3) -> Transform3D:
 	pocket = _pocket(pose, uc, sh)
+	if _pocket_pre != Vector3.INF and _lean_side != Vector3.ZERO and absf(_lean_out) > 1e-3:
+		# Leaning toward the gun's side the bend pivots at the chest: the shoulder drops more than it goes out (the gun went
+		# 6-12 cm out of the eye's 28-33). The stock follows the lean out to LEAN_GUN of the eye's way.
+		var out := (pocket - _pocket_pre).dot(_lean_side)
+		var want := _lean_out * LEAN_GUN
+		if (want > 0.0 and out < want) or (want < 0.0 and out > want):
+			pocket += _lean_side * (want - out)
 	var gun := Transform3D(Basis(), pocket)
 	var d := (target_sk - pocket).normalized()
 	for k in 2:
@@ -1363,6 +1416,10 @@ func _chest_to_aim(pose: Array[Transform3D], uc: int, sh: int, target_sk: Vector
 		var cz := _chest_axes(_clip_pose, uc).z
 		ref = atan2(cz.x, cz.z)
 	var cz2 := _chest_axes(pose, uc).z
+	if absf(_lean_a) > 1e-4:
+		# (A lean bends the chest about the view's forward, tipping its own forward sideways: read as a heading error the
+		# chest was turned back - leaning right that swung the stock 17 cm back to the middle.)
+		cz2 = Quaternion(_lean_fwd, -_lean_a) * cz2
 	var r := angle_difference(atan2(cz2.x, cz2.z), _aim_h_st.x + ref)
 	r = clampf(signf(r) * maxf(absf(r) - band, 0.0), -CHEST_MAX, CHEST_MAX)
 	chest_turn = r

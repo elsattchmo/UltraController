@@ -140,6 +140,11 @@ func _build_sinew() -> AnimationNodeBlendTree:
 				t.xfade_time = XFADE
 				t.xfade_curve = _ease_curve()
 				loco.add_transition(pair[0], pair[1], t)
+	# (Into and out of the drop to hang: always a cut - the capsule is already 2 m down at the end; a cross-fade from the
+	# standing pose drew the body 2 m down and rising.)
+	for ti in loco.get_transition_count():
+		if loco.get_transition_from(ti) == &"drop_hang" or loco.get_transition_to(ti) == &"drop_hang":
+			loco.get_transition(ti).xfade_time = 0.0
 	return root
 
 
@@ -200,6 +205,18 @@ func _add_parity_nodes(loco: AnimationNodeStateMachine) -> void:
 		_add_loco(loco, "drop_hang", dh, 0.0, 0.0)
 	_build_hang(loco)
 	_build_ladder(loco)
+	# Getting down to prone / back up to a crouch (Mixamo PR_FromCrouch / PR_ToCrouch, played over the motor's
+	# PRONE_TRANSITION while the capsule's height eases) - the matcher / prone set cut straight from one to the other.
+	for spec: Array in [["prone_down", &"prone_down"], ["prone_up", &"prone_up"]]:
+		if _role_anim(spec[1]):
+			var tb := AnimationNodeBlendTree.new()
+			tb.add_node("clip", _anim(spec[1], false), Vector2(0, 0))
+			tb.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+			tb.add_node("speed", AnimationNodeTimeScale.new(), Vector2(400, 0))
+			tb.connect_node("seek", 0, "clip")
+			tb.connect_node("speed", 0, "seek")
+			tb.connect_node("output", 0, "speed")
+			_add_loco(loco, spec[0], tb, 0.15, 0.15)
 	var dive := AnimationNodeBlendTree.new()
 	dive.add_node("clip", _anim(&"swim_f"), Vector2(0, 0))
 	dive.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
@@ -254,6 +271,24 @@ func _parity_wanted(w: String) -> String:
 			return "drop_hang" if trav_kind in UltraTraversal.DOWN_MOVES and _role_anim(&"drop_hang") else w
 		Id.DIVE:
 			return "dive"
+	return _prone_transition(w)
+
+
+## Down to prone from standing / crouched, and back up: the transition clip first (the UltraController's way).
+func _prone_transition(w: String) -> String:
+	var upright := ["ground", "crouch", "land", "mm"]
+	if w == "prone" and _cur_loco in upright and _role_anim(&"prone_down"):
+		_prone_trans = PRONE_TRANSITION_TIME
+		tree.set(LOCO + "prone_down/seek/seek_request", 0.0)
+		tree.set(LOCO + "prone_down/speed/scale", _clip_len(&"prone_down", 1.8) / PRONE_TRANSITION_TIME)
+		return "prone_down"
+	if _cur_loco == "prone" and w in upright and _role_anim(&"prone_up"):
+		_prone_trans = PRONE_TRANSITION_TIME
+		tree.set(LOCO + "prone_up/seek/seek_request", 0.0)
+		tree.set(LOCO + "prone_up/speed/scale", _clip_len(&"prone_up", 1.8) / PRONE_TRANSITION_TIME)
+		return "prone_up"
+	if _cur_loco in ["prone_down", "prone_up"] and _prone_trans > 0.0 and (w == "prone" or w in upright):
+		return _cur_loco               # (let it finish)
 	return w
 
 
@@ -413,7 +448,8 @@ const LOCO_BLEND := 0.25
 func _go(want: String) -> void:
 	# (Not out of the drop to hang: the visual root turns round to the wall as it ends - the clip has turned itself round
 	# - so the cut is continuous in the world, and a blend of local poses across the turn swung the body 1.1 m.)
-	if want != _cur_loco and _cur_loco != "" and inertial and want != "mm" and _cur_loco != "mm" and _cur_loco != "drop_hang":
+	# (Into / out of the matcher too: a running landing handed to it moved the hands 0.7 m in a frame.)
+	if want != _cur_loco and _cur_loco != "" and inertial and _cur_loco != "drop_hang":
 		inertial.trigger(LOCO_BLEND)
 	if _cur_loco == "drop_hang" and want != "drop_hang":
 		# (The visual root turns round the frame after the motor does, the tree shows the new node the frame after that:
@@ -558,6 +594,11 @@ func root_jumped(d: Vector3) -> void:
 	var r := (get_parent() as UltraCharacter).ragdoll as SinewRagdoll if get_parent() is UltraCharacter else null
 	if r and r.modifier and not r.active:
 		r.modifier.blend = 0.0
+	# (And the matched pass goes at once: easing out on the new root its ground fit pulled the body down to the floor
+	# below - a drop to hang began 2 m down and climbed back up.)
+	if mm_pass:
+		mm_pass.weight = 0.0
+		_mix[&"mm_pass"] = Vector2.ZERO
 
 
 # ------------------------------------------------------------------ motion matching (spike)
@@ -726,6 +767,7 @@ func _process(delta: float) -> void:
 		_mk_drive_prone(delta)
 	_drive_air(delta)
 	_drive_parity(delta)
+	_prone_trans = maxf(_prone_trans - delta, 0.0)
 	if mm:
 		_drive_mm(delta)
 

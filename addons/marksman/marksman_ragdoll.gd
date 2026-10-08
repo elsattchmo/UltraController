@@ -435,6 +435,9 @@ func armed_hold() -> bool:
 func _part_wants_physics(i: int, want: bool) -> bool:
 	if _limp_arm(i):
 		return true
+	var drv := character.anim as UltraAnimDriver if character else null
+	if want and drv and drv.prone_transitioning() and _stagger_t < 0.0:
+		return false           # (getting down to prone / up: the clip, not a physical upper body sagging over it)
 	if want and armed_hold() and String(parts[i].name) in ARM_PARTS:
 		return false
 	return want

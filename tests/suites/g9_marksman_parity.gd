@@ -59,8 +59,8 @@ func _course(c: MarksmanCharacter, limit: int, fn: Callable, done: Callable) -> 
 					(sk.global_transform * sk.get_bone_global_pose(sk.find_bone("LeftHand")).origin).snappedf(0.01), c.state.pos.snappedf(0.01),
 					r.modifier.blend if r and r.modifier else -1.0])
 		for b in sk.get_bone_count():
-			if sk.get_bone_name(b).contains("leaf"):
-				continue          # (end markers of the rig, no pose of their own)
+			if sk.get_bone_name(b).contains("leaf") or sk.get_bone_name(b) == "Root":
+				continue          # (end markers of the rig, no pose of their own; the root bone is the capsule's floor)
 			var p := sk.global_transform * sk.get_bone_global_pose(b).origin
 			if not p.is_finite():
 				out.nan = true
@@ -73,6 +73,23 @@ func _course(c: MarksmanCharacter, limit: int, fn: Callable, done: Callable) -> 
 					out.fast = v
 					out.fast_bone = sk.get_bone_name(b)
 			last[b] = p
+	if OS.get_environment("G9_TRACE") != "" and out.nodes.is_empty():
+		var lp := (c.anim.tree.tree_root as AnimationNodeBlendTree).get_node("loco") as AnimationNodeStateMachine
+		for nn in ["drop_hang", "air_run", "land_heavy", "hang", "ladder", "prone_down"]:
+			if lp.has_node(nn):
+				var nd := lp.get_node(nn)
+				var an := ""
+				if nd is AnimationNodeBlendTree and (nd as AnimationNodeBlendTree).has_node("clip"):
+					an = String(((nd as AnimationNodeBlendTree).get_node("clip") as AnimationNodeAnimation).animation)
+				elif nd is AnimationNodeAnimation:
+					an = String((nd as AnimationNodeAnimation).animation)
+				print("NODE %s anim '%s' in player %s" % [nn, an, c.anim.player.has_animation(an) if an != "" else false])
+				if an != "" and c.anim.player.has_animation(an):
+					var A := c.anim.player.get_animation(an)
+					for ti in A.get_track_count():
+						var tp := String(A.track_get_path(ti))
+						if tp.ends_with(":Hips") or tp.ends_with(":Root"):
+							print("   track %s type %d keys %d first %s last %s len %.2f" % [tp, A.track_get_type(ti), A.track_get_key_count(ti), A.track_get_key_value(ti, 0), A.track_get_key_value(ti, A.track_get_key_count(ti) - 1), A.length])
 	# (A teleport or respawn moves everything at once: the probe starts after the first frames.)
 	await ticks(4)
 	sk.skeleton_updated.connect(probe)
@@ -193,6 +210,23 @@ func test_every_state_shows_its_node() -> void:
 	var rs: Dictionary = await _course(cg, 150, func(k: int, _ch: MarksmanCharacter) -> InputFrame:
 		return frame(Vector2(0, 1), InputFrame.B_SPRINT | (InputFrame.B_CROUCH if k >= 70 and k < 74 else 0)), never)
 	bad += _report("slide", rs, ["slide"])
+	# Down to prone and back up (unarmed, then with the rifle).
+	for item: StringName in [&"", &"rifle"]:
+		var sl := 0
+		if item != &"":
+			UltraItems.give(cg, item)
+			for i in cg.inventory.size():
+				var it := cg.inventory.get_slot(i)
+				if it and it.def_id == item:
+					sl = i + 1
+		var bits := InputFrame.B_CRAWL | InputFrame.B_CROUCH
+		bot(cg).set_steps([{"ticks": 60, "slot": sl}])
+		await ticks(60)
+		var rpd: Dictionary = await _course(cg, 220, func(k: int, _ch: MarksmanCharacter) -> InputFrame:
+			var f := frame(Vector2.ZERO, bits if k < 110 else 0)
+			f.want_slot = sl
+			return f, never)
+		bad += _report("prone %s" % ("rifle" if item != &"" else "unarmed"), rpd, ["prone_down", "prone", "prone_up"])
 	await _done(cg)
 	# Off the cliff top: crouched lowers into a hang (drop_hang), standing walks off and falls.
 	var cc := _marksman(Vector3(128.5, 8.05, -24.6), PI)

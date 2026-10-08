@@ -1543,4 +1543,29 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   turning at 300 deg/s the aim leads ~55 deg while the matcher's turn clip squares the chest - support arm 4.5 cm in), and
   the hold's frame takes `HOLD_DOWN_SHARE` 0.7 of a downward pitch (at 70 down "below the view" pointed back at the body:
   the hand sat behind the eye, the off arm 4-5 cm in).
+- **Lean carries the gun** (user: "leaning to the right - the gun needs to lean to the right too, currently it goes
+  left"; g4 test_gun_leans_with_the_body): the lean bends the chest about the VIEW's forward, which tips the bladed chest's
+  own forward sideways - `_chest_to_aim` read that as a heading error and turned the chest back (leaning right the stock
+  swung 17 cm back to the middle): it now reads the heading with the lean taken out (`_lean_a`, `_lean_fwd`). The gun
+  cants LEAN_CANT 0.5 of the lean's bend (`_lean_cant`, closed on the final pose: placed level gun-first, the eye's settle
+  rolled it either way - right lean canted the pistol 10-16 deg LEFT). Leaning toward the gun's side the bend pivots at
+  the chest and the shoulder drops more than it goes out: the stock follows the lean out to LEAN_GUN 0.85 of the eye's
+  way (`_pocket_pre`). Rifle right lean: gun out 1 -> 22 cm at the hip.
+- **Prone transitions under Marksman**: PR_FromCrouch / PR_ToCrouch (roles prone_down / prone_up) over the motor's 0.8 s
+  (`MarksmanAnimDriver._prone_transition`, the UltraController's rule); the gun pass lets go and Sinew's upper body stays
+  animated meanwhile (`prone_transitioning()`). g9 prone cases.
+- **Back diagonals (MM)** (user: "walk back and a direction at the same time we get a shuffle"; suite g10: 8 ways x stance
+  x posture x MM on / off - clips played, planted slide (ankle AND toe low, the smaller move), steps): on a diagonal no
+  clip fitted the trajectory and the IDLE won (pistol all four diagonals, rifle back-right): its feet stepped after the
+  sliding body - 21-24 steps in 3 s. Moving (wish >= 0.3 m/s) the matcher only takes clips travelling within DIR_FIT 70
+  deg of the wish (`_dir_fit`; a clip outside the mask always switches). Pistol set: the pack's walk back (55 mm a
+  frame) and 1 m/s strafe (38) skate -> the axe pack's AXE_UnarmedWalkBack (planted 0 mm; also unarmed's, the UAL
+  Walk_Backwards slid 6), U_Run_B, mirrored PST_PistolStrafe2.
+- **V7 parity nodes** (`MarksmanAnimDriver._add_parity_nodes`, the UltraController's builders and helpers - inherited):
+  air_run (leap seeked by vertical speed), fall, land_heavy, slide start, drop_hang, the hang's shimmy blend
+  (`_build_hang`), ladder refit, dive; `_parity_wanted` maps the motor states as the UltraController does. Every loco change
+  dead-blends (`inertial`, now always made; Sinew started timed moves with a cut), `root_jumped` shifts it and drops the
+  stale physics picture, and the visual root holds its turn the frame the tree lags at a drop's end (`hold_visual_until`:
+  the drop clip turns itself round as the body yaw flips - a cut, never a blend). Suite g9 (courses: ledges, vault,
+  ladder, shimmy, rope, leap, jump, slide, prone, drop to hang, cliff fall, swim + dive).
 

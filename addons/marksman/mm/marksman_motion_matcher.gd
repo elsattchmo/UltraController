@@ -24,8 +24,10 @@ const RATE_MAX := 1.35
 const RFP_CROUCH := ["mixamo/RFP_IdleCrouching", "mixamo/RFP_WalkCrouchingForward", "mixamo/RFP_WalkCrouchingForwardLeft",
 	"mixamo/RFP_WalkCrouchingForwardRight", "mixamo/RFP_WalkCrouchingLeft", "mixamo/RFP_WalkCrouchingRight",
 	"mixamo/RFP_WalkCrouchingBackward", "mixamo/RFP_WalkCrouchingBackwardLeft", "mixamo/RFP_WalkCrouchingBackwardRight"]
+## (Backwards unarmed: the axe pack's unarmed walk back - its planted feet hold still; the UAL Walk_Backwards slid them
+## 6 mm a frame, sideways in the source clip.)
 const SETS := {
-	"unarmed": ["Idle_A", "mixamo/N_StdWalk2", "mixamo/U_Walk_R", "mirror:mixamo/U_Walk_R", "Walk_Backwards", "mixamo/U_Run_F", "mixamo/U_Run_B",
+	"unarmed": ["Idle_A", "mixamo/N_StdWalk2", "mixamo/U_Walk_R", "mirror:mixamo/U_Walk_R", "mixamo/AXE_UnarmedWalkBack", "mixamo/U_Run_F", "mixamo/U_Run_B",
 		"mixamo/U_Run_L", "mixamo/U_Run_R", "mixamo/S_Fast"],
 	"rifle": ["mixamo/RFP_Idle", "mixamo/RFP_WalkForward", "mixamo/RFP_WalkForwardLeft", "mixamo/RFP_WalkForwardRight",
 		"mixamo/RFP_WalkLeft", "mixamo/RFP_WalkRight", "mixamo/RFP_WalkBackward", "mixamo/RFP_WalkBackwardLeft",
@@ -33,12 +35,14 @@ const SETS := {
 		"mixamo/RFP_RunLeft", "mixamo/RFP_RunRight", "mixamo/RFP_RunBackward", "mixamo/RFP_RunBackwardLeft",
 		"mixamo/RFP_RunBackwardRight", "mixamo/RFP_SprintForward", "mixamo/RFP_SprintForwardLeft",
 		"mixamo/RFP_SprintForwardRight"],
-	# (The pistol pack: walk 2.4 m/s (played down to 1.2), back, strafes 1.0 left / 2.2 right - mirrored for the other
-	# sides - run, run back; the sprint is the unarmed one (the gun is lowered). Not the plain walk: its free left arm
-	# swung the support hand 12 cm off the gun.)
-	"pistol": ["mixamo/PST_PistolIdle", "mixamo/PST_PistolWalk", "mixamo/PST_PistolWalkBackward",
-		"mixamo/PST_PistolStrafe", "mirror:mixamo/PST_PistolStrafe", "mixamo/PST_PistolStrafe2", "mirror:mixamo/PST_PistolStrafe2",
-		"mixamo/PST_PistolRun", "mixamo/PST_PistolRunBackward", "mixamo/S_Fast", "mixamo/U_Run_L", "mixamo/U_Run_R"],
+	# (The pistol pack: walk 2.4 m/s (played down to 1.2), the 2.2 m/s strafe (mirrored for the left), run; the sprint
+	# is the unarmed one (the gun is lowered). Not the plain walk: its free left arm swung the support hand 12 cm off the
+	# gun. Backwards, the unarmed back walk / run: the pack's walk back skated its planted feet 55 mm a frame and its
+	# 1.0 m/s strafe 38 (the gait's set swapped them too) - backing on a diagonal looked a shuffle. The arms are the
+	# gun pass's.)
+	"pistol": ["mixamo/PST_PistolIdle", "mixamo/PST_PistolWalk", "mixamo/AXE_UnarmedWalkBack",
+		"mixamo/PST_PistolStrafe2", "mirror:mixamo/PST_PistolStrafe2",
+		"mixamo/PST_PistolRun", "mixamo/U_Run_B", "mixamo/S_Fast", "mixamo/U_Run_L", "mixamo/U_Run_R"],
 	# Limping (a second matcher, in step with the first: see `follow`, MarksmanAnimDriver._drive_limp), by the bad leg:
 	# Injured_Walk favours the left (UltraController's measure), Injured_Walk_Back the right, the INJ pack's hurting
 	# idle stands on the right (129 of 181 frames) - mirrored for the other leg.
@@ -199,7 +203,10 @@ func _search(wish: Vector2, speed: float, force: bool) -> void:
 	if follow != null and follow.db != null and follow.frame >= 0 and (clip < 0 or follow.switched):
 		q = db.query_follow(follow.db, follow.frame, traj, Vector2(bv.x, bv.z))
 	var t0 := Time.get_ticks_usec()
-	var r := db.search(q, clip, time, 0.2, _speed_fit(speed) if follow != null else PackedByteArray())
+	var mask := _dir_fit(wish, speed)
+	if follow != null:
+		mask = _both(mask, _speed_fit(speed))
+	var r := db.search(q, clip, time, 0.2, mask)
 	search_us = maxi(search_us, Time.get_ticks_usec() - t0)
 	if OS.get_environment("MM_Q") != "" and Engine.get_physics_frames() % 30 < 6:
 		var per := {}
@@ -220,7 +227,8 @@ func _search(wish: Vector2, speed: float, force: bool) -> void:
 		return
 	last_cost = r[1]
 	last_keep = db.cost(q, cur) if clip >= 0 else INF
-	if clip < 0 or last_cost < last_keep - SWITCH_MARGIN * (0.5 if force else 1.0):
+	var masked_out := clip >= 0 and not mask.is_empty() and mask[clip] == 0
+	if clip < 0 or masked_out or last_cost < last_keep - SWITCH_MARGIN * (0.5 if force else 1.0):
 		clip = db.frame_clip[best]
 		time = db.frame_time[best]
 		switched = true
@@ -243,6 +251,53 @@ func _speed_fit(speed: float) -> PackedByteArray:
 		ok[i] = 1 if fits else 0
 		any = any or (fits and cs >= 0.15)
 	return ok if any else PackedByteArray()
+
+
+## Moving, only clips that travel within DIR_FIT of the wished way (skeleton space) are candidates - never a standing
+## clip: on a diagonal no clip fits the trajectory well, and the idle won (the pistol set on all four diagonals, the
+## rifle backing right): its feet stepped to catch the sliding body - a shuffle, 21-24 steps in 3 s. The matched pass
+## warps what's left (<= 50 deg). Nothing that way: every moving clip.
+const DIR_FIT := 1.22
+## Wished speed (m/s) from which the mask applies (slower: starting, stopping - the idle's frames may win).
+const DIR_FIT_SPEED := 0.3
+
+
+func _dir_fit(wish: Vector2, speed: float) -> PackedByteArray:
+	if wish.length() < 0.05 or speed < DIR_FIT_SPEED or db == null:
+		return PackedByteArray()
+	var w3 := driver.skeleton.global_transform.basis.orthonormalized().inverse() * Vector3(wish.x, 0.0, wish.y)
+	var ws := Vector2(w3.x, w3.z)
+	if ws.length() < 1e-3:
+		return PackedByteArray()
+	ws = ws.normalized()
+	var ok := PackedByteArray()
+	ok.resize(db.clips.size())
+	var moving := PackedByteArray()
+	moving.resize(db.clips.size())
+	var any := false
+	for i in db.clips.size():
+		var cv: Vector2 = db.clips[i].vel
+		if float(db.clips[i].speed) < 0.15 or cv.length() < 1e-3:
+			continue
+		moving[i] = 1
+		if absf(ws.angle_to(cv.normalized())) <= DIR_FIT:
+			ok[i] = 1
+			any = true
+	return ok if any else moving
+
+
+## Both masks (an empty one is no filter).
+func _both(a: PackedByteArray, b: PackedByteArray) -> PackedByteArray:
+	if a.is_empty():
+		return b
+	if b.is_empty():
+		return a
+	var out := a.duplicate()
+	var any := false
+	for i in out.size():
+		out[i] = 1 if a[i] == 1 and b[i] == 1 else 0
+		any = any or out[i] == 1
+	return out if any else a
 
 
 ## Stick direction (world xz, unit or zero).
