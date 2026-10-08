@@ -18,7 +18,7 @@ func _build() -> void:
 	# through the blow (the sim's hit lands at 0.45 / 0.36 s).
 	if "--strike" in OS.get_cmdline_user_args():
 		for item in ["rifle", "pistol"]:
-			for v: Array in [["side", Vector3(2.2, 1.4, -0.6)], ["fp", Vector3.ZERO]]:
+			for v: Array in [["side", Vector3(3.4, 1.4, -1.2)], ["fp", Vector3.ZERO]]:
 				steps.append({"call": _arm.bind(item, v[1], v[0] == "fp"), "t": 600.0, "until": _ticks.bind(80), "yaw": 0, "pitch": 0, "view_tp": v[0] != "fp"})
 				steps.append({"t": 600.0, "until": _ticks.bind(83), "yaw": 0, "pitch": 0, "view_tp": v[0] != "fp", "buttons": InputFrame.B_MELEE})
 				for k in 6:

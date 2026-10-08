@@ -365,7 +365,10 @@ func _play_strike(sw: Dictionary) -> void:
 		for b in _upper_body_bones():
 			one.set_filter_path(NodePath("%" + String(skeleton.name) + ":" + b), true)
 	one.filter_enabled = moving
-	(tree.tree_root as AnimationNodeBlendTree).get_node("swing_src").set("animation", _segment(clip, seg.x, seg.y))
+	# (On the move only the upper body strikes - with the clip's hip turn folded into the spine, all of it: without, the
+	# upper body swung round the other way and the stock trailed 0.7 m behind the muzzle at the blow.)
+	var seg_clip := _segment(clip, seg.x, seg.y)
+	(tree.tree_root as AnimationNodeBlendTree).get_node("swing_src").set("animation", _upper_lean(seg_clip, 1.0) if moving else seg_clip)
 	tree.set("parameters/swing_seek/seek_request", 0.0)
 	tree.set("parameters/swing_ts/scale", rate)
 	tree.set("parameters/swing/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)

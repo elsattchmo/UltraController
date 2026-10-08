@@ -212,20 +212,32 @@ func test_every_state_shows_its_node() -> void:
 		await ticks(70)
 		var swung := [0]
 		var off := [0.0]
+		var blow := [INF, INF]
 		var gp := (cg.ragdoll as MarksmanRagdoll).gun_pass
 		var rm: Dictionary = await _course(cg, 90, func(k: int, ch: MarksmanCharacter) -> InputFrame:
 			if bool(ch.anim.tree.get("parameters/swing/active")):
 				swung[0] += 1
 			if gp.strike_w > 0.99:
 				off[0] = maxf(off[0], gp.support_error)
+			# At the blow (the sim's hit window): the stock leads (ahead of the muzzle along the facing) and the gun's top is up.
+			var eqp := ch.get_node("Equipment") as UltraEquipmentVisual
+			if spec[0] != &"bat" and ch.state.action == UltraActionLayer.Action.MELEE and absf(ch.state.action_t - 0.45) < 0.02 and eqp.held_node:
+				var g := eqp.held_node.global_transform
+				var fwd := Vector3(-sin(ch.state.body_yaw), 0, -cos(ch.state.body_yaw))
+				var st_w := g * gp._stock_local.origin if gp._has_stock else g.origin
+				var mz_w := g * gp._muzzle_local.origin
+				blow[0] = (st_w - mz_w).dot(fwd)
+				blow[1] = g.basis.y.normalized().y
 			var f := frame(spec[2], int(spec[1]) if k >= 10 and k < 14 else 0)
 			f.want_slot = msl
 			return f, never)
 		var name := "melee %s%s" % [item, " walking" if spec[2] != Vector2.ZERO else ""]
 		bad += _report(name, rm, [], SWING_MAX)
-		info("%s: swing one-shot active %d frames, support hand up to %.1f cm off the gun mid-strike" % [name, swung[0], off[0] * 100.0])
+		info("%s: swing one-shot active %d frames, support hand up to %.1f cm off the gun mid-strike; at the blow stock %+.2f m ahead of the muzzle, gun top up %.2f" % [name, swung[0], off[0] * 100.0, blow[0], blow[1]])
 		if item == &"rifle" and off[0] > 0.03:
 			bad.append("%s: the support hand left the gun (%.1f cm)" % [name, off[0] * 100.0])
+		if item == &"rifle" and (blow[0] < 0.2 or blow[1] < 0.5):
+			bad.append("%s: at the blow the stock must lead, the gun upright (stock %+.2f m, top up %.2f)" % [name, blow[0], blow[1]])
 		if swung[0] < 10:
 			bad.append("%s: no swing played (%d frames)" % [name, swung[0]])
 	await _done(cg)

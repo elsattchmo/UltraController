@@ -377,6 +377,15 @@ func _strike_support(sk: Skeleton3D, pose: Array[Transform3D], eq: UltraEquipmen
 			# (The fore-end exactly where the clip's support hand is: through the punch that arm is at full stretch - it
 			# can't reach any further - while the gun arm, bent back at the stock, takes up the difference.)
 			gun.origin += pose[lh].origin - gun * _grip_contact
+			# Upright about that line (both hands stay on it): the clip's gun hand rolled ours onto its side at the blow.
+			var ax_w := (gun.basis * axis).normalized()
+			var up_now := gun.basis.y - ax_w * gun.basis.y.dot(ax_w)
+			var up_want := Vector3.UP - ax_w * ax_w.y
+			if up_now.length() > 1e-3 and up_want.length() > 1e-3:
+				var roll := up_now.normalized().signed_angle_to(up_want.normalized(), ax_w)
+				var pivot := gun * hand_pt
+				var rq := Quaternion(ax_w, roll)
+				gun = Transform3D(Basis(rq) * gun.basis, pivot + rq * (gun.origin - pivot))
 	var k := smoothstep(0.0, 1.0, strike_w)
 	_two_bone(pose, _gpart("UpperArm"), _gpart("LowerArm"), rh, gun * grip.affine_inverse(), k)
 	var target := gun * def.support_offset
@@ -685,6 +694,7 @@ func _lean_settle(sk: Skeleton3D, pose: Array[Transform3D]) -> void:
 const LEAN_CANT := 0.5
 ## Leaning, the stock goes at least this share of the eye's way out.
 const LEAN_GUN := 0.85
+const LEAN_GUN_ADS := 1.15
 
 
 func _lean_cant(pose: Array[Transform3D], rh: int, grip: Transform3D) -> void:
@@ -701,7 +711,9 @@ func _lean_cant(pose: Array[Transform3D], rh: int, grip: Transform3D) -> void:
 	var up := gun.basis.y.normalized()
 	var roll := atan2(up.dot(level_x), up.dot(level_up))     # (+ = top tipped toward the gun's right)
 	# (+ lean tips the top to the view's right; the gun's right is the view's right when it points ahead.)
-	var want := _lean_a * LEAN_CANT * weight
+	# (From the lean asked for, not the bend it took: leaning right needs more bend to get the eye out - the cant came
+	# out +34 deg right against -19 left.)
+	var want := signf(lean) * smoothstep(0.0, 1.0, absf(lean)) * LEAN_MAX * LEAN_CANT * weight
 	var turn := angle_difference(roll, want)
 	if absf(turn) < 1e-3:
 		return
@@ -1490,7 +1502,10 @@ func _place_stock(pose: Array[Transform3D], uc: int, sh: int, target_sk: Vector3
 		# Leaning toward the gun's side the bend pivots at the chest: the shoulder drops more than it goes out (the gun went
 		# 6-12 cm out of the eye's 28-33). The stock follows the lean out to LEAN_GUN of the eye's way.
 		var out := (pocket - _pocket_pre).dot(_lean_side)
-		var want := _lean_out * LEAN_GUN
+		var eqa := _equipment()
+		# (Down the sights the eye goes onto the gun's sight line: a stock short of the lean pulled the eye back with it -
+		# leaning right in ADS the eye got 19 cm out against 29 leaning left. In ADS it goes all the way.)
+		var want := _lean_out * lerpf(LEAN_GUN, LEAN_GUN_ADS, eqa.ads if eqa else 0.0)
 		if (want > 0.0 and out < want) or (want < 0.0 and out > want):
 			pocket += _lean_side * (want - out)
 	var gun := Transform3D(Basis(), pocket)
