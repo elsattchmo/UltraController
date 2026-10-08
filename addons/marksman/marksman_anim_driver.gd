@@ -31,6 +31,31 @@ func _build_sinew() -> AnimationNodeBlendTree:
 	_stance_chain(c, "mix", &"rc_idle", &"rc_aim", &"pc_idle", Vector2(650, 60))
 	# --- prone: 8 ways
 	loco.replace_node("prone", _build_prone())
+	# --- in the air: the legs reach down for the ground as it comes (Jump_Land's first frame: legs long, feet under the
+	# hips) - the air clip has them tucked 40 cm up, so a touchdown came down on folded legs
+	var air := loco.get_node("air") as AnimationNodeBlendTree
+	air.disconnect_node("output", 0)
+	air.add_node("ready_clip", _role_node(&"jump_land", false), Vector2(0, 160))
+	air.add_node("ready_seek", AnimationNodeTimeSeek.new(), Vector2(200, 160))
+	air.add_node("ready_ts", AnimationNodeTimeScale.new(), Vector2(400, 160))
+	air.connect_node("ready_seek", 0, "ready_clip")
+	air.connect_node("ready_ts", 0, "ready_seek")
+	var ready := AnimationNodeBlend2.new()
+	ready.filter_enabled = true
+	for b in _leg_bones():
+		ready.set_filter_path(NodePath("%" + String(skeleton.name) + ":" + b), true)
+	air.add_node("ready", ready, Vector2(600, 60))
+	air.connect_node("ready", 0, "clip_ts")
+	air.connect_node("ready", 1, "ready_ts")
+	air.connect_node("output", 0, "ready")
+	# --- landing: as deep as the impact (Jump_Land squats 45 cm - for a hop, a little of it over the idle)
+	var land := loco.get_node("land") as AnimationNodeBlendTree
+	land.disconnect_node("output", 0)
+	land.add_node("stand", _role_node(&"idle"), Vector2(0, 160))
+	land.add_node("depth", AnimationNodeBlend2.new(), Vector2(450, 60))
+	land.connect_node("depth", 0, "stand")
+	land.connect_node("depth", 1, "clip_ts")
+	land.connect_node("output", 0, "depth")
 	# --- motion matching (spike, MarksmanCharacter.motion_matching): one clip node the matcher re-points and seeks
 	if _mm_on():
 		var m := AnimationNodeBlendTree.new()
@@ -80,6 +105,22 @@ func _build_sinew() -> AnimationNodeBlendTree:
 				t.xfade_curve = _ease_curve()
 				loco.add_transition(pair[0], pair[1], t)
 	return root
+
+
+## Both legs: thighs down (not the hips).
+func _leg_bones() -> PackedStringArray:
+	var out := PackedStringArray()
+	if skeleton == null:
+		return out
+	var roots := [skeleton.find_bone("LeftUpperLeg"), skeleton.find_bone("RightUpperLeg")]
+	for b in skeleton.get_bone_count():
+		var p := b
+		while p >= 0:
+			if p in roots:
+				out.append(skeleton.get_bone_name(b))
+				break
+			p = skeleton.get_bone_parent(p)
+	return out
 
 
 ## `src` -> Blend2 (rifle idle / aim, by how far the gun is up) -> Blend2 (pistol idle) -> output.
@@ -250,7 +291,13 @@ func mm_active() -> bool:
 
 func _wanted() -> String:
 	var w := super._wanted()
-	return "mm" if (w == "ground" or w == "crouch") and mm_active() else w
+	# (A landing on the move runs on: the matcher picks it up, no stop-and-squat clip under a running body.)
+	var running_land := w == "land" and not hard_landing and Vector2(velocity.x, velocity.z).length() > LAND_RUN_ON
+	return "mm" if (w == "ground" or w == "crouch" or running_land) and mm_active() else w
+
+
+## Landing faster than this (m/s, along the ground) under motion matching keeps the matched locomotion.
+const LAND_RUN_ON := 1.2
 
 
 func _drive_mm(delta: float) -> void:
@@ -309,8 +356,34 @@ func _process(delta: float) -> void:
 	tree.set(LOCO + "crouch/rifle_src/blend_amount", aim_w)
 	if _cur_loco == "prone":
 		_mk_drive_prone(delta)
+	_drive_air(delta)
 	if mm:
 		_drive_mm(delta)
+
+
+## In the air the legs come down to meet the ground over the last 0.4 s before touchdown (the character's predicted
+## landing); landing, the squat is as deep as the impact.
+func _drive_air(delta: float) -> void:
+	var want := 0.0
+	if _cur_loco == "air":
+		var c := get_parent() as MarksmanCharacter
+		var l: Dictionary = c.landing if c else {}
+		if not l.is_empty():
+			want = 1.0 - smoothstep(LEGS_READY.x, LEGS_READY.y, float(l.time))
+		tree.set(LOCO + "air/ready_seek/seek_request", 0.0)
+		tree.set(LOCO + "air/ready_ts/scale", 0.0)
+	legs_ready = _ease_w(&"air_ready", want, delta) if _cur_loco == "air" else 0.0
+	tree.set(LOCO + "air/ready/blend_amount", legs_ready)
+	if _cur_loco == "land":
+		tree.set(LOCO + "land/depth/blend_amount", smoothstep(LAND_DEPTH.x, LAND_DEPTH.y, land_impact))
+
+
+## Seconds before touchdown the legs are fully down .. start coming down.
+const LEGS_READY := Vector2(0.08, 0.4)
+## Landing speed (m/s) for no squat .. the clip's full squat.
+const LAND_DEPTH := Vector2(2.0, 10.0)
+## How far the legs are reaching for the ground now (0 tucked .. 1).
+var legs_ready := 0.0
 
 
 func _mk_drive_prone(delta: float) -> void:

@@ -61,6 +61,7 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	if replaying:
 		return
 	_cross_gaps()
+	_predict_landing()
 	var was := _prev_state
 	var was_grounded := _prev_grounded
 	_prev_state = state.state
@@ -70,8 +71,66 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	# (Walking off: the tick the capsule leaves the ground from a ground state - not a jump. The motor only says FALL a
 	# moment later, by when Sinew had already let the body go to the animation for the air.)
 	if was in MOTION_STATES and was_grounded and not state.is_grounded() and state.state in [MotorState.Id.FALL, MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TURN_IN_PLACE] and r != null and r.mm_legs() and offline and is_authority() \
-			and state.stance != MotorState.Stance.CROUCH and _drop_below() >= ledge_height:
-		r.over_edge()
+			and state.stance != MotorState.Stance.CROUCH and not _walking_off(input) and _drop_below() >= ledge_height:
+		r.over_edge(_off_dir())
+
+
+## Going over on purpose: the stick pushes the way the body faces (within 90 deg either side) and it moves that way -
+## stepping, running or striding off forward is a plain drop (the air clip, the legs reaching down, the landing).
+## Only an accident is Sinew's fall: backing or side-stepping off, shoved or drifting off with no stick.
+func _walking_off(input: InputFrame) -> bool:
+	if input == null or input.move.length() < 0.1:
+		return false
+	var facing := Basis(Vector3.UP, state.body_yaw) * Vector3.FORWARD
+	var wish := input.move_world(input.yaw)
+	var hv := Vector3(state.vel.x, 0.0, state.vel.z)
+	return wish.dot(facing) > 0.0 and (hv.length() < 0.2 or hv.normalized().dot(facing) > 0.0)
+
+
+## Which way the body went off an edge (flat): the way it was moving, else away from the ground it stood on (probed
+## round the capsule).
+func _off_dir() -> Vector3:
+	var hv := Vector3(state.vel.x, 0.0, state.vel.z)
+	if hv.length() > 0.15:
+		return hv.normalized()
+	var space := get_world_3d().direct_space_state
+	var away := Vector3.ZERO
+	for k in 8:
+		var d := Vector3.FORWARD.rotated(Vector3.UP, k * TAU / 8.0)
+		var p := state.pos + d * 0.35
+		var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 0.3, p + Vector3.DOWN * 0.5, UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC)
+		q.exclude = [get_rid()]
+		if space.intersect_ray(q).is_empty():
+			away += d
+	return away.normalized() if away.length() > 1e-3 else Vector3.ZERO
+
+
+# ------------------------------------------------------------------ landings
+
+## Falling, where and how hard we'll come down: UltraMotor.predict_impact ({speed, time, point}; {} rising, grounded,
+## coming down in water / on a moving platform). The driver straightens the legs to meet the ground by it.
+var landing := {}
+## A landing at least this hard (m/s down; a standing hop comes down at ~5.6) is met by the body: Sinew powers it a
+## moment before touchdown (MarksmanRagdoll.land_brace) - the upper body physical, carried on into the stop and caught
+## by its muscles, the legs on the landing clip; a very hard one is the balancer's. Softer landings are the animation's.
+## The motor's own hard landing (hard_land_speed, the limp ragdoll) stays the motor's.
+@export var land_brace_speed := 7.0
+## Seconds before touchdown the body goes physical.
+const LAND_BRACE_LEAD := 0.1
+
+
+func _predict_landing() -> void:
+	landing = {}
+	if state.is_grounded() or state.state not in [MotorState.Id.JUMP, MotorState.Id.FALL] or state.vel.y > 0.5 or motor == null:
+		return
+	landing = motor.predict_impact(state)
+	var r := ragdoll as MarksmanRagdoll
+	var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
+	if landing.is_empty() or r == null or not offline or not is_authority():
+		return
+	var v: float = landing.speed
+	if v >= land_brace_speed and v <= profile.hard_land_speed and float(landing.time) <= LAND_BRACE_LEAD:
+		r.land_brace(v)
 
 
 # ------------------------------------------------------------------ gaps: one long stride

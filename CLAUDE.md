@@ -1369,7 +1369,11 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   taken IN the leg (stagger first, the leg knocked and weak: tone 0.7 -> 0.15, 0.5 -> 1.2 s by impulse). Balancer (core):
   steps from ONE planted foot (it waited for both: mid-stride takeovers toppled), seeds contacts for soles already on the
   ground at takeover (`seed_contact`), and a standing leg holds only as well as its tone (`leg_tone`: stance stiffness and
-  ankle cap scale with it). Outcome = simulation (gm: 16/30 dmg staggers, 60 dmg falls 2 in 8).
+  ankle cap scale with it). Standing still that's the balancer's stagger. MOVING (> 0.8 m/s) a leg hit / staggering blow
+  is a stumble the way it's going (`_stumble_hit`: receive_push = the gait's catch steps with the momentum + a lurch along
+  the travel, `moving_hit_per_impulse` 0.11 x (1 + 0.4 x speed), x0.4 if the struck leg was swinging (MM contact), <= 4.5
+  m/s; the leg still weakened) - the balancer stagger froze the animation in place (the user: "stays in that pose").
+  Outcome = simulation (gm walking: 8/16 dmg stumble, 30 falls 2 in 8, 60 falls 3 in 8 - which leg carries the weight).
 - **Foot IK (ground fit)**: each foot onto the ground under its ankle / ball (higher of the two), followed (rise 3.5, fall
   2 m/s); hips down only as far as a leg can't reach (`REACH` 0.97); planted soles tilt to the surface (<= 28 deg). Leg IK
   swings the knee WITH the leg onto the new hip->foot line, plus the thigh's forward only when the knee is nearly straight
@@ -1378,7 +1382,19 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   state copy); standing at a lip a planted foot's ball is drawn back onto solid ground (the lock follows it); the tick the
   capsule leaves the ground from a ground state over a drop >= `ledge_height` (0.6 m; lower = a plain step down, and
   the lip rule uses it too, measured from the foot's own ground, only for a body standing still), Sinew takes the body (`over_edge` -> stagger, kept
-  powered in the air by Sinew's additive `_powered_in_air` hook) - it lands and recovers or falls.
+  powered in the air by Sinew's additive `_powered_in_air` hook) - it lands and recovers or falls. ONLY AN ACCIDENT
+  (user): going off with the stick and the motion within 90 deg of the facing is on purpose - a plain drop
+  (`_walking_off`); backing / side-stepping / shoved / drifting off is Sinew's, tipped INTO the drop (`over_edge(dir)`:
+  `over_edge_tip` 1.1 m/s, pelvis 40 %). Taken over in the air, the balancer gets the STANDING target height
+  (`_standing_target`): measured in the air (COM 1.9 m over the floor below) every landing "sank" and went down.
+- **Jumps / landings**: `MarksmanCharacter.landing` = `motor.predict_impact` each falling tick; the air node blends the
+  legs (filtered) to Jump_Land's first frame (legs long, feet down; the air clip tucks them 40 cm up) over the last 0.4 s
+  (`legs_ready`); the land node squats by impact (`depth`: idle <-> Jump_Land, 2 .. 10 m/s); under MM a landing faster
+  than 1.2 m/s along the ground stays matched (runs on). Landing >= `land_brace_speed` 7 m/s (a hop is ~5.6): the body is
+  powered 0.1 s before touchdown (`land_brace`, once: re-arming it reset the pose every tick) with the fall's velocity,
+  the upper body physical for `land_window` 0.8 s at tone 0.75 .. 0.4 (it carries on into the stop, the muscles catch it),
+  legs on the clip; >= `land_stagger_speed` 11.5 (~4 m) the balancer has the legs (may go down). A 2 m jump down lands on
+  its feet; the motor's hard landing (> 15.5) stays the limp ragdoll. gm test_jumps_and_landings.
 - **Gaps**: `MarksmanCharacter._cross_gaps` scans ahead along the travel; a gap (ground back within 0.25 m) no wider than the
   span (0.9 m walking .. 1.8 m sprinting) is crossed held at the edges' height; the fit pass keeps feet level over it and
   lands planted feet on the nearer edge. Playground: GAP WALK (0.4 / 0.7 / 1.0 / 1.4 m, marker `gap_walk`), SPRINT TRACK
