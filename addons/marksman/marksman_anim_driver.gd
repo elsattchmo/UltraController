@@ -21,18 +21,19 @@ func _build_sinew() -> AnimationNodeBlendTree:
 	var g := loco.get_node("ground") as AnimationNodeBlendTree
 	g.disconnect_node("output", 0)
 	_stance_chain(g, "move_ts", &"r_idle", &"p_idle", Vector2(450, 0))
-	# --- crouched: still = the stance's crouch idle, moving = the walk (the gait shows the legs)
+	# --- crouched: the stance's crouch idle over the unarmed still / walk mix, as on the ground (the gait shows
+	# the legs; moving, its upper body comes in by speed). Over "still" only, a start showed the unarmed crouch
+	# walk's arms until the gait's upper body was in: the rifle dipped.
 	var c := loco.get_node("crouch") as AnimationNodeBlendTree
-	c.disconnect_node("mix", 0)
-	_stance_chain(c, "still", &"rc_idle", &"pc_idle", Vector2(200, -120), "still_st")
-	c.connect_node("mix", 0, "still_st")
+	c.disconnect_node("output", 0)
+	_stance_chain(c, "mix", &"rc_idle", &"pc_idle", Vector2(650, 60))
 	# --- prone: 8 ways
 	loco.replace_node("prone", _build_prone())
 	return root
 
 
-## `src` -> Blend2 (rifle idle) -> Blend2 (pistol idle) -> output (or `out_name`, left unconnected).
-func _stance_chain(bt: AnimationNodeBlendTree, src: String, rifle_role: StringName, pistol_role: StringName, at: Vector2, out_name := "") -> void:
+## `src` -> Blend2 (rifle idle) -> Blend2 (pistol idle) -> output.
+func _stance_chain(bt: AnimationNodeBlendTree, src: String, rifle_role: StringName, pistol_role: StringName, at: Vector2) -> void:
 	bt.add_node("rifle_src", _role_node(rifle_role), at + Vector2(0, 140))
 	bt.add_node("pistol_src", _role_node(pistol_role), at + Vector2(0, 260))
 	bt.add_node("st_rifle", AnimationNodeBlend2.new(), at + Vector2(200, 0))
@@ -41,13 +42,7 @@ func _stance_chain(bt: AnimationNodeBlendTree, src: String, rifle_role: StringNa
 	bt.connect_node("st_rifle", 1, "rifle_src")
 	bt.connect_node("st_pistol", 0, "st_rifle")
 	bt.connect_node("st_pistol", 1, "pistol_src")
-	if out_name == "":
-		bt.connect_node("output", 0, "st_pistol")
-	else:
-		# (A chain feeding another node: its end named by a pass-through - a TimeScale left at 1. A Blend2
-		# with its second input unconnected left the crouch's "still" branch empty: crouched still, it stood.)
-		bt.add_node(out_name, AnimationNodeTimeScale.new(), at + Vector2(600, 0))
-		bt.connect_node(out_name, 0, "st_pistol")
+	bt.connect_node("output", 0, "st_pistol")
 
 
 ## Prone: x = right, y = forward (1 = the crawl's own speed). Armed: the rifle prone set; unarmed: the crawl

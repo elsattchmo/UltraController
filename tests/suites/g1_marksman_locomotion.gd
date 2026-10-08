@@ -154,7 +154,9 @@ func test_eight_ways_standing_and_crouched_per_stance() -> void:
 		var stand := await _eight_ways(c, m, name + " stand", 0, sl)
 		var crouch := await _eight_ways(c, m, name + " crouch", InputFrame.B_CROUCH, sl)
 		_judge_eight(m, stand, name + " stand", 0.22)
-		_judge_eight(m, crouch, name + " crouch", 0.45)
+		# (Crouched, a move starts from the stance's crouch idle - the rifle's is a kneel, its hips 48 cm under the
+		# standing idle's - and rises into the crouch walk as the gait comes in.)
+		_judge_eight(m, crouch, name + " crouch", 0.5)
 	for line in m.table().split("\n"):
 		info(line)
 	# (Debugging: G1_DUMP=<label substring> prints those segments frame by frame.)
