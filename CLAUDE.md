@@ -1506,3 +1506,15 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   the support hand two-bone IK'd onto the gun AS SHOWN; knocked further than LET_GO 14 cm it lets go (grip_w eases to
   0), takes hold again within REGRIP 7 cm over 0.18 s. Hits in tests need `react_to_hit` called by hand (UltraEffects
   calls it on every machine; a test scene has none). Suite g5 (CI).
+- **Arms out of the body** (the user: "we don't really want the arms to clip into the body"): (1) every arm IK in the gun
+  pass puts the elbow down and OUT (`_elbow_hint` in `_two_bone`: chest frame, gun arm ELBOW_OUT_GUN 1.3, support 0.7,
+  ELBOW_KEEP 0.1 of the clip's own side) - the RFP clips hold their rifle across the chest and kept, the gun arm's elbow
+  pointed in across the belly; (2) last in `apply_post` (after physics + the support hand) `MarksmanArmClear`:
+  UltraArmClear's torso ellipse + keep-hands swing round the shoulder -> wrist line (hands stay on the gun) - a kicked gun
+  drove the forearm 7-8 cm in; (3) the pistol stays 13 cm right of the eye (18 cost the barrel 0.45 deg aiming low crouched: g2).
+  g6 (CI): elbow / forearm / hand depth <= 2 cm, the upper arm no deeper than its own shoulder (the ellipse is wider than
+  the body at the shoulders: the joint reads 2-6 cm "in" in every pose, unarmed idle too), elbow_out >= 1.15. Tour
+  `marksman_gunfeel_review -- --arms` films pistol / rifle hip + ADS from above, the side and the front.
+  Racking an empty long gun, the gun comes out off the shoulder (`RACK_OUT` 14 cm forward, `_rack_w` eased round the
+  rack): shouldered, the charging handle sat in front of the chest and the left hand went 7.9 cm into it.
+  (`UltraItems.give(c, id, n)` gives n ROUNDS - one by default: give tests a reserve, a lone suite has no infinite ammo.)

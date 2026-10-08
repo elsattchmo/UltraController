@@ -22,6 +22,16 @@ func _build() -> void:
 		for k in at.size():
 			steps.append({"t": 600.0, "until": _ticks.bind(int(at[k])), "yaw": 0, "pitch": -5, "shot": "%s_empty_%d" % [item, k]})
 		steps.append({"t": 600.0, "until": _ticks.bind(260), "yaw": 0, "pitch": -5})
+	# Arms against the body: the pistol held at the hip and in ADS, from above and from the side.
+	if "--arms" in OS.get_cmdline_user_args():
+		steps = [{"teleport": "spawn", "t": 0.6, "yaw": 0, "pitch": 0, "view_tp": true, "slot": 0}, {"call": _setup, "t": 1.0}]
+		for item in ["pistol", "rifle"]:
+			for ads: int in [0, InputFrame.B_SECONDARY]:
+				steps.append({"call": _arm.bind(item), "t": 600.0, "until": _ticks.bind(100), "yaw": 0, "pitch": 0, "buttons": ads})
+				for v: Array in [["top", Vector3(0.12, 2.3, -0.6), 1.2], ["side", Vector3(1.1, 1.45, 0.0), 1.3], ["front", Vector3(0.0, 1.5, -1.1), 1.35]]:
+					steps.append({"call": _cam_at.bind(v[1], v[2]), "t": 600.0, "until": _ticks.bind(8), "yaw": 0, "pitch": 0, "buttons": ads,
+							"shot": "arms_%s_%s_%s" % [item, "ads" if ads else "hip", v[0]]})
+		return
 	# Hits with the rifle up (V5): the body flinches, the gun is knocked off its line, the support hand knocked off.
 	steps.append({"call": _arm.bind("rifle"), "t": 600.0, "until": _ticks.bind(100), "yaw": 0, "pitch": 0})
 	for h: Array in [["torso", UltraLimbs.Region.TORSO, 25.0], ["gun_arm", UltraLimbs.Region.FOREARM_R, 25.0], ["support_arm", UltraLimbs.Region.FOREARM_L, 60.0]]:
@@ -73,6 +83,12 @@ func _hit(region: int, amount: float) -> void:
 	_c.state.hp = 100.0
 	_view_off = Vector3(1.4, 1.5, -1.6)
 	_look_y = 1.3
+	_tick0 = Engine.get_physics_frames()
+
+
+func _cam_at(off: Vector3, look_y: float) -> void:
+	_view_off = off
+	_look_y = look_y
 	_tick0 = Engine.get_physics_frames()
 
 

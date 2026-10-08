@@ -222,7 +222,16 @@ var _grip_grip := Transform3D()
 var _armed_now := false
 
 
+var arm_clear := MarksmanArmClear.new()
+
+
 func apply_post(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
+	_post_hands(mod, sk)
+	# Last: the arms out of the body (the hands where they are).
+	arm_clear.apply(sk)
+
+
+func _post_hands(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 	var dt := clampf(mod.get_process_delta_time(), 0.0, 0.1)
 	if not _armed_now or weight <= 0.001:
 		grip_w = 1.0
@@ -240,6 +249,9 @@ func apply_post(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 	pose.resize(parts.size())
 	for i in ids:
 		pose[i] = sk.get_bone_global_pose(parts[i].bone)
+	var uc := _part("UpperChest")
+	if uc >= 0:
+		pose[uc] = sk.get_bone_global_pose(parts[uc].bone)      # (the elbow's way: _elbow_hint)
 	var gun: Transform3D = pose[ids[0]] * _grip_grip
 	var target: Transform3D = gun * _support_rel_now
 	post_off = pose[ids[3]].origin.distance_to(target.origin)
@@ -511,6 +523,11 @@ func _reload_pose(pose: Array[Transform3D], rh: int, grip: Transform3D, def: Ite
 	var roll := Basis((-b.z).normalized(), -deg_to_rad(float(spec[0])) * e)
 	var g := Transform3D(roll * b, hand + roll * (gun.origin - hand))
 	g.origin += Vector3.DOWN * float(spec[1]) * e + b.z * float(spec[2]) * e - b.x * float(spec[3]) * e
+	# (Racking an empty gun, it comes out off the shoulder: the charging handle in front of the chest put the left hand
+	# 8 cm into it.)
+	if _rack_w > 0.001:
+		var k := smoothstep(0.0, 1.0, _rack_w)
+		g.origin += (-b.z * RACK_OUT.x + Vector3.UP * RACK_OUT.y - b.x * RACK_OUT.z) * k
 	_two_bone(pose, _part("RightUpperArm"), _part("RightLowerArm"), rh, g * grip.affine_inverse(), weight)
 
 
@@ -523,6 +540,7 @@ func _reload_hand(sk: Skeleton3D, gun: Transform3D, sup: Transform3D, def: ItemD
 		return _shell_hand(sk, gun, sup, def, st, eq)
 	var mag := eq.held_node.find_child("Magazine", true, false) as Node3D
 	if mag == null or st.action != UltraActionLayer.Action.RELOADING:
+		_rack_w = 0.0
 		eq._mag_hand = Transform3D()
 		_mag_dropped = false
 		_mag_snd = 0
@@ -556,6 +574,12 @@ func _reload_hand(sk: Skeleton3D, gun: Transform3D, sup: Transform3D, def: ItemD
 	var t_pouch := minf(0.8, commit - 0.7)
 	var t_up := commit - 0.3
 	var t_seat := commit - 0.12
+	# (The gun out for the rack - _reload_pose, next frame: from just before the magazine is seated, back in as the
+	# hand returns to its grip.)
+	_rack_w = 0.0
+	if empty:
+		var span := commit * (MarksmanCharacter.empty_stretch(def, slow) - 1.0) + 0.12
+		_rack_w = smoothstep(-0.15, 0.15, t - t_seat) * (1.0 - smoothstep(span, span + 0.25, t - t_seat))
 	var mag_at := in_well
 	var in_hand := false
 	eq._mag_hidden = false
@@ -623,6 +647,9 @@ func _reload_hand(sk: Skeleton3D, gun: Transform3D, sup: Transform3D, def: ItemD
 ## (pistol), pulls it back RACK_PULL and lets it fly forward, then goes back to its grip. `u` s since the magazine was
 ## seated, over `span` s; `from` = the hand on the seated magazine. Transform3D() once done (or nothing to rack).
 const RACK_PULL := 0.07
+## The gun pushed out for the rack (forward along the barrel, up, toward the right; m) - `_rack_w` of it.
+const RACK_OUT := Vector3(0.14, 0.03, 0.04)
+var _rack_w := 0.0
 var rack_pull := 0.0                   ## (tests) how far the bolt / slide is back now (m)
 var _rack_snd := false
 
@@ -1003,6 +1030,28 @@ func _turn_subtree(pose: Array[Transform3D], top: int, q: Quaternion, about: Vec
 
 ## Two-bone IK on the pose: upper / lower / end parts reach `target` (origin; the end takes its basis), keeping the
 ## bend on the side the pose has it (the elbow's own direction is the pole). Blended by `w`.
+## How much of the clip's own elbow side an arm keeps (the rest: down and out - the gun arm ELBOW_OUT_GUN of the way
+## to the side, the support arm less).
+const ELBOW_KEEP := 0.1
+const ELBOW_OUT_GUN := 1.3
+const ELBOW_OUT_SUPPORT := 0.7
+
+
+## Down and out from the shoulder (skeleton space) for an upper arm, else ZERO.
+func _elbow_hint(pose: Array[Transform3D], up: int) -> Vector3:
+	var side := 0.0
+	if up == _part("LeftUpperArm"):
+		side = 1.0
+	elif up == _part("RightUpperArm"):
+		side = -1.0
+	var uc := _part("UpperChest")
+	if side == 0.0 or uc < 0 or pose[uc] == Transform3D():
+		return Vector3.ZERO
+	var ax := _chest_axes(pose, uc)          # (x = the character's left, y up, z forward)
+	var out := ELBOW_OUT_GUN if side < 0.0 else ELBOW_OUT_SUPPORT
+	return (-ax.y + ax.x * side * out - ax.z * 0.1).normalized()
+
+
 func _two_bone(pose: Array[Transform3D], up: int, lo: int, end: int, target: Transform3D, w: float) -> void:
 	if up < 0 or lo < 0 or end < 0:
 		return
@@ -1021,6 +1070,13 @@ func _two_bone(pose: Array[Transform3D], up: int, lo: int, end: int, target: Tra
 	if pole.length() < 1e-4:
 		pole = (C - A).cross(Vector3.UP).cross(dir)
 	pole = pole.normalized()
+	# An arm's elbow goes down and out, whatever side the clip had it on: the rifle clips hold their gun across the chest,
+	# and kept, the gun arm's elbow pointed in across the belly (the forearm in front of the stomach).
+	var hint := _elbow_hint(pose, up)
+	if hint != Vector3.ZERO:
+		var perp := hint - dir * hint.dot(dir)
+		if perp.length() > 0.2:
+			pole = (pole * ELBOW_KEEP + perp.normalized() * (1.0 - ELBOW_KEEP)).normalized()
 	var cos_a := clampf((a * a + c * c - b * b) / (2.0 * a * c), -1.0, 1.0)
 	var B2 := A + dir * (a * cos_a) + pole * (a * sqrt(maxf(1.0 - cos_a * cos_a, 0.0)))
 	var C2 := A + dir * c
