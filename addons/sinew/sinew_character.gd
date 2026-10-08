@@ -63,11 +63,11 @@ func _build_visual() -> void:
 		_sync_visual(1.0)
 		return
 	var set_res := sinew_anim_set
-	if set_res == null and ResourceLoader.exists(DEFAULT_ANIM_SET):
-		set_res = load(DEFAULT_ANIM_SET) as SinewAnimationSet
+	if set_res == null and ResourceLoader.exists(_default_anim_set()):
+		set_res = load(_default_anim_set()) as SinewAnimationSet
 	if set_res == null:
 		set_res = SinewAnimationSet.new()
-	var drv := SinewAnimDriver.new()
+	var drv := _new_anim_driver()
 	drv.name = "AnimDriver"
 	drv.anim_set = set_res.resolved(body_profile.anim_set)
 	drv.library = body_profile.library
@@ -76,7 +76,7 @@ func _build_visual() -> void:
 	anim = drv
 	add_child(drv)
 	drv.setup(player, skeleton)
-	var eq := UltraEquipmentVisual.new()
+	var eq := _new_equipment()
 	eq.name = "Equipment"
 	add_child(eq)
 	eq.setup(self)
@@ -86,7 +86,7 @@ func _build_visual() -> void:
 	add_child(body_fx)
 	body_fx.setup(self)
 	if SinewWorld.available():
-		var r := SinewRagdoll.new()
+		var r := _new_ragdoll()
 		r.name = "RagdollFX"
 		ragdoll = r
 		add_child(r)
@@ -102,6 +102,25 @@ func _build_visual() -> void:
 
 
 const DEFAULT_ANIM_SET := "res://addons/sinew/sinew_animset.tres"
+
+
+# ------------------------------------------------------------------ factories
+## The pieces _build_visual puts together - a controller built on Sinew (addons/marksman) swaps its own in.
+func _new_anim_driver() -> SinewAnimDriver:
+	return SinewAnimDriver.new()
+
+
+func _new_equipment() -> UltraEquipmentVisual:
+	return UltraEquipmentVisual.new()
+
+
+func _new_ragdoll() -> SinewRagdoll:
+	return SinewRagdoll.new()
+
+
+## The clip references used when `sinew_anim_set` isn't set.
+func _default_anim_set() -> String:
+	return DEFAULT_ANIM_SET
 
 
 func _process(delta: float) -> void:

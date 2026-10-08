@@ -1,7 +1,7 @@
 class_name CharacterModels
 extends RefCounted
 ## What the main menu's Character section offers: which controller drives the local player
-## (the UltraController as it is, or Sinew's physics body) and which rigged model it wears.
+## (the UltraController as it is, Sinew's physics body, or Marksman - Sinew built round the gun packs) and which rigged model it wears.
 ## Dummies, the companion and zombies are never affected: they stay ordinary UltraCharacters.
 
 const MANNEQUIN_BODY := "res://assets/characters/mannequin/mannequin_body_profile.tres"
@@ -10,6 +10,7 @@ const ZOMBIE_BODY := "res://assets/characters/zombie/zombie_body_profile.tres"
 const CONTROLLERS := [
 	{"key": "ultra", "title": "UltraController", "blurb": "the controller as it is"},
 	{"key": "sinew", "title": "Sinew", "blurb": "physics body (in development)"},
+	{"key": "marksman", "title": "Marksman", "blurb": "Sinew body + rifle / pistol packs (in development)"},
 ]
 const MODELS := [
 	{"key": "mannequin", "title": "Mannequin", "blurb": "Quaternius mannequin"},
@@ -29,6 +30,8 @@ static func has_model(key: String) -> bool:
 static func make(controller: String) -> UltraCharacter:
 	if controller == "sinew":
 		return SinewCharacter.new()
+	if controller == "marksman":
+		return MarksmanCharacter.new()
 	return UltraCharacter.new()
 
 
