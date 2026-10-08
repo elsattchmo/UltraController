@@ -1494,3 +1494,27 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   eases back (9/s). Presentation only: shots never move. g4 test_freelook_turns_the_head_not_the_aim. Tour
   `marksman_gunfeel_review` (empty reloads close up, freelook; tours wait on physics ticks - frame grabs under xvfb are
   slow and a wall-clock tour shot everything in 30 frames).
+- **Hits with a gun up (V5)**: whatever holds the gun stays animated (`MarksmanRagdoll.armed_hold`: gun pass weight > 0.5):
+  Sinew's additive `_part_wants_physics(i, want)` hook keeps the arm parts kinematic even through a stagger, and
+  `_hit_chain` drops them. A body / head hit: spine / neck / head physical, the arms RIDE on the chest
+  (`MarksmanGunPass._carry_arms`: shown chest x animated chest^-1 x animated arm) - the gun rocks off the aim ~25 deg and
+  is back in 0.4 s. An arm hit is a sprung kick in the gun pass (`arm_hit`: the gun arm's moves the gun along the hit and
+  turns it KICK_TURN rad/m - ~9 deg at 25 points, back in 0.2 s; the support arm's knocks the hand off the grip, x3, up to
+  SUPPORT_KICK_MAX). A physical arm was tried: switched on it sagged ~free fall (23 cm in 0.18 s whatever the push or
+  tone) and kept a ~12 deg wrist error while physical: the barrel stayed 10-14 deg off for a second.
+  After physics, Sinew's additive `SinewPoseModifier.post_passes` hook (empty for Sinew) runs `MarksmanGunPass.apply_post`:
+  the support hand two-bone IK'd onto the gun AS SHOWN; knocked further than LET_GO 14 cm it lets go (grip_w eases to
+  0), takes hold again within REGRIP 7 cm over 0.18 s. Hits in tests need `react_to_hit` called by hand (UltraEffects
+  calls it on every machine; a test scene has none). Suite g5 (CI).
+- **Arms out of the body** (the user: "we don't really want the arms to clip into the body"): (1) every arm IK in the gun
+  pass puts the elbow down and OUT (`_elbow_hint` in `_two_bone`: chest frame, gun arm ELBOW_OUT_GUN 1.3, support 0.7,
+  ELBOW_KEEP 0.1 of the clip's own side) - the RFP clips hold their rifle across the chest and kept, the gun arm's elbow
+  pointed in across the belly; (2) last in `apply_post` (after physics + the support hand) `MarksmanArmClear`:
+  UltraArmClear's torso ellipse + keep-hands swing round the shoulder -> wrist line (hands stay on the gun) - a kicked gun
+  drove the forearm 7-8 cm in; (3) the pistol stays 13 cm right of the eye (18 cost the barrel 0.45 deg aiming low crouched: g2).
+  g6 (CI): elbow / forearm / hand depth <= 2 cm, the upper arm no deeper than its own shoulder (the ellipse is wider than
+  the body at the shoulders: the joint reads 2-6 cm "in" in every pose, unarmed idle too), elbow_out >= 1.15. Tour
+  `marksman_gunfeel_review -- --arms` films pistol / rifle hip + ADS from above, the side and the front.
+  Racking an empty long gun, the gun comes out off the shoulder (`RACK_OUT` 14 cm forward, `_rack_w` eased round the
+  rack): shouldered, the charging handle sat in front of the chest and the left hand went 7.9 cm into it.
+  (`UltraItems.give(c, id, n)` gives n ROUNDS - one by default: give tests a reserve, a lone suite has no infinite ammo.)
