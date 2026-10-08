@@ -60,3 +60,34 @@ func test_marksman_is_a_sinew_body_that_walks() -> void:
 	check(c.state.pos.distance_to(from) > 1.2, "walks (%.2f m in 2 s)" % c.state.pos.distance_to(from))
 	var st: Dictionary = r.world.physics.call("character_gait_state", r._id)
 	check(bool(st.get("stepping", false)), "the gait steps")
+
+
+## The Sinew debug view (K / main menu "Show Sinew muscles" / --sinew-debug) draws a Marksman body too: its
+## parts as shapes coloured by effort, over the character.
+func test_debug_view_draws_marksman() -> void:
+	load_playground()
+	var c := _marksman(marker("spawn").global_position)
+	await ticks(40)
+	var r := c.ragdoll as MarksmanRagdoll
+	if not check(r != null, "a Marksman body"):
+		return
+	var dd: SinewDebugDraw = null
+	for n in r.get_children():
+		if n is SinewDebugDraw:
+			dd = n
+	if not check(dd != null, "its ragdoll carries the debug view"):
+		return
+	var was := SinewDebugDraw.view
+	SinewDebugDraw.view = SinewDebugDraw.View.OVERLAY
+	await ticks(10)
+	var shown := 0
+	for m in dd._shapes:
+		shown += 1 if m.visible else 0
+	check(shown >= r.parts.size() - 1, "overlay: a shape per part shown (%d of %d)" % [shown, r.parts.size()])
+	SinewDebugDraw.view = SinewDebugDraw.View.OFF
+	await ticks(3)
+	shown = 0
+	for m in dd._shapes:
+		shown += 1 if m.is_visible_in_tree() else 0
+	check(shown == 0, "off: nothing drawn (%d shown)" % shown)
+	SinewDebugDraw.view = was

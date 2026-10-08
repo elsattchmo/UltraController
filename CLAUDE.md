@@ -1338,3 +1338,7 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   (`LATE_LIFT`), swing phase offset latched (`Foot::off`), swing yaw rate-limited (`swing_turn_rate` 12 / 30 at a
   run, lands facing the way it faces), foothold kept `land_clear` 11 cm off the standing foot. s10 KNOWN: sprint
   flick 180 (legs cross in the air, -3..-11 cm).
+- **Hips never jump** (g1, <= 4 cm a frame off the body; were 6-9): `Gait::set_pelvis_offset` (SinewRagdoll feeds the
+  clip's hips while the clip holds the legs; eases away 0.25 s after), heel strikes lowered into through the swing,
+  drop released at 0.6 + 1.2 x speed m/s, the cycle pose's share at low speed eased (`_step_w`). s10 KNOWN: chaos
+  sprint (thigh roots brush < 1 cm).

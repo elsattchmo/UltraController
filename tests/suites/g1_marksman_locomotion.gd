@@ -282,10 +282,14 @@ func _track_feet(c: MarksmanCharacter, frames: int) -> Dictionary:
 		if OS.get_environment("G1_FEET") != "":
 			var lat: Vector3 = (sk.global_transform * sk.get_bone_global_pose(feet[0])).basis * (rec.lat[0] as Vector3)
 			var lat_r: Vector3 = (sk.global_transform * sk.get_bone_global_pose(feet[1])).basis * (rec.lat[1] as Vector3)
-			print("FEET t%d %s yaw %.0f aim %.0f gait_w %.2f legs %.2f footyaw L %.0f R %.0f planted %s%s anchor %d" % [Engine.get_physics_frames(),
+			var hrel: Vector3 = (rec.hips.back() as Vector3) - c.visual_root.global_position
+			var dh := 0.0
+			if rec.hips.size() > 1 and rec.body.size() > 0:
+				dh = (hrel - ((rec.hips[rec.hips.size() - 2] as Vector3) - (rec.body.back() as Vector3))).length()
+			print("FEET t%d %s yaw %.0f aim %.0f gait_w %.2f legs %.2f footyaw L %.0f R %.0f planted %s%s anchor %d hips (%.2f %.2f %.2f) d %.1f cm step %s drop %.3f early %s gap %.2f" % [Engine.get_physics_frames(),
 					MotorState.Id.keys()[c.state.state], rad_to_deg(c.state.body_yaw), rad_to_deg(c.last_input.yaw), r.gait_w, r._legs_w(),
 					rad_to_deg(atan2(lat.z, lat.x)), rad_to_deg(atan2(lat_r.z, lat_r.x)), "L" if st.get("planted_l", false) else "-",
-					"R" if st.get("planted_r", false) else "-", r._clip_anchor.size()])
+					"R" if st.get("planted_r", false) else "-", r._clip_anchor.size(), hrel.x, hrel.y, hrel.z, dh * 100.0, st.get("stepping", false), float(st.get("pelvis_drop", 0.0)), st.get("early_lifts", 0), float(st.get("legs_gap", 0.0))])
 		rec.body.append(c.visual_root.global_position)
 		for i in 2:
 			var ft := sk.global_transform * sk.get_bone_global_pose(feet[i])
@@ -377,14 +381,15 @@ func test_feet_pivot_not_twist() -> void:
 	# (Limits: a planted foot turning with neither ball nor heel held is the measuring noise of a pivot point a
 	# centimetre off - a few degrees; a swinging foot turns at most Gait's swing_turn_rate, 12 rad/s = 11.5 deg a
 	# frame. Before: armed turns snapped the planted feet 35-111 deg in a frame, crouching twisted them 25-90 deg in
-	# place, starts / side steps / stops spun a swinging foot 37-79 deg a frame. The pelvis column is information:
-	# known pops of 6-9 cm a frame at hand-overs between the clip and the gait.)
+	# place, starts / side steps / stops spun a swinging foot 37-79 deg a frame. The hips (off the body's own motion)
+	# jumped 6-9 cm a frame at clip <-> gait hand-overs, heel strikes and stopping crouched; now <= ~3 cm.)
 	for row: Array in rows:
 		var r: Dictionary = row[1]
 		info("%-28s twist %5.1f deg (worst %4.1f/frame)  pivot %5.1f deg  spin %4.1f deg/frame  pelvis %.1f cm/frame" % [row[0], r.twist,
 				r.twist_max, r.pivot, r.spin, r.pelvis * 100.0])
 		check(r.twist_max <= 4.0 and r.twist <= 15.0, "%s: planted feet pivot, not twist (%.1f deg, %.1f a frame)" % [row[0], r.twist, r.twist_max])
 		check(r.spin <= 12.0, "%s: a swinging foot turns at a foot's pace (%.1f deg a frame)" % [row[0], r.spin])
+		check(r.pelvis <= 0.04, "%s: the hips never jump (%.1f cm a frame off the body)" % [row[0], r.pelvis * 100.0])
 
 
 ## From a _track_feet record: yaw of each foot from its sideways axis (pitch doesn't move it).
