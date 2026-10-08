@@ -70,9 +70,8 @@ func test_motion_matching_against_the_gait() -> void:
 			rows[mm] = rec
 			if mm:
 				var drv := c.anim as MarksmanAnimDriver
-				for cl: Dictionary in drv.mm.db.clips:
-					info("  db %-32s v (%5.2f %5.2f) ground %.3f frames %d" % [cl.name, cl.vel.x, cl.vel.y, cl.ground, cl.count])
-				info("%s matching: %d searches, %d switches" % ["unarmed" if item == &"" else String(item), drv.mm.searches, drv.mm.switches])
+				info("%s matching: %d searches, %d switches, %d frames, slowest search %.2f ms" % ["unarmed" if item == &"" else String(item),
+						drv.mm.searches, drv.mm.switches, drv.mm.db.size(), drv.mm.search_us / 1000.0])
 				check(drv.mm.switches > 3, "%s: the matcher picks clips (%d switches)" % [item, drv.mm.switches])
 				check(rec.nan == 0, "%s: no NaN in the matched pose" % item)
 			chars.erase(c)

@@ -47,6 +47,8 @@ var last_cost := 0.0
 var last_keep := 0.0
 var searches := 0
 var switches := 0
+## The slowest search so far (microseconds).
+var search_us := 0
 ## The predicted trajectory (world, xz offsets from the body) of the last search - for debug drawing.
 var predicted: Array[Vector3] = []
 
@@ -139,7 +141,9 @@ func _search(wish: Vector2, speed: float, force: bool) -> void:
 	var cur := frame if clip >= 0 else 0
 	var bv := driver.skeleton.global_transform.basis.orthonormalized().inverse() * Vector3(character.state.vel.x, 0.0, character.state.vel.z)
 	var q := db.query_from(cur, traj, Vector2(bv.x, bv.z))
+	var t0 := Time.get_ticks_usec()
 	var r := db.search(q, clip, time)
+	search_us = maxi(search_us, Time.get_ticks_usec() - t0)
 	if OS.get_environment("MM_Q") != "" and Engine.get_physics_frames() % 30 < 6:
 		var per := {}
 		for fi in db.size():

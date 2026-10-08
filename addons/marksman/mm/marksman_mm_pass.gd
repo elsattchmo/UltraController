@@ -36,7 +36,6 @@ var _wait_lift: Array[bool] = [false, false]
 var _p := {}
 var _sub := {}
 var _last_sk := Vector3.INF
-var _last_us := 0
 
 
 func _init(c: UltraCharacter, r: SinewRagdoll, m: MarksmanMotionMatcher) -> void:
@@ -52,9 +51,7 @@ func _part(n: String) -> int:
 
 
 func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
-	var now := Time.get_ticks_usec()
-	var dt := clampf((now - _last_us) / 1e6, 0.0, 0.1) if _last_us > 0 else 0.0
-	_last_us = now
+	var dt := clampf(character.get_process_delta_time(), 0.0, 0.1)
 	var xf := sk.global_transform
 	# (A teleport: nothing stays locked.)
 	if _last_sk != Vector3.INF and xf.origin.distance_to(_last_sk) > 1.0:
