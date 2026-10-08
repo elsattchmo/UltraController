@@ -234,7 +234,7 @@ func test_main_menu_character_select_with_pad() -> void:
 	add_child(m)
 	await _frames(3)
 	var b: Dictionary = m.get("_char_buttons")
-	check(b.has("controller:ultra") and b.has("controller:sinew") and b.has("model:mannequin") and b.has("model:zombie"), "a toggle per controller and model (%s)" % [b.keys()])
+	check(b.has("controller:ultra") and b.has("controller:sinew") and b.has("controller:marksman") and b.has("model:mannequin") and b.has("model:zombie"), "a toggle per controller and model (%s)" % [b.keys()])
 	check((b["controller:ultra"] as Button).button_pressed and (b["model:mannequin"] as Button).button_pressed, "the current picks are the pressed ones")
 	check(_focus_text() == "Single player", "focus still opens on Single player (got %s)" % _focus_text())
 	await _pad(PAD_UP)
