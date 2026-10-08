@@ -21,6 +21,9 @@ var ragdoll: SinewRagdoll
 var matcher: MarksmanMotionMatcher
 ## 0..1: how much the pass does (the driver eases it with the "mm" state).
 var weight := 0.0
+## What it applies this frame: weight, less the gait's share (a stumble), none while physics has the legs.
+var _w := 0.0
+var _physics_legs := false
 var warp := 0.0
 ## The playing clip's floor height taken out of the pose (m, eased).
 var ground := 0.0
@@ -58,18 +61,24 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 		locked = [false, false]
 		release_t = [0.0, 0.0]
 	_last_sk = xf.origin
-	if weight <= 0.0 or matcher == null or matcher.db == null or matcher.clip < 0:
+	# (Standing aside while the gait has the legs - a stumble. A stagger keeps the pose as it was - the matcher
+	# freezes, MarksmanAnimDriver - and only lets the feet go (easing off their locks): the balancer steps them now;
+	# dropping the whole pass at once jumped the muscles' targets just as the balancer took over.)
+	var w := weight * (1.0 - ragdoll.gait_w)
+	_physics_legs = ragdoll.staggering() or ragdoll._handback_t >= 0.0
+	if w <= 0.0 or matcher == null or matcher.db == null or matcher.clip < 0:
 		locked = [false, false]
 		warp = 0.0
 		_ground_set = false
 		return false
 	var pose := mod.anim_pose
+	_w = w
 	# The clip's floor onto the real one (eased: a switch between clips authored at different heights glides).
 	var want: float = matcher.db.clips[matcher.clip].ground
 	ground = move_toward(ground, want, GROUND_RATE * dt) if dt > 0.0 and _ground_set else want
 	_ground_set = true
 	if absf(ground) > 1e-5:
-		var down := Vector3(0.0, -ground * weight, 0.0)
+		var down := Vector3(0.0, -ground * _w, 0.0)
 		for i in pose.size():
 			pose[i].origin += down
 	if OS.get_environment("MM_NOWARP") == "":
@@ -90,7 +99,7 @@ func _warp(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 		# Signed turn from the clip's way to the body's, about the skeleton's up (+Y): x -> z is -Y.
 		want = clampf(-cv.angle_to(v), -WARP_MAX, WARP_MAX)
 	warp = move_toward(warp, want, WARP_RATE * dt) if dt > 0.0 else want
-	var w := warp * weight
+	var w := warp * _w
 	if absf(w) < 1e-4:
 		return
 	var hips := _part("Hips")
@@ -122,7 +131,7 @@ func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> vo
 		return
 	var xf := sk.global_transform
 	var foot_w: Vector3 = xf * pose[ft_i].origin
-	var planted := matcher.planted(side)
+	var planted := matcher.planted(side) and not _physics_legs
 	# Where the foot shows now: the clip's, plus what is left of a released lock's offset.
 	var shown := foot_w
 	if not locked[side] and release_t[side] > 0.0:
@@ -146,7 +155,7 @@ func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> vo
 	if target.distance_to(foot_w) < 1e-4:
 		return
 	var t_sk := xf.affine_inverse() * target
-	_two_bone(pose, up_i, lo_i, ft_i, Transform3D(pose[ft_i].basis, t_sk), weight)
+	_two_bone(pose, up_i, lo_i, ft_i, Transform3D(pose[ft_i].basis, t_sk), _w)
 
 
 func _subtree(top: int) -> Array:

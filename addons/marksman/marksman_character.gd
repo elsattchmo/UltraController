@@ -26,6 +26,20 @@ func _ready() -> void:
 	super._ready()
 
 
+## A push under motion matching: the legs go to Sinew's gait for the stumble (its catching steps under physical
+## motion, the trip rule), then back to the matcher (MarksmanRagdoll.stumble_start).
+func receive_push(dv: Vector3) -> bool:
+	var r := ragdoll as MarksmanRagdoll
+	var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
+	if not _motion_on and r != null and r.mm_legs() and physical_motion and offline and is_authority() \
+			and state.is_grounded() and state.state in MOTION_STATES and state.platform_id == 0:
+		r.stumble_start()
+		if r.gait_walking():
+			_motion_on = true
+			_motion_vel = Vector3(state.vel.x, 0.0, state.vel.z)
+	return super.receive_push(dv)
+
+
 func _new_anim_driver() -> SinewAnimDriver:
 	return MarksmanAnimDriver.new()
 

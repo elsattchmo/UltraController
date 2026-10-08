@@ -183,6 +183,12 @@ func _drive_mm(delta: float) -> void:
 		mm_pass.weight = _ease_w(&"mm_pass", 1.0 if on else 0.0, delta)
 	if not on:
 		return
+	# Staggering (the balancer has the legs): the matched pose holds still as its target, like the gait's frozen pose
+	# (the body stands still meanwhile, so the matcher jumped to the idle mid-recovery).
+	var r := (get_parent() as UltraCharacter).ragdoll as SinewRagdoll
+	if r and (r.staggering() or r._handback_t >= 0.0):
+		tree.set(LOCO + "mm/rate/scale", 0.0)
+		return
 	if mm.update(delta, MarksmanStance.of_item(held_def)) or mm.db.clips[mm.clip].name != _mm_clip:
 		var c: Dictionary = mm.db.clips[mm.clip]
 		var node := ((tree.tree_root as AnimationNodeBlendTree).get_node("loco") as AnimationNodeStateMachine).get_node("mm") as AnimationNodeBlendTree
