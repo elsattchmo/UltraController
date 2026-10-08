@@ -72,7 +72,14 @@ func _process_modification_with_delta(_delta: float) -> void:
 				sk.set_bone_global_pose(ragdoll.parts[i].bone, anim_pose[i])
 		return
 	var pw := ragdoll.part_w
+	var cut := ragdoll.part_cut
 	for i in n:          # parents first, so each part's local pose is taken against its placed parent
+		# A cut-off part stays on its parent as animated (it's hidden; the gore system throws the gib).
+		var p: int = ragdoll.parts[i].parent
+		if i < cut.size() and cut[i] != 0 and p >= 0:
+			var placed := sk.get_bone_global_pose(ragdoll.parts[p].bone)
+			sk.set_bone_global_pose(ragdoll.parts[i].bone, placed * (anim_pose[p].affine_inverse() * anim_pose[i]))
+			continue
 		# Per part: physics where it's physical, else exactly this frame's animated pose (set
 		# explicitly - a physical parent would otherwise carry an animated child off its pose).
 		var k := blend * (pw[i] if i < pw.size() else 1.0)

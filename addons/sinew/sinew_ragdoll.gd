@@ -28,6 +28,10 @@ var _rig := -1
 var _id := 0                                 ## the Sinew character
 var _severed := 0                            ## regions already cut off in Sinew
 var _part_of_region := {}                    ## region -> the top part of it
+## Per part: cut off (no longer attached in Sinew). The skeleton keeps such a bone on its animated pose under its
+## parent (SinewPoseModifier): the gore system hides it and throws its own gib - posed on the falling physics piece,
+## the stump's rim (skinned partly to the cut bone) stretched after it across the body.
+var part_cut := PackedByteArray()
 
 ## Muscle tone while down (Sinew's tone: 1 = the rig's full muscles).
 @export_range(0, 1, 0.01) var down_tone_start := 0.35
@@ -168,6 +172,7 @@ func _make_character() -> void:
 	_hit_t.clear()
 	_powered_on = false
 	_severed = 0
+	part_cut = PackedByteArray()
 	pose_now = _pose()
 	pose_prev = pose_now.duplicate()
 	_setup_gait()
@@ -1035,6 +1040,9 @@ func _follow_cuts() -> void:
 		if (sev >> r) & 1 and not (_severed >> r) & 1:
 			world.physics.call("character_sever", _id, _part_of_region[r])
 	_severed = sev
+	part_cut.resize(parts.size())
+	for i in parts.size():
+		part_cut[i] = 0 if bool(world.physics.call("character_attached", _id, i)) else 1
 
 
 func _decide_getup() -> void:

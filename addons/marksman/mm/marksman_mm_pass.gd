@@ -213,7 +213,18 @@ func _limp(pose: Array[Transform3D], dt: float) -> void:
 				pose[j] = x2 * pose[j]
 
 
+## A released foot this far off its clip is stepped there (lifted on an arc), not slid (m).
+const STEP_LIFT_FROM := 0.06
+## A turn clip's foot is down while its ankle is within this of the rest height (m).
+const TURN_LIFT := 0.03
+## Fading out of a turn, a lock holds this far off the idle's own foot (m).
+const RELEASE_TURN := 0.45
+var _ankle_h := [INF, INF]
+
+
 func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> void:
+	if _ankle_h[side] == INF:
+		_ankle_h[side] = sk.get_bone_global_rest(sk.find_bone("LeftFoot" if side == 0 else "RightFoot")).origin.y
 	var pre := "Left" if side == 0 else "Right"
 	var up_i := _part(pre + "UpperLeg")
 	var lo_i := _part(pre + "LowerLeg")
@@ -222,13 +233,34 @@ func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> vo
 		return
 	var xf := sk.global_transform
 	var foot_w: Vector3 = xf * pose[ft_i].origin
-	var planted := _planted(side) and not _physics_legs
+	var drv := character.anim as MarksmanAnimDriver
+	var turning := drv != null and drv.turn_stepping()
+	var idle_clip := float(matcher.db.clips[matcher.clip].speed) < 0.15
+	# (Only standing: walking off out of a turn, the long hold dragged a planted foot - and the hips - after the body.)
+	var fading := drv != null and drv.turn_w > 0.05 and not turning and idle_clip
+	# (Planted: the matched clip's contact - an idle's feet always (the pistol idle's weight shifts read as lifted: the
+	# feet turned round with the body); in a turn clip, a foot the clip has down (it's locked until the clip lifts it -
+	# else its stance, unlike the idle's, slid in under the body); fading out of a turn, where the turn left them.)
+	var planted := _planted(side) or idle_clip or fading
+	if turning:
+		planted = pose[ft_i].origin.y < _ankle_h[side] + TURN_LIFT
+	planted = planted and not _physics_legs
 	# Where the foot shows now: the clip's, plus what is left of a released lock's offset.
 	var shown := foot_w
 	if not locked[side] and release_t[side] > 0.0:
 		release_t[side] = maxf(release_t[side] - dt, 0.0)
-		shown = foot_w + release[side] * smoothstep(0.0, 1.0, release_t[side] / RELEASE_TIME)
+		var k := release_t[side] / RELEASE_TIME
+		shown = foot_w + release[side] * smoothstep(0.0, 1.0, k)
+		# (A foot going a step's way standing / turning is lifted on an arc, not slid along the ground; walking, the
+		# clip's own swing lifts it.)
+		var far := Vector2(release[side].x, release[side].z).length()
+		if far > STEP_LIFT_FROM and (idle_clip or turning or fading):
+			shown.y += minf(0.07, far * 0.35) * sin(PI * (1.0 - k))
 	if not planted:
+		_wait_lift[side] = false
+	# (An idle never lifts a foot: once the released foot has glided back onto the clip it locks again - else the feet
+	# stayed unlocked for good after the first release and turned round with the body.)
+	if _wait_lift[side] and (idle_clip or turning) and release_t[side] <= 0.0:
 		_wait_lift[side] = false
 	# A plant locks where the foot is SHOWN (a fresh lock never jumps it); a foot pulled out of its lock waits for the
 	# clip's next plant (re-locking on the spot it was dragged from held it there).
@@ -236,7 +268,7 @@ func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> vo
 		locked[side] = true
 		lock_at[side] = shown
 		release_t[side] = 0.0
-	if locked[side] and (not planted or lock_at[side].distance_to(foot_w) > RELEASE_DIST):
+	if locked[side] and (not planted or lock_at[side].distance_to(foot_w) > (RELEASE_TURN if fading else RELEASE_DIST)):
 		locked[side] = false
 		_wait_lift[side] = planted
 		release[side] = lock_at[side] - foot_w
@@ -363,7 +395,7 @@ func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 		else:
 			var rate := FIT_RISE if want[side] > fit_off[side] else FIT_FALL
 			fit_off[side] = move_toward(fit_off[side], want[side], rate * dt)
-		fit_normal[side] = fit_normal[side].slerp(normals[side], clampf(dt * 12.0, 0.0, 1.0)) if _fit_set else normals[side]
+		fit_normal[side] = fit_normal[side].lerp(normals[side], clampf(dt * 12.0, 0.0, 1.0)).normalized() if _fit_set else normals[side]
 	# The hips only go down as far as a leg needs to reach its foot (straightening takes up the rest).
 	var k := _w
 	var need := 0.0
@@ -397,9 +429,10 @@ func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 		if _planted(side):
 			var n_sk := (to_sk * fit_normal[side]).normalized()
 			var q := _arc(Vector3.UP, n_sk)
-			var ang := q.get_angle()
-			if ang > 1e-4:
-				q = Quaternion(q.get_axis(), minf(ang, TILT_MAX) * k)
+			var ang := q.normalized().get_angle()
+			var axis := q.get_axis()
+			if ang > 1e-4 and axis.length_squared() > 1e-8:
+				q = Quaternion(axis.normalized(), minf(ang, TILT_MAX) * k)
 				b = Basis(q) * b
 		if absf(lift) < 1e-4 and b == pose[ft_i].basis and _edge_pull[side] == Vector3.ZERO:
 			continue

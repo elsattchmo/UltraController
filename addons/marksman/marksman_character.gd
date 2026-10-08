@@ -42,6 +42,12 @@ func _traversal_hook(m: UltraMotor, s: MotorState, inp: InputFrame) -> int:
 	return r
 
 
+## Sprint held with the stick sideways / back, standing: a run rather than a walk (not a sprint).
+static func side_run_wanted(s: MotorState, i: InputFrame) -> bool:
+	var mag := minf(i.move.length(), 1.0)
+	return i.has(InputFrame.B_SPRINT) and mag > 0.5 and i.move.y <= 0.45 * mag and s.stance == MotorState.Stance.STAND
+
+
 # ------------------------------------------------------------------ the gun against a wall (V4b)
 
 ## How far a held firearm reaches in front of the shoulder (m; item stat "tuck_length", else long guns 0.75, others 0.45).
@@ -86,7 +92,15 @@ func simulate(input: InputFrame, delta: float, replaying := false) -> void:
 	if input != null and input.has(InputFrame.B_PRIMARY) and tuck_distance(state, input) < INF:
 		input = input.copy()
 		input.buttons &= ~InputFrame.B_PRIMARY
+	# Sprint held going sideways or back runs (the motor sprints only forward - sideways it stayed a walk): the jog gait
+	# for this tick, so the stick's full way is a run (jog_speed x strafe / back share, ~3.4 m/s sideways) - the stance's
+	# run strafe clips show it. Not crouched.
+	var side_run := input != null and side_run_wanted(state, input)
+	var gait := profile.default_gait
+	if side_run:
+		profile.default_gait = MovementProfile.Gait.JOG
 	super.simulate(input, delta, replaying)
+	profile.default_gait = gait
 	if replaying:
 		return
 	_cross_gaps()
@@ -335,7 +349,17 @@ func _new_equipment() -> UltraEquipmentVisual:
 var eye: MarksmanEye
 
 
+## Getting up facing the way the body lay (MarksmanRagdoll._face_getup): the aim still to turn round to it (rad), eased
+## out over the get-up - the camera turns with the body; mouse movement meanwhile adds on top.
+var aim_turn_left := 0.0
+const AIM_TURN_RATE := 2.8
+
+
 func _process(delta: float) -> void:
+	if absf(aim_turn_left) > 1e-4 and input_source:
+		var step := clampf(aim_turn_left, -AIM_TURN_RATE * delta, AIM_TURN_RATE * delta)
+		input_source.live_yaw += step
+		aim_turn_left -= step
 	super._process(delta)
 	if (eye == null or not is_instance_valid(eye)) and Engine.get_process_frames() % 30 == 0 and is_inside_tree():
 		for n in get_tree().root.find_children("*", "UltraCameraRig", true, false):

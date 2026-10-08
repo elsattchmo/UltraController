@@ -23,6 +23,10 @@ const NECK_MAX := 0.35
 const HEAD_SHARE := 0.6
 ## The shoulder pocket off the right shoulder joint, in the chest's frame (x = left / inward, y = up, z = forward), m.
 const POCKET := Vector3(0.06, -0.04, 0.05)
+## A shouldered gun at the hip: the eye at least this far to the view's left of the stock (m; y unused).
+const HIP_LONG := Vector2(0.10, 0.0)
+## The most the neck rolls the head back up off the stock at the hip (rad).
+const HIP_ROLL := 0.7
 ## Where a held-out gun's hand sits off the eye (m along the view's right, up, forward): low and right, out in front.
 const PISTOL_HIP := Vector3(0.13, -0.22, 0.45)
 
@@ -103,6 +107,7 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	var want := (1.0 if reloading else UltraActionLayer.raised(st) * (1.0 - st.gun_low)) if armed else 0.0
 	weight = move_toward(weight, want, 6.0 * dt)
 	reload_w = move_toward(reload_w, 1.0 if reloading else 0.0, 4.0 * dt)
+	_lean_e0 = Vector3.INF
 	var leaned := _lean(sk, mod.anim_pose, dt)
 	if weight <= 0.001 or not armed:
 		return leaned
@@ -152,6 +157,8 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 		_aim_down_sights(sk, pose, rh, grip, target_sk, def)
 	if kick.length() > 1e-5:
 		_kick(pose, rh, grip, kick)
+	if leaned:
+		_lean_settle(sk, pose)
 	var gun: Transform3D = pose[rh] * grip
 	aim_error = _barrel_turn(gun, target_sk).get_angle()
 	# The support hand onto the gun: under the fore-end at M_SupportGrip where the item says how (support_fingers /
@@ -243,14 +250,49 @@ func _lean(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> bool:
 	var side := fwd.cross(Vector3.UP).normalized()          # (the view's right, skeleton space)
 	var e0 := _eye(sk, pose, neck) if neck >= 0 and _head_bone >= 0 else Vector3.INF
 	_bend(pose, fwd, a)
-	if e0 != Vector3.INF:
+	for _r in (2 if e0 != Vector3.INF else 0):
 		var went := (_eye(sk, pose, neck) - e0).dot(side) * signf(a)
 		var want_out := LEAN_OUT * smoothstep(0.0, 1.0, absf(lean))
 		if went > 0.02:
 			var more := clampf(a * (want_out / went - 1.0), -absf(a) * 0.5, absf(a) * 0.6) if a > 0.0 \
 					else clampf(a * (want_out / went - 1.0), -absf(a) * 0.6, absf(a) * 0.5)
 			_bend(pose, fwd, more)
+			a += more
+	if e0 != Vector3.INF:
+		var went := (_eye(sk, pose, neck) - e0).dot(side)
+		_lean_e0 = e0
+		_lean_fwd = fwd
+		_lean_side = side
+		_lean_gain = absf(went / a) if absf(a) > 1e-3 else 0.0
+		_lean_out = signf(a) * LEAN_OUT * smoothstep(0.0, 1.0, absf(lean))
 	return true
+
+
+var _lean_e0 := Vector3.INF
+var _lean_fwd := Vector3.ZERO
+var _lean_side := Vector3.ZERO
+var _lean_gain := 0.0
+var _lean_out := 0.0
+
+
+## After the gun is placed: the head coming up off the stock at the hip (_head_up_at_hip) moves the eye too, by more or
+## less as the spine leans - bend the rest so the eye is out LEAN_OUT from where it stands at the hip (_hip_shift left of
+## the lean-free eye). About the view's way, so the gun (carried on the chest) only rolls a little round its own line.
+func _lean_settle(sk: Skeleton3D, pose: Array[Transform3D]) -> void:
+	var neck := _part("Neck")
+	if _lean_e0 == Vector3.INF or _lean_gain < 0.05 or neck < 0 or _head_bone < 0:
+		return
+	var eq := _equipment()
+	var held := _hip_shift * weight * (1.0 - (eq.ads if eq else 0.0))
+	var want := _lean_out - held
+	var total := 0.0
+	for _r in 3:
+		var err := want - (_eye(sk, pose, neck) - _lean_e0).dot(_lean_side)
+		var more := clampf(err / _lean_gain, -0.5 - total, 0.5 - total)
+		if absf(err) < 0.005 or absf(more) < 1e-3:
+			break
+		_bend(pose, _lean_fwd, more)
+		total += more
 
 
 func _bend(pose: Array[Transform3D], fwd: Vector3, a: float) -> void:
@@ -317,7 +359,7 @@ func _reload_pose(pose: Array[Transform3D], rh: int, grip: Transform3D, def: Ite
 ## The left hand (skeleton space) on the reload's path now, or an empty transform.
 func _reload_hand(sk: Skeleton3D, gun: Transform3D, sup: Transform3D, def: ItemDefinition, st: MotorState) -> Transform3D:
 	var eq := _equipment()
-	if eq == null or eq.held_node == null:
+	if eq == null or eq.held_node == null or not _learn_palm(sk):
 		return Transform3D()
 	if String(def.stat("reload_mode", "")) == "shell":
 		return _shell_hand(sk, gun, sup, def, st, eq)
@@ -551,6 +593,44 @@ func _shoulder(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transfor
 		d = (target_sk - muzzle).normalized()
 	stock = gun * _stock_local.origin
 	_two_bone(pose, sh, _part("RightLowerArm"), rh, gun * grip.affine_inverse(), weight)
+	_head_up_at_hip(sk, pose, target_sk)
+
+
+## At the hip the head is up, off the stock: the rifle clips cant it over the gun (a cheek weld) and the gun sat in the
+## middle of the first-person view. The neck rolls back until the eye is HIP_LONG.x left of the stock (<= HIP_ROLL; the
+## stock stays in the shoulder - moving the gun out to the right floated it 12-20 cm off the shoulder). In ADS the cheek
+## comes back down onto the stock (_aim_down_sights bends from here).
+func _head_up_at_hip(sk: Skeleton3D, pose: Array[Transform3D], target_sk: Vector3) -> void:
+	var eq := _equipment()
+	# (Leaning, the head goes over with the spine - held up and left it fought the lean; _lean_settle puts the eye out.)
+	var k := weight * (1.0 - (eq.ads if eq else 0.0)) * (1.0 - smoothstep(0.0, 1.0, absf(lean)))
+	var neck := _part("Neck")
+	if k <= 0.001 or neck < 0:
+		return
+	if _eye_local == Vector3.INF:
+		_eye_setup(sk)
+	if _head_bone < 0:
+		return
+	var eye := _eye(sk, pose, neck)
+	var view_d := (target_sk - eye).normalized()
+	var view_r := view_d.cross(Vector3.UP).normalized()
+	var need := HIP_LONG.x - (stock - eye).dot(view_r)
+	if need <= 0.0:
+		_hip_shift = 0.0
+		return
+	# (Toward an eye that far left, the neck bent straight at it - as ADS bends it to the sights: the clip bows the head
+	# forward over the stock, so a roll about the view hardly moved the eye.)
+	var j: Vector3 = pose[neck].origin
+	var want := eye - view_r * need
+	var bend := _limit(_arc((eye - j).normalized(), (want - j).normalized()), HIP_ROLL)
+	_turn_subtree(pose, neck, Quaternion.IDENTITY.slerp(bend, k), j)
+	hip_gap = Vector2((stock - eye).dot(view_r), (stock - _eye(sk, pose, neck)).dot(view_r))
+	if absf(lean) < 0.05:
+		_hip_shift = (hip_gap.y - hip_gap.x) / k
+
+
+var hip_gap := Vector2.ZERO        ## (tests) the stock's offset right of the eye before / after the head came up
+var _hip_shift := 0.0              ## how far the head coming up moved the eye left, per unit of its weight (m)
 
 
 ## The right shoulder's pocket (skeleton space): just inside the shoulder joint, a little forward and down - where
@@ -632,21 +712,29 @@ func _eye_setup(sk: Skeleton3D) -> void:
 ## The support hand under the fore-end (skeleton space): its fingers along `support_fingers`, palm toward
 ## `support_palm` (item frame), the palm on M_SupportGrip - as UltraEquipmentVisual._support_under does it.
 func _support_under(sk: Skeleton3D, gun: Transform3D, def: ItemDefinition) -> Transform3D:
-	if _palm_local == Vector3.ZERO:
-		var hb := sk.get_bone_global_rest(sk.find_bone("LeftHand"))
-		var tip := Vector3.ZERO
-		for f in ["LeftMiddleDistal", "LeftRingDistal", "LeftIndexDistal"]:
-			tip += sk.get_bone_global_rest(sk.find_bone(f)).origin / 3.0
-		var v := hb.basis.orthonormalized().inverse() * (tip - hb.origin)
-		v.y = 0.0
-		if v.length() < 0.005:
-			return Transform3D()
-		_palm_local = v.normalized()
+	if not _learn_palm(sk):
+		return Transform3D()
 	if _grip_for != _muzzle_for:
 		_grip_for = _muzzle_for
 		_grip_contact = UltraPoseSampler.marker(_muzzle_for, "M_SupportGrip").origin
 	var gb := gun.basis.orthonormalized()
 	return _left_hand(gb * def.support_fingers, gb * def.support_palm, gun * _grip_contact, 0.03)
+
+
+## The left hand's own palm axis (its rest pose, toward the curled fingertips): learnt once. False when it can't be.
+func _learn_palm(sk: Skeleton3D) -> bool:
+	if _palm_local != Vector3.ZERO:
+		return true
+	var hb := sk.get_bone_global_rest(sk.find_bone("LeftHand"))
+	var tip := Vector3.ZERO
+	for f in ["LeftMiddleDistal", "LeftRingDistal", "LeftIndexDistal"]:
+		tip += sk.get_bone_global_rest(sk.find_bone(f)).origin / 3.0
+	var v := hb.basis.orthonormalized().inverse() * (tip - hb.origin)
+	v.y = 0.0
+	if v.length() < 0.005:
+		return false
+	_palm_local = v.normalized()
+	return true
 
 
 ## The left hand bone (skeleton space) with its fingers along `fingers`, palm toward `palm`, the palm on `contact`.

@@ -220,7 +220,12 @@ func test_leg_shots_are_simulated() -> void:
 const GROUND_SEGS := ["@flat", "idle unarmed", "@reset", "walk fwd", "@stairs", "stairs up", "stairs down",
 		"@ramp:20:up", "ramp 20 up", "@ramp:20:down", "ramp 20 down", "@ramp:30:up", "ramp 30 up", "@ramp:30:down", "ramp 30 down"]
 ## Sink into the ground past flat walking (m) and hips below standing, per kind.
-const GROUND_LIMITS := {"stairs": {"sink": 0.20, "hips": 0.30}, "ramp": {"sink": 0.03, "hips": 0.22}}
+## (Ramp hips 0.24: since the turn-on-the-spot fix an idle's feet stay locked - re-locked after a release - so a body
+## settling on the slope keeps a foot lower down it: rifle 30 deg up 21.3 -> 22.6 cm.)
+const GROUND_LIMITS := {"stairs": {"sink": 0.20, "hips": 0.30}, "ramp": {"sink": 0.03, "hips": 0.24}}
+## Legs gap (m): the unarmed clips' shins graze ~1 cm on flat ground already (walk fwd -0.6 cm); the rifle's down stairs
+## -1.5 .. -1.6.
+const GROUND_GAP := -0.018
 
 
 func test_feet_on_stairs_and_ramps() -> void:
@@ -279,8 +284,7 @@ func test_feet_on_stairs_and_ramps() -> void:
 				continue
 			var sm := m.summary(lab)
 			var lim: Dictionary = GROUND_LIMITS[kind]
-			# (Legs: the unarmed clips' shins graze ~1 cm on flat ground already - walk fwd -0.6 cm.)
-			check(float(sm.sink) - flat <= float(lim.sink) and float(sm.hips_drop) <= float(lim.hips) and float(sm.gap_min) >= -0.016,
+			check(float(sm.sink) - flat <= float(lim.sink) and float(sm.hips_drop) <= float(lim.hips) and float(sm.gap_min) >= GROUND_GAP,
 					"%s %s: sink %.1f cm, hips -%.1f cm, legs gap %.1f cm" % [name, lab, (float(sm.sink) - flat) * 100.0, float(sm.hips_drop) * 100.0, float(sm.gap_min) * 100.0])
 		chars.erase(c)
 		c.queue_free()
@@ -521,7 +525,15 @@ func test_limp_in_stages() -> void:
 			var sk := c.skeleton
 			var gap := [9.0]
 			var lurch := [9.0, -9.0]
+			var clips := {}
 			var grab := func() -> void:
+				var mm: MarksmanMotionMatcher = drv.mm_pass.matcher if drv.mm_pass else null
+				if mm and mm.clip >= 0:
+					var cn := String(mm.db.clips[mm.clip].name)
+					clips[cn] = int(clips.get(cn, 0)) + 1
+				if drv.mm_limp and drv.mm_limp.clip >= 0 and drv.limp_w > 0.05:
+					var ln := "limp:" + String(drv.mm_limp.db.clips[drv.mm_limp.clip].name)
+					clips[ln] = int(clips.get(ln, 0)) + 1
 				var b := {}
 				for n in SinewMoveMetrics.BONES:
 					var bi := sk.find_bone(n)
@@ -540,8 +552,8 @@ func test_limp_in_stages() -> void:
 			sk.skeleton_updated.disconnect(grab)
 			var ratio := float(lurch[1]) - float(lurch[0])                   # the head's sideways swing over the hips (m)
 			var want := UltraInjury.leg_damage(c.state, true)
-			rows.append("%-9s left thigh %3.0f %%: damage %.2f, limp clip layer %.2f, procedural %.2f, head lurch %.1f cm, speed %.2f m/s, legs gap %.1f cm" % [
-					dir[0], hp, want, drv.limp_w, drv.mm_pass.limp_amount, ratio * 100.0, Vector2(c.state.vel.x, c.state.vel.z).length(), gap[0] * 100.0])
+			rows.append("%-9s left thigh %3.0f %%: damage %.2f, limp clip layer %.2f, procedural %.2f, head lurch %.1f cm, speed %.2f m/s, legs gap %.1f cm, clips %s" % [
+					dir[0], hp, want, drv.limp_w, drv.mm_pass.limp_amount, ratio * 100.0, Vector2(c.state.vel.x, c.state.vel.z).length(), gap[0] * 100.0, clips])
 			ratios.append(ratio)
 			check(gap[0] >= -0.02, "%s, left thigh at %.0f %%: legs clear (%.1f cm)" % [dir[0], hp, gap[0] * 100.0])
 			chars.erase(c)
@@ -806,3 +818,289 @@ func test_rope_legs_pump_the_swing() -> void:
 	check(not r.active and r.rope_pass != null, "the body is the animation on the rope (no ragdoll)")
 	check(front > 0.3 and back < -0.05, "the legs pump the swing: kicked out in front %.2f m, back behind %.2f m" % [front, -back])
 	check(released >= 0 and pop < 0.08, "letting go eases back into the animation (worst %.1f cm/frame about the body)" % (pop * 100.0))
+
+
+## The ball launcher (a test tool) from a Marksman: the ball leaves the muzzle clear of the shooter, flies at the aim and
+## knocks the body it hits (the shooter stays put).
+func test_ball_launcher_works() -> void:
+	load_playground()
+	var at := marker("spawn").global_position + Vector3(-16, 0, -3)
+	var shooter := _marksman(at)
+	var target := _marksman(at + Vector3(0, 0, -5))
+	bot(target).live_yaw = PI
+	bot(target).set_steps([{"ticks": 600, "yaw": PI}])
+	await ticks(40)
+	UltraItems.give(shooter, &"ball_launcher")
+	var sl := 0
+	for i in shooter.inventory.size():
+		var it := shooter.inventory.get_slot(i)
+		if it and it.def_id == &"ball_launcher":
+			sl = i + 1
+	bot(shooter).set_steps([{"ticks": 90, "slot": sl, "yaw": 0.0, "pitch": -0.05}, {"ticks": 2, "slot": sl, "yaw": 0.0, "pitch": -0.05, "buttons": InputFrame.B_PRIMARY},
+			{"ticks": 200, "slot": sl, "yaw": 0.0, "pitch": -0.05}])
+	await ticks(91)
+	var balls0 := SinewBall._live.size()
+	var shooter_stag := false
+	var target_hit := false
+	var ball_z := []
+	var t0 := target.state.pos
+	for i in 60:
+		await ticks(1)
+		shooter_stag = shooter_stag or (shooter.ragdoll as SinewRagdoll).staggering()
+		target_hit = target_hit or (target.ragdoll as SinewRagdoll).staggering() or target.state.state == Id.RAGDOLL
+		if not SinewBall._live.is_empty() and is_instance_valid(SinewBall._live[-1]):
+			ball_z.append(snappedf((SinewBall._live[-1] as Node3D).global_position.z - at.z, 0.01))
+	info("ball launcher: balls %d -> %d, ball z %s, shooter staggered %s, target hit %s (moved %.2f m)" % [balls0, SinewBall._live.size(),
+			ball_z.slice(0, 12), shooter_stag, target_hit, target.state.pos.distance_to(t0)])
+	check(SinewBall._live.size() > balls0 or not ball_z.is_empty(), "a ball flies")
+	check(not shooter_stag, "the shooter isn't knocked by its own ball")
+	check(target_hit, "the ball knocks the target")
+
+
+## Strafing with a pistol then letting go of the stick: the matched clip settles to standing (it kept playing the strafe).
+func test_pistol_strafe_stops() -> void:
+	load_playground()
+	var rows := []
+	var worst := 0.0
+	for dir: Array in [["R", Vector2(1, 0)], ["L", Vector2(-1, 0)], ["fwd-R", Vector2(0.7, 0.7)], ["back-L", Vector2(-0.7, -0.7)]]:
+		var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+		await ticks(30)
+		UltraItems.give(c, &"pistol")
+		var sl := 0
+		for i in c.inventory.size():
+			var it := c.inventory.get_slot(i)
+			if it and it.def_id == &"pistol":
+				sl = i + 1
+		var drv := c.anim as MarksmanAnimDriver
+		bot(c).set_steps([{"ticks": 60, "slot": sl, "yaw": 0.0}, {"ticks": 120, "slot": sl, "yaw": 0.0, "move": dir[1]}, {"ticks": 400, "slot": sl, "yaw": 0.0}])
+		await ticks(180)
+		var moving_clip_ticks := 0
+		var last := ""
+		for i in 120:
+			await ticks(1)
+			var cl: Dictionary = drv.mm.db.clips[drv.mm.clip]
+			last = String(cl.name).get_file()
+			if i > 45 and float(cl.speed) > 0.3:
+				moving_clip_ticks += 1
+		var sp := Vector2(c.state.vel.x, c.state.vel.z).length()
+		rows.append("pistol strafe %-6s let go: body %.2f m/s, a moving clip still playing %d of the last 75 ticks (now %s, rate %.2f)" % [dir[0], sp, moving_clip_ticks, last, drv.mm.rate])
+		worst = maxf(worst, moving_clip_ticks)
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+	for r: String in rows:
+		info(r)
+	check(worst == 0, "letting go of a pistol strafe, it stands (a moving clip played up to %d ticks after stopping)" % worst)
+
+
+## Turning on the spot (the mouse, no stick): the stance's turn clip steps the feet round (seeked by how far the body has
+## turned: planted feet stay put), no strafe clip plays, and the matched idle has the legs back once the feet are home.
+func test_turning_on_the_spot_steps() -> void:
+	load_playground()
+	for item: StringName in [&"", &"pistol", &"rifle", &"limp"]:
+		var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+		await ticks(30)
+		var sl := 0
+		if item == &"limp":
+			c.state.limb_hp[UltraLimbs.Region.THIGH_R] = 25.0      # (a bad right leg: the injured turns, mirrored)
+		elif item != &"":
+			UltraItems.give(c, item)
+			for i in c.inventory.size():
+				var it := c.inventory.get_slot(i)
+				if it and it.def_id == item:
+					sl = i + 1
+		var drv := c.anim as MarksmanAnimDriver
+		var r := c.ragdoll as MarksmanRagdoll
+		var sk := c.skeleton
+		var steps := []
+		steps.append({"ticks": 60, "slot": sl, "yaw": 0.0})
+		# A steady turn: 90 deg over a second, twice, then still.
+		for k in 120:
+			steps.append({"ticks": 1, "slot": sl, "yaw": -PI * float(k + 1) / 120.0})
+		steps.append({"ticks": 200, "slot": sl, "yaw": -PI})
+		bot(c).set_steps(steps)
+		await ticks(60)
+		var feet := {"l": Vector3.ZERO, "r": Vector3.ZERO}
+		var grab := func() -> void:
+			feet.l = sk.global_transform * sk.get_bone_global_pose(sk.find_bone("LeftFoot")).origin
+			feet.r = sk.global_transform * sk.get_bone_global_pose(sk.find_bone("RightFoot")).origin
+		sk.skeleton_updated.connect(grab)
+		await ticks(1)
+		# Skating: a foot sliding along while it's down (ankle within 11 cm of the floor); lifts: a foot going up.
+		var prev := [feet.l, feet.r]
+		var skate := [0.0, 0.0]
+		var lifted := [false, false]
+		var lifts := [0, 0]
+		var strafe_ticks := 0
+		var gait_ticks := 0
+		for i in 200:
+			await ticks(1)
+			for k in 2:
+				var f: Vector3 = feet.l if k == 0 else feet.r
+				var p: Vector3 = prev[k]
+				var h := f.y - c.state.pos.y
+				if h < 0.11:
+					skate[k] += Vector2(f.x - p.x, f.z - p.z).length()
+				var up := h > 0.125
+				if up and not lifted[k]:
+					lifts[k] += 1
+				lifted[k] = up
+				prev[k] = f
+			if drv.mm.clip >= 0 and float(drv.mm.db.clips[drv.mm.clip].speed) > 0.3 and drv.turn_w < 0.5:
+				strafe_ticks += 1
+			gait_ticks += 1 if drv.turn_w > 0.5 else 0
+			if OS.get_environment("GM_DUMP") == String(item):
+				print("t%d %s yaw %.2f feet_yaw %.2f dir %d p %.2f w %.2f still %.2f L %s R %s loco %s" % [i, MotorState.Id.keys()[c.state.state], c.state.body_yaw,
+						drv._mk_feet_yaw, drv._mk_turn_dir, drv._mk_turn_p, drv.turn_w, drv._mk_still, (feet.l as Vector3).snappedf(0.01), (feet.r as Vector3).snappedf(0.01), "%s locks %s w %.2f gait %.2f clip %s" % [drv._cur_loco, drv.mm_pass.locked, drv.mm_pass._w, r.gait_w, String(drv.mm.db.clips[drv.mm.clip].name).get_file()]])
+		await ticks(60)
+		var back := drv.turn_w < 0.05 and drv._cur_loco == "mm"
+		sk.skeleton_updated.disconnect(grab)
+		var label := String(item) if item != &"" else "unarmed"
+		if item == &"limp":
+			label = "limp R (%s)" % drv._mk_turn_key
+		info("%-8s turned 180 on the spot: feet skated L %.2f R %.2f m on the ground, lifted %d / %d times, a turn clip had the legs %d ticks, a moving clip showed %d ticks; matcher back %s" % [
+				label, skate[0], skate[1], lifts[0], lifts[1], gait_ticks, strafe_ticks, back])
+		# (Limping, the injured turn is a shuffle: a step each.)
+		check(lifts[0] + lifts[1] >= (2 if item == &"limp" else 3), "%s: the feet step round with the turn (%d / %d steps)" % [label, lifts[0], lifts[1]])
+		check(skate[0] < 0.15 and skate[1] < 0.15, "%s: no gliding round on planted feet (%.2f / %.2f m)" % [label, skate[0], skate[1]])
+		check(strafe_ticks < 6, "%s: no strafe clip plays turning on the spot (%d ticks)" % [label, strafe_ticks])
+		check(back, "%s: the matcher has the legs again once the feet are home" % label)
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+
+
+## Sprint held going sideways runs (faster than the walk strafe, short of a sprint) on each stance's run strafe clip.
+func test_side_run() -> void:
+	load_playground()
+	for item: StringName in [&"", &"pistol", &"rifle"]:
+		var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+		await ticks(30)
+		var sl := 0
+		if item != &"":
+			UltraItems.give(c, item)
+			for i in c.inventory.size():
+				var it := c.inventory.get_slot(i)
+				if it and it.def_id == item:
+					sl = i + 1
+		var drv := c.anim as MarksmanAnimDriver
+		var speeds := []
+		for b: int in [0, InputFrame.B_SPRINT]:
+			bot(c).set_steps([{"ticks": 50, "slot": sl, "yaw": 0.0}, {"ticks": 100, "slot": sl, "yaw": 0.0, "move": Vector2(1, 0), "buttons": b}, {"ticks": 60, "slot": sl, "yaw": 0.0}])
+			await ticks(140)
+			speeds.append([Vector2(c.state.vel.x, c.state.vel.z).length(), String(drv.mm.db.clips[drv.mm.clip].name).get_file(), float(drv.mm.db.clips[drv.mm.clip].speed)])
+			await ticks(70)
+		var label := String(item) if item != &"" else "unarmed"
+		info("%-8s strafe right: walking %.2f m/s (%s), sprint held %.2f m/s (%s, clip %.2f m/s)" % [label, speeds[0][0], speeds[0][1], speeds[1][0], speeds[1][1], speeds[1][2]])
+		check(float(speeds[1][0]) > 3.0 and float(speeds[1][0]) < 4.5, "%s: sprint held sideways runs (%.2f m/s)" % [label, speeds[1][0]])
+		check(float(speeds[1][2]) > 2.5, "%s: on a run strafe clip (%s, %.2f m/s)" % [label, speeds[1][1], speeds[1][2]])
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+
+
+## Getting up with the clip for how the body lies: face down a prone get-up, face up a supine one - it never rolls over
+## to get up (the shown pelvis keeps facing the way the body lay until it's up on its feet).
+func test_get_up_the_way_it_lies() -> void:
+	load_playground()
+	var rows := []
+	var flips := 0
+	var picked := {}
+	for spec: Array in [["forward", Vector3(0, 0.5, -5.5)], ["back", Vector3(0, 0.5, 5.5)], ["side", Vector3(5.5, 0.5, 0)], ["side-L", Vector3(-5.5, 0.5, 0)]]:
+		var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+		await ticks(40)
+		var r := c.ragdoll as MarksmanRagdoll
+		var sk := c.skeleton
+		c.knock_down(spec[1])
+		var belly := [0.0]
+		var hips_y := [0.0]
+		var grab := func() -> void:
+			var hx := sk.get_bone_global_pose(sk.find_bone("Hips"))
+			belly[0] = (sk.global_transform.basis * hx.basis * Vector3.BACK).normalized().y
+			hips_y[0] = (sk.global_transform * hx.origin).y - c.state.pos.y
+		sk.skeleton_updated.connect(grab)
+		var t := 0
+		while c.state.state != Id.GET_UP and t < 600:
+			await ticks(1)
+			t += 1
+		var lay_belly: float = belly[0]
+		var sign0 := signf(lay_belly)
+		var flipped := false
+		var ticks_up := 0
+		# (The shown hips' heading: it mustn't swing round while the body is still low.)
+		var heading := func() -> float:
+			var f := sk.global_transform.basis * sk.get_bone_global_pose(sk.find_bone("Hips")).basis * Vector3.UP
+			return atan2(f.x, f.z)
+		var h0: float = heading.call()
+		var spin := 0.0
+		while c.state.state == Id.GET_UP and ticks_up < 400:
+			await ticks(1)
+			ticks_up += 1
+			if ticks_up == 3:
+				h0 = heading.call()            # (from the get-up's own first frames)
+			var up_axis := (sk.global_transform.basis * sk.get_bone_global_pose(sk.find_bone("Hips")).basis * Vector3.UP).normalized()
+			# (Only while the pelvis lies flat: sitting up, its spine axis tips toward vertical and its heading means nothing.)
+			if ticks_up > 3 and hips_y[0] < 0.4 and absf(up_axis.y) < 0.6:
+				spin = maxf(spin, absf(angle_difference(h0, heading.call())))
+			if OS.get_environment("GM_DUMP") == spec[0] and ticks_up % 5 == 0:
+				print("u%d heading %.0f hips_y %.2f belly %.2f blend %.2f body_yaw %.0f ragdoll_yaw %.0f" % [ticks_up, rad_to_deg(heading.call()), hips_y[0], belly[0],
+						(r.modifier as SinewPoseModifier).blend, rad_to_deg(c.state.body_yaw), rad_to_deg(c.ragdoll_yaw)])
+			# (Until the hips are up off the ground: a flip there is a roll over.)
+			if hips_y[0] < 0.5 and absf(belly[0]) > 0.4 and signf(belly[0]) != sign0 and absf(lay_belly) > 0.2:
+				flipped = true
+		sk.skeleton_updated.disconnect(grab)
+		var v: Dictionary = r.getup_variant
+		var clip := String(v.get("clip", "?")).get_file()
+		picked[clip] = true
+		await ticks(40)
+		var turned_after := absf(angle_difference(c.state.body_yaw, (c.input_source as BotInputSource).live_yaw))
+		rows.append("knocked %-7s: lying belly %.2f (%s), get-up %s (front %s), rolled over %s, turned on the ground %.0f deg, up in %d ticks, aim vs body after %.0f deg" % [spec[0], lay_belly,
+				"down" if lay_belly < 0.0 else "up", clip, r.getup_front, flipped, rad_to_deg(spin), ticks_up, rad_to_deg(turned_after)])
+		check(spin < deg_to_rad(25.0), "knocked %s: no turning round on the ground (%.0f deg)" % [spec[0], rad_to_deg(spin)])
+		flips += 1 if flipped else 0
+		check(r.getup_front == (lay_belly < 0.0) or absf(lay_belly) < 0.15, "knocked %s: the get-up is for how it lies (belly %.2f, front %s)" % [spec[0], lay_belly, r.getup_front])
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+	for row: String in rows:
+		info(row)
+	check(flips == 0, "it never rolls over to get up (%d did)" % flips)
+
+
+## A leg gone: knocked down, it doesn't stand up again - it gets up onto its front and crawls (UltraInjury.must_crawl).
+func test_missing_leg_crawls() -> void:
+	load_playground()
+	var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+	await ticks(40)
+	var sk := c.skeleton
+	var hips := [0.0]
+	var grab := func() -> void:
+		hips[0] = (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Hips")).origin).y - c.state.pos.y
+	sk.skeleton_updated.connect(grab)
+	# A blast that takes the left leg off (as play does it: apply_damage severs, knocks down).
+	var info := UltraCombat.DamageInfo.new()
+	info.amount = 80.0
+	info.kind = &"buckshot"
+	info.region = UltraLimbs.Region.THIGH_L
+	info.dir = Vector3(0, 0, -1)
+	info.point = c.state.pos + Vector3(0.1, 0.7, 0)
+	c.apply_damage(info)
+	info("severed %d, state %s, hp %.0f" % [c.state.severed, Id.keys()[c.state.state], c.state.hp])
+	var drv := c.anim as MarksmanAnimDriver
+	var locos := {}
+	var states := {}
+	var top := 0.0
+	bot(c).set_steps([{"ticks": 400, "yaw": 0.0}, {"ticks": 200, "yaw": 0.0, "move": Vector2(0, 1)}])
+	for i in 600:
+		await ticks(1)
+		locos[drv._cur_loco] = true
+		states[Id.keys()[c.state.state]] = true
+		if i > 60:
+			top = maxf(top, hips[0])
+	var moved := c.state.pos.distance_to(marker("spawn").global_position + Vector3(-16, 0, -3))
+	sk.skeleton_updated.disconnect(grab)
+	info("leg gone: states %s, locos %s, hips at most %.2f m up, now %s (moved %.1f m)" % [states.keys(), locos.keys(), top, Id.keys()[c.state.state], moved])
+	check(not locos.has("getup") and not locos.has("getup_front") and not locos.has("mm"), "no standing get-up, no walking (locos %s)" % [locos.keys()])
+	check(top < 0.55, "it stays down on the ground (hips at most %.2f m)" % top)
+	# (A stump bleeds: it may have bled out by the end - DEAD after crawling is fine.)
+	check(states.has("CRAWL"), "and crawls (%s)" % [states.keys()])
