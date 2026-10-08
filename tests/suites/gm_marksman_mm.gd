@@ -1053,3 +1053,42 @@ func test_get_up_the_way_it_lies() -> void:
 	for row: String in rows:
 		info(row)
 	check(flips == 0, "it never rolls over to get up (%d did)" % flips)
+
+
+## A leg gone: knocked down, it doesn't stand up again - it gets up onto its front and crawls (UltraInjury.must_crawl).
+func test_missing_leg_crawls() -> void:
+	load_playground()
+	var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+	await ticks(40)
+	var sk := c.skeleton
+	var hips := [0.0]
+	var grab := func() -> void:
+		hips[0] = (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("Hips")).origin).y - c.state.pos.y
+	sk.skeleton_updated.connect(grab)
+	# A blast that takes the left leg off (as play does it: apply_damage severs, knocks down).
+	var info := UltraCombat.DamageInfo.new()
+	info.amount = 80.0
+	info.kind = &"buckshot"
+	info.region = UltraLimbs.Region.THIGH_L
+	info.dir = Vector3(0, 0, -1)
+	info.point = c.state.pos + Vector3(0.1, 0.7, 0)
+	c.apply_damage(info)
+	info("severed %d, state %s, hp %.0f" % [c.state.severed, Id.keys()[c.state.state], c.state.hp])
+	var drv := c.anim as MarksmanAnimDriver
+	var locos := {}
+	var states := {}
+	var top := 0.0
+	bot(c).set_steps([{"ticks": 400, "yaw": 0.0}, {"ticks": 200, "yaw": 0.0, "move": Vector2(0, 1)}])
+	for i in 600:
+		await ticks(1)
+		locos[drv._cur_loco] = true
+		states[Id.keys()[c.state.state]] = true
+		if i > 60:
+			top = maxf(top, hips[0])
+	var moved := c.state.pos.distance_to(marker("spawn").global_position + Vector3(-16, 0, -3))
+	sk.skeleton_updated.disconnect(grab)
+	info("leg gone: states %s, locos %s, hips at most %.2f m up, now %s (moved %.1f m)" % [states.keys(), locos.keys(), top, Id.keys()[c.state.state], moved])
+	check(not locos.has("getup") and not locos.has("getup_front") and not locos.has("mm"), "no standing get-up, no walking (locos %s)" % [locos.keys()])
+	check(top < 0.55, "it stays down on the ground (hips at most %.2f m)" % top)
+	# (A stump bleeds: it may have bled out by the end - DEAD after crawling is fine.)
+	check(states.has("CRAWL"), "and crawls (%s)" % [states.keys()])

@@ -23,8 +23,10 @@ const NECK_MAX := 0.35
 const HEAD_SHARE := 0.6
 ## The shoulder pocket off the right shoulder joint, in the chest's frame (x = left / inward, y = up, z = forward), m.
 const POCKET := Vector3(0.06, -0.04, 0.05)
-## A shouldered gun at the hip: its stock at least this far to the view's right of the eye and below it (m).
-const HIP_LONG := Vector2(0.10, 0.07)
+## A shouldered gun at the hip: the eye at least this far to the view's left of the stock (m; y unused).
+const HIP_LONG := Vector2(0.10, 0.0)
+## The most the neck rolls the head back up off the stock at the hip (rad).
+const HIP_ROLL := 0.7
 ## Where a held-out gun's hand sits off the eye (m along the view's right, up, forward): low and right, out in front.
 const PISTOL_HIP := Vector3(0.13, -0.22, 0.45)
 
@@ -551,27 +553,41 @@ func _shoulder(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transfor
 		gun.origin = pocket - gun.basis * _stock_local.origin
 		var muzzle := gun * _muzzle_local.origin
 		d = (target_sk - muzzle).normalized()
-	# At the hip the gun rides out to the right of the face (as the UltraController held it) - the sights come back onto
-	# the eye in ADS (_aim_down_sights works from wherever the gun is). Turned back onto the aim from there.
-	# (Off the EYE: standing, the rifle clip leans the head over the stock - off the pocket the gun stayed mid-view.)
-	var neck := _part("Neck")
-	if neck >= 0 and _eye_local == Vector3.INF:
-		_eye_setup(sk)
-	if weight > 0.001 and neck >= 0 and _head_bone >= 0:
-		var eye := _eye(sk, pose, neck)
-		var view_d := (target_sk - eye).normalized()
-		var view_r := view_d.cross(Vector3.UP).normalized()
-		var st := gun * _stock_local.origin
-		var right := (st - eye).dot(view_r)
-		var below := (eye - st).y
-		var move := view_r * maxf(HIP_LONG.x - right, 0.0) + Vector3.DOWN * maxf(HIP_LONG.y - below, 0.0)
-		if move.length() > 1e-4:
-			gun.origin += move * weight
-			var turn := _barrel_turn(gun, target_sk)
-			var s0 := gun * _stock_local.origin
-			gun = Transform3D(Basis(turn) * gun.basis, s0 + Basis(turn) * (gun.origin - s0))
 	stock = gun * _stock_local.origin
 	_two_bone(pose, sh, _part("RightLowerArm"), rh, gun * grip.affine_inverse(), weight)
+	_head_up_at_hip(sk, pose, target_sk)
+
+
+## At the hip the head is up, off the stock: the rifle clips cant it over the gun (a cheek weld) and the gun sat in the
+## middle of the first-person view. The neck rolls back until the eye is HIP_LONG.x left of the stock (<= HIP_ROLL; the
+## stock stays in the shoulder - moving the gun out to the right floated it 12-20 cm off the shoulder). In ADS the cheek
+## comes back down onto the stock (_aim_down_sights bends from here).
+func _head_up_at_hip(sk: Skeleton3D, pose: Array[Transform3D], target_sk: Vector3) -> void:
+	var eq := _equipment()
+	var k := weight * (1.0 - (eq.ads if eq else 0.0))
+	var neck := _part("Neck")
+	if k <= 0.001 or neck < 0:
+		return
+	if _eye_local == Vector3.INF:
+		_eye_setup(sk)
+	if _head_bone < 0:
+		return
+	var eye := _eye(sk, pose, neck)
+	var view_d := (target_sk - eye).normalized()
+	var view_r := view_d.cross(Vector3.UP).normalized()
+	var need := HIP_LONG.x - (stock - eye).dot(view_r)
+	if need <= 0.0:
+		return
+	# (Toward an eye that far left, the neck bent straight at it - as ADS bends it to the sights: the clip bows the head
+	# forward over the stock, so a roll about the view hardly moved the eye.)
+	var j: Vector3 = pose[neck].origin
+	var want := eye - view_r * need
+	var bend := _limit(_arc((eye - j).normalized(), (want - j).normalized()), HIP_ROLL)
+	_turn_subtree(pose, neck, Quaternion.IDENTITY.slerp(bend, k), j)
+	hip_gap = Vector2((stock - eye).dot(view_r), (stock - _eye(sk, pose, neck)).dot(view_r))
+
+
+var hip_gap := Vector2.ZERO        ## (tests) the stock's offset right of the eye before / after the head came up
 
 
 ## The right shoulder's pocket (skeleton space): just inside the shoulder joint, a little forward and down - where

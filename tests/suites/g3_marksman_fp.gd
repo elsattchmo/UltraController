@@ -139,10 +139,13 @@ func test_hip_gun_clears_the_view() -> void:
 					if side < 12.0:
 						top = maxf(top, up)
 			var label := "%s %s" % [item, spec[0]]
-			info("%-18s line of sight through the gun %d of 20 frames; gun's top near the centre %.1f deg, its middle %.1f deg right" % [label, blocked, top, across])
+			var gpp := (c.ragdoll as MarksmanRagdoll).gun_pass
+			info("%-18s line of sight through the gun %d of 20 frames; gun's top near the centre %.1f deg, its middle %.1f deg right; stock right of the eye %s, camera-eye %.3f" % [label, blocked, top, across, gpp.hip_gap, rig.camera.global_position.distance_to(c.eye.eye)])
 			# (A held-out pistol sits well below the centre; a shouldered long gun's receiver just under the line of sight.)
 			var most := -4.0 if item == &"pistol" else 2.0
 			check(blocked == 0 and top < most, "%s: the gun clears the line of sight (blocked %d frames, top %.1f deg)" % [label, blocked, top])
+			# (The user: two-handed guns "on the right a bit more" - the head up off the stock at the hip.)
+			check(across > 8.0, "%s: the gun sits to the right of the view (%.1f deg)" % [label, across])
 	rig.queue_free()
 
 
