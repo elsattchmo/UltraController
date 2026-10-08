@@ -1313,3 +1313,18 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   can't take knocks it down, light hits don't stagger) / s6 (no IK on the skeleton, clips play, references
   re-point, a gun still shows) / s7 (gait: cycles, planted feet while walking / sprinting, stairs, off).
   Tours `sinew_review`, `sinew_debug_review`, `sinew_gait_review`.
+
+## Marksman (third controller: Sinew body + rifle / pistol packs; plan `addons/marksman/README.md`)
+- `MarksmanCharacter extends SinewCharacter` (addons/marksman/), key `marksman` in `CharacterModels`. Never edits the
+  UltraController; Sinew gets only additive hooks (`_new_anim_driver / _new_equipment / _new_ragdoll /
+  _default_anim_set`, `SinewRagdoll._gait_states / _gait_upper_weight`) - s0-s10 must stay green.
+- **Stance sets** (V1): `MarksmanStanceSet` groups = core gait groups (unarmed / rifle / pistol x stand / crouch;
+  prone = clip 8-way). Tables in `tools/marksman/build_stance_sets.gd` -> `addons/marksman/marksman_animset.tres`;
+  `MarksmanStance.of_item` (firearm with `fp_ads_eye` = rifle, else pistol; `stats.stance` overrides);
+  `MarksmanRagdoll._sync_group` switches over 0.35 s. Read `sinew/ANIMATION_GUIDE.md` "Stance sets" before
+  changing a clip. Suite g1 (8 ways x stance x posture, prone sweep, clip audit `addons/marksman/clip_audit.json`,
+  draw mid-walk). Tour `marksman_moves_review` (`--only=<stance>`, `--postures=`) + `tools/marksman/contact_sheet.py`.
+- A BlendTree node that only names a chain's end must be a pass-through TimeScale: a Blend2 with an input left
+  unconnected outputs nothing (crouched still showed the standing pose).
+- g1 planted slide = s7's measure plus the BALL (sole under the toe joint): the Toes bone is ~2.6 cm over the sole
+  and swings round the ball at push-off (read as 8-10 mm "slides").
