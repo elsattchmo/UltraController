@@ -14,6 +14,18 @@ var _tick0 := 0
 func _build() -> void:
 	out_dir = out_dir.replace("/m1", "/marksman_feedback_review")
 	steps = [{"teleport": "spawn", "t": 0.6, "yaw": 0, "pitch": 0, "view_tp": true, "slot": 0}, {"call": _setup, "t": 1.0}]
+	# Weapon strikes (--strike): the rifle's stock driven in, the pistol whipped - from the side and in first person, frames
+	# through the blow (the sim's hit lands at 0.45 / 0.36 s).
+	if "--strike" in OS.get_cmdline_user_args():
+		for item in ["rifle", "pistol"]:
+			for v: Array in [["side", Vector3(2.2, 1.4, -0.6)], ["fp", Vector3.ZERO]]:
+				steps.append({"call": _arm.bind(item, v[1], v[0] == "fp"), "t": 600.0, "until": _ticks.bind(80), "yaw": 0, "pitch": 0, "view_tp": v[0] != "fp"})
+				steps.append({"t": 600.0, "until": _ticks.bind(83), "yaw": 0, "pitch": 0, "view_tp": v[0] != "fp", "buttons": InputFrame.B_MELEE})
+				for k in 6:
+					steps.append({"t": 600.0, "until": _ticks.bind(86 + k * 8), "yaw": 0, "pitch": 0, "view_tp": v[0] != "fp",
+							"shot": "strike_%s_%s_%d" % [item, v[0], k]})
+				steps.append({"t": 600.0, "until": _ticks.bind(200), "yaw": 0, "pitch": 0, "view_tp": v[0] != "fp"})
+		return
 	# Lean with the rifle: from behind and in first person.
 	for lean: Array in [["right", InputFrame.B_LEAN_R], ["left", InputFrame.B_LEAN_L]]:
 		for v: Array in [["back", Vector3(0, 1.6, 2.0)], ["fp", Vector3.ZERO]]:

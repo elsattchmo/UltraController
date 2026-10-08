@@ -317,6 +317,78 @@ func _drive_parity(delta: float) -> void:
 		tree.set(LOCO + "dive/rate/scale", clampf(velocity.length() / 1.8, 0.3, 1.6))
 
 
+# ------------------------------------------------------------------ V7: actions (Sinew's driver ignores item events)
+
+## The held item's events as the UltraController plays them: a melee swing (UltraActionLayer.melee_swing: the item's clip
+## segment timed to the sim's contact), its cancel, a prop thrown (the push one-shot: arms out from the chest). Fire and
+## reload are MarksmanGunPass's (the gun in the hands, procedural).
+func item_event(kind: StringName, data := {}) -> void:
+	match kind:
+		&"melee":
+			if held_def and held_def.kind == ItemDefinition.Kind.FIREARM:
+				_play_strike(UltraActionLayer.melee_swing(held_def, 0))
+			elif held_def:
+				play_swing(UltraActionLayer.melee_swing(held_def, int(data.get("combo", 0)) & 0x3F))
+		&"melee_cancel":
+			if _sw_left > 0.0:
+				tree.set("parameters/swing/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
+				_sw_left = 0.0
+		&"throw":
+			play_push(PUSH_OUT_AT)
+
+
+## Weapon melee with a gun (Marksman's own - the UltraController's gun-butt was a procedural hook in first person and a
+## clip the shouldered-gun pose fought in third): the strike clip, both views (the eye is the head's), named here - not
+## an item role. [clip, segment start, end, contact] - contact = the hand's speed peak driving the blow in
+## (tools/measure_melee.gd): a long gun's stock driven in with a step (Mixamo "Advancing And Punching With Butt Of A
+## Rifle": right hand fastest 1.0-1.07 s, out at 1.3), a pistol whipped overhand ("Overhand Strike With Pistol": 0.87-
+## 0.93 s). The segment is time-scaled so contact lands on the sim's hit_from; the gun rides the clip's gun hand and the
+## support hand is put on our gun (MarksmanGunPass._strike_support).
+const STRIKES := {
+	"long": ["mixamo/M_RiflePunch", 0.15, 2.3, 1.03],
+	"pistol": ["mixamo/M_PistolStrike", 0.25, 1.6, 0.9],
+}
+var striking := 0.0                    ## (> 0) seconds of the strike clip left to play
+
+
+func _play_strike(sw: Dictionary) -> void:
+	var long := held_def.two_handed or held_def.equip_slots & ItemDefinition.EquipSlot.BACK
+	var spec: Array = STRIKES["long" if long else "pistol"]
+	var clip := StringName(spec[0])
+	if tree == null or not player.has_animation(clip):
+		return
+	var seg := Vector2(float(spec[1]), float(spec[2]))
+	var rate := clampf((float(spec[3]) - seg.x) / maxf(float(sw.get("hit_from", 0.4)), 0.05), 0.5, 3.0)
+	var one := (tree.tree_root as AnimationNodeBlendTree).get_node("swing") as AnimationNodeOneShot
+	var moving := Vector2(velocity.x, velocity.z).length() > SWING_UPPER_FROM
+	if moving and not one.filter_enabled:
+		for b in _upper_body_bones():
+			one.set_filter_path(NodePath("%" + String(skeleton.name) + ":" + b), true)
+	one.filter_enabled = moving
+	(tree.tree_root as AnimationNodeBlendTree).get_node("swing_src").set("animation", _segment(clip, seg.x, seg.y))
+	tree.set("parameters/swing_seek/seek_request", 0.0)
+	tree.set("parameters/swing_ts/scale", rate)
+	tree.set("parameters/swing/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+	_sw_left = (seg.y - seg.x) / rate
+	striking = _sw_left
+
+
+## A swing standing is the whole body's (GTA / RDR play standing attacks full-body); on the move only the upper body
+## swings over the legs' own gait (a whole-body swing stopped the run dead) - the one-shot's filter, set as it fires.
+const SWING_UPPER_FROM := 1.2
+
+
+func play_swing(sw: Dictionary) -> void:
+	var one := (tree.tree_root as AnimationNodeBlendTree).get_node("swing") as AnimationNodeOneShot if tree else null
+	if one:
+		var moving := Vector2(velocity.x, velocity.z).length() > SWING_UPPER_FROM
+		if moving and not one.filter_enabled:
+			for b in _upper_body_bones():
+				one.set_filter_path(NodePath("%" + String(skeleton.name) + ":" + b), true)
+		one.filter_enabled = moving
+	super.play_swing(sw)
+
+
 # ------------------------------------------------------------------ turning on the spot
 
 ## Turn clips per stance [left, right] (registered as roles at build): each weapon type its own - the RFP pack's for the
@@ -769,6 +841,7 @@ func _process(delta: float) -> void:
 	_drive_air(delta)
 	_drive_parity(delta)
 	_prone_trans = maxf(_prone_trans - delta, 0.0)
+	striking = maxf(striking - delta, 0.0)
 	if mm:
 		_drive_mm(delta)
 

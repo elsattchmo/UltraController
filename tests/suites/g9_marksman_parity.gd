@@ -7,6 +7,8 @@ extends UltraTestSuite
 const Id := MotorState.Id
 const FPS := "res://addons/ultra_controller/profiles/fps.tres"
 const SPEED_MAX := 25.0
+## A strike's hands are fast for real (the clip time-scaled so contact lands on the sim's): 26-29 m/s through the swing.
+const SWING_MAX := 40.0
 
 
 func _marksman(at: Vector3, yaw: float) -> MarksmanCharacter:
@@ -81,7 +83,7 @@ func _course(c: MarksmanCharacter, limit: int, fn: Callable, done: Callable) -> 
 	return out
 
 
-func _report(name: String, r: Dictionary, want: Array) -> Array:
+func _report(name: String, r: Dictionary, want: Array, limit := SPEED_MAX) -> Array:
 	info("%-16s nodes %s | states %s | fastest %s %.1f m/s" % [name, " ".join(r.nodes), " ".join(r.states), r.fast_bone, r.fast])
 	var bad := []
 	for w: String in want:
@@ -89,7 +91,7 @@ func _report(name: String, r: Dictionary, want: Array) -> Array:
 			bad.append("%s: no %s (%s)" % [name, w, " ".join(r.nodes)])
 	if r.nan:
 		bad.append("%s: NaN" % name)
-	if float(r.fast) > SPEED_MAX:
+	if float(r.fast) > limit:
 		bad.append("%s: %s at %.1f m/s" % [name, r.fast_bone, r.fast])
 	return bad
 
@@ -196,6 +198,36 @@ func test_every_state_shows_its_node() -> void:
 			f.want_slot = sl
 			return f, never)
 		bad += _report("prone %s" % ("rifle" if item != &"" else "unarmed"), rpd, ["prone_down", "prone", "prone_up"])
+	# Melee: a bat swing standing (whole body) and walking (upper body), a gun-butt with the rifle up.
+	for spec: Array in [[&"bat", InputFrame.B_PRIMARY, Vector2.ZERO], [&"bat", InputFrame.B_PRIMARY, Vector2(0, 1)], [&"rifle", InputFrame.B_MELEE, Vector2.ZERO],
+			[&"rifle", InputFrame.B_MELEE, Vector2(0, 1)], [&"pistol", InputFrame.B_MELEE, Vector2.ZERO]]:
+		var item: StringName = spec[0]
+		UltraItems.give(cg, item)
+		var msl := 0
+		for i in cg.inventory.size():
+			var it := cg.inventory.get_slot(i)
+			if it and it.def_id == item:
+				msl = i + 1
+		bot(cg).set_steps([{"ticks": 70, "slot": msl}])
+		await ticks(70)
+		var swung := [0]
+		var off := [0.0]
+		var gp := (cg.ragdoll as MarksmanRagdoll).gun_pass
+		var rm: Dictionary = await _course(cg, 90, func(k: int, ch: MarksmanCharacter) -> InputFrame:
+			if bool(ch.anim.tree.get("parameters/swing/active")):
+				swung[0] += 1
+			if gp.strike_w > 0.99:
+				off[0] = maxf(off[0], gp.support_error)
+			var f := frame(spec[2], int(spec[1]) if k >= 10 and k < 14 else 0)
+			f.want_slot = msl
+			return f, never)
+		var name := "melee %s%s" % [item, " walking" if spec[2] != Vector2.ZERO else ""]
+		bad += _report(name, rm, [], SWING_MAX)
+		info("%s: swing one-shot active %d frames, support hand up to %.1f cm off the gun mid-strike" % [name, swung[0], off[0] * 100.0])
+		if item == &"rifle" and off[0] > 0.03:
+			bad.append("%s: the support hand left the gun (%.1f cm)" % [name, off[0] * 100.0])
+		if swung[0] < 10:
+			bad.append("%s: no swing played (%d frames)" % [name, swung[0]])
 	await _done(cg)
 	# Off the cliff top: crouched lowers into a hang (drop_hang), standing walks off and falls.
 	var cc := _marksman(Vector3(128.5, 8.05, -24.6), PI)

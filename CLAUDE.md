@@ -1576,3 +1576,15 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   `MarksmanInertial.turn` turns the blend's remembered hips by the root's turn and blends into the hang (a cut jumped the
   legs 0.8 m). Suite g9 (CI): ledges, vault, ladder, shimmy, rope, leap, jump, slide, prone, drop to hang, cliff fall,
   swim + dive - each its node, no NaN, no bone (but leaf / Root) over 25 m/s.
+- **Melee and throw under Marksman** (Sinew's driver ignored item events): `MarksmanAnimDriver.item_event` plays a melee
+  weapon's swings (UltraActionLayer.melee_swing, Sinew's play_swing; whole body standing, upper body from
+  SWING_UPPER_FROM 1.2 m/s - the one-shot's filter set as it fires) and the throw (push one-shot). **Weapon melee is
+  Marksman's own** (the user: the old controller's was broken - start fresh, the clips are in): `STRIKES` names the clips
+  directly (long gun mixamo/M_RiflePunch 0.15-2.3 s, contact 1.03; pistol M_PistolStrike 0.25-1.6, contact 0.9 - hand
+  speed peaks, tools/measure_melee.gd), time-scaled so contact lands on the sim's hit_from (the sim's gun-butt timing is
+  UltraActionLayer's, unchanged). The gun pass lets go (want 0 while `_sw_left`) and `_strike_support` runs LAST in
+  `apply` (after the fading hold): the gun from BOTH clip hands - grip at the clip's gun hand, fore-end exactly at the
+  clip's support hand (through the punch that arm is at full stretch) - gun hand re-seated, support hand on
+  (`_support_under`), strike_w faded over STRIKE_FADE. Support hand 56 cm off the gun on the gun hand alone; 0.0 now (g9
+  melee courses: bat standing / walking, rifle standing / walking, pistol; strikes' hands are fast for real: SWING_MAX 40).
+

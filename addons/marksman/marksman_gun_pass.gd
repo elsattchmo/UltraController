@@ -117,6 +117,11 @@ var _last_pose: Array[Transform3D] = []
 func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	var changed := _apply(mod, sk)
 	var pose: Array[Transform3D] = mod.anim_pose
+	# (A strike last, over whatever the hold - fading out / back in - left: the gun from the clip's hands.)
+	var eq := _equipment()
+	if strike_w > 0.001 and eq and eq.held_def and eq.held_node and eq.held_def.two_handed and two and character.state.held_uid != 0:
+		_strike_support(sk, pose, eq, eq.held_def)
+		changed = true
 	if _switch_t < SWITCH_TIME and _switch_from.size() == pose.size():
 		_switch_t += clampf(mod.get_process_delta_time(), 0.0, 0.1)
 		var k := smoothstep(0.0, SWITCH_TIME, _switch_t)
@@ -155,6 +160,10 @@ func _apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	var drv := character.anim as UltraAnimDriver
 	if drv and drv.prone_transitioning():
 		want = 0.0             # (getting down to prone / up: the transition clip carries the gun)
+	if drv is SinewAnimDriver and (drv as SinewAnimDriver)._sw_left > 0.0:
+		want = 0.0             # (a strike: the strike clip has the arms and the gun - _strike_support)
+	var mdrv := drv as MarksmanAnimDriver
+	strike_w = move_toward(strike_w, 1.0 if mdrv and mdrv.striking > STRIKE_FADE else 0.0, dt / STRIKE_FADE)
 	weight = move_toward(weight, want, 6.0 * dt)
 	reload_w = move_toward(reload_w, 1.0 if reloading else 0.0, 4.0 * dt)
 	_lean_e0 = Vector3.INF
@@ -251,6 +260,51 @@ func _apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 		_two_bone(pose, _part("LeftUpperArm"), _part("LeftLowerArm"), lh, Transform3D(support_target.basis, support_target.origin + support_kick), weight)
 	_look_about(pose)
 	return true
+
+
+## A weapon strike (MarksmanAnimDriver._play_strike): the gun rides the clip's gun hand, and the support hand - the clip
+## holds ITS rifle, not ours - goes onto our gun's fore-end as the gun pass holds it (`_support_under`, else the item's
+## support_offset), faded in / out over STRIKE_FADE.
+const STRIKE_FADE := 0.12
+var strike_w := 0.0
+
+
+func _strike_support(sk: Skeleton3D, pose: Array[Transform3D], eq: UltraEquipmentVisual, def: ItemDefinition) -> void:
+	var rh := _gpart("Hand")
+	var lh := _part("LeftHand")
+	if rh < 0 or lh < 0 or eq.held_node == null:
+		return
+	if _muzzle_for != eq.held_node:
+		_muzzle_for = eq.held_node
+		_muzzle_local = UltraPoseSampler.marker(eq.held_node, "M_Muzzle")
+	# The gun from BOTH of the clip's hands (it holds its own rifle its own way - hung on the gun hand by our grip, the
+	# fore-end ended 56 cm from the clip's other hand): the grip where the clip's gun hand is, the gun turned about it so
+	# its support grip lies toward the clip's support hand; then the gun hand re-seated on it and the support hand onto it.
+	var grip := eq.grip()
+	var gun: Transform3D = pose[rh] * grip
+	if _grip_for != _muzzle_for:
+		_grip_for = _muzzle_for
+		_grip_contact = UltraPoseSampler.marker(_muzzle_for, "M_SupportGrip").origin
+	var hand_pt := grip.affine_inverse().origin                  # (the gun hand's place in the gun's frame)
+	var axis := _grip_contact - hand_pt
+	if axis.length() > 0.05:
+		var at := gun * hand_pt
+		var want_dir := pose[lh].origin - at
+		if want_dir.length() > 0.05:
+			var q := _arc((gun.basis * axis).normalized(), want_dir.normalized())
+			gun = Transform3D(Basis(q) * gun.basis, at + q * (gun.origin - at))
+			# (The fore-end exactly where the clip's support hand is: through the punch that arm is at full stretch - it
+			# can't reach any further - while the gun arm, bent back at the stock, takes up the difference.)
+			gun.origin += pose[lh].origin - gun * _grip_contact
+	var k := smoothstep(0.0, 1.0, strike_w)
+	_two_bone(pose, _gpart("UpperArm"), _gpart("LowerArm"), rh, gun * grip.affine_inverse(), k)
+	var target := gun * def.support_offset
+	if def.support_fingers != Vector3.ZERO:
+		var under := _support_under(sk, gun, def)
+		if under != Transform3D():
+			target = under
+	_two_bone(pose, _part("LeftUpperArm"), _part("LeftLowerArm"), lh, target, k)
+	support_error = pose[lh].origin.distance_to(target.origin)
 
 
 ## Freelook (MarksmanFreelook.offset): the head turns toward the view - yaw about the body's up, then pitch about the
