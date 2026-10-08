@@ -191,6 +191,9 @@ func test_leg_shots_are_simulated() -> void:
 	check(int((outcomes["30"] as Dictionary).get("staggered", 0)) + int((outcomes["30"] as Dictionary).get("fell", 0)) > 0, "a solid leg hit staggers (%s)" % [outcomes["30"]])
 	check((outcomes["60"] as Dictionary).size() > 1 or not (outcomes["60"] as Dictionary).has("fell"),
 			"even a heavy leg hit isn't a guaranteed fall: the outcome depends on the moment (%s)" % [outcomes["60"]])
+	var falls := func(k: String) -> int: return int((outcomes[k] as Dictionary).get("fell", 0))
+	check(falls.call("16") <= falls.call("30") and falls.call("30") <= falls.call("60"),
+			"harder leg hits floor the body more often (%d / %d / %d of 8)" % [falls.call("16"), falls.call("30"), falls.call("60")])
 
 
 
@@ -265,3 +268,123 @@ func test_feet_on_stairs_and_ramps() -> void:
 		chars.erase(c)
 		c.queue_free()
 		await ticks(3)
+
+
+## Ledges (the user's rules): crouched, walking up to a drop takes the climb-down; standing it doesn't - the feet keep
+## to the lip, and walking on, the body goes over with Sinew's balancer meeting the ground (no canned fall clip).
+func test_ledges() -> void:
+	load_playground()
+	var top := marker("drop_2").global_position           # a 4 x 4 m block 2 m high, facing its +Z edge (2 m ahead)
+	# Crouched: the climb-down.
+	var c := _marksman(top, true)
+	bot(c).live_yaw = PI
+	bot(c).set_steps([{"ticks": 40, "yaw": PI, "buttons": InputFrame.B_CROUCH}, {"ticks": 160, "move": Vector2(0, 1), "yaw": PI, "buttons": InputFrame.B_CROUCH}])
+	var climbed := false
+	for i in 200:
+		await ticks(1)
+		climbed = climbed or c.state.state == Id.LEDGE_CLIMB
+	check(climbed, "crouched, walking up to the 2 m drop climbs down (state %s)" % Id.keys()[c.state.state])
+	chars.erase(c)
+	c.queue_free()
+	await ticks(3)
+	# Standing: up to the lip and stop - the planted feet stay on the block.
+	c = _marksman(top, true)
+	var r := c.ragdoll as MarksmanRagdoll
+	bot(c).live_yaw = PI
+	bot(c).set_steps([{"ticks": 40, "yaw": PI}, {"ticks": 600, "move": Vector2(0, 0.5), "yaw": PI}])
+	await ticks(40)
+	var stopped := false
+	for i in 300:
+		await ticks(1)
+		if c.state.pos.z > top.z + 1.72:                     # the capsule 0.28 m short of the edge: stop there
+			bot(c).set_steps([{"ticks": 600, "yaw": PI}])
+			stopped = true
+			break
+	await ticks(60)
+	var sk := c.skeleton
+	var off_edge := 0
+	# (The shown pose is only readable at skeleton_updated: read later, the bones are the clip's, before any pass.)
+	var shown := {}
+	var grab := func() -> void:
+		for side in ["Left", "Right"]:
+			for b in ["Foot", "Toes"]:
+				shown[side + b] = (sk.global_transform * sk.get_bone_global_pose(sk.find_bone(side + b))).origin
+	sk.skeleton_updated.connect(grab)
+	await ticks(2)
+	sk.skeleton_updated.disconnect(grab)
+	for side in ["Left", "Right"]:
+		var ankle: Vector3 = shown[side + "Foot"]
+		var toe: Vector3 = shown[side + "Toes"]
+		for p: Vector3 in [ankle, toe]:
+			if p.z > top.z + 2.0 + 0.02:
+				off_edge += 1
+				info("past the edge: %s %s by %.1f cm" % [side, "ankle" if p == ankle else "toe", (p.z - top.z - 2.0) * 100.0])
+	info("at the lip: capsule %.2f m from the edge, feet points past it: %d" % [top.z + 2.0 - c.state.pos.z, off_edge])
+	check(stopped and off_edge == 0 and c.state.state in [Id.IDLE, Id.MOVE], "standing at the lip, the feet stay on the block (%d points past the edge)" % off_edge)
+	# And walking on: no climb-down; over the edge, Sinew has the body.
+	bot(c).set_steps([{"ticks": 200, "move": Vector2(0, 1), "yaw": PI}])
+	var down_move := false
+	var stag := false
+	var states := {}
+	for i in 200:
+		await ticks(1)
+		down_move = down_move or c.state.state == Id.LEDGE_CLIMB
+		stag = stag or r.staggering()
+		states[Id.keys()[c.state.state]] = true
+	info("standing, walked off the 2 m drop: staggered %s, states %s" % [stag, states.keys()])
+	check(not down_move, "standing, no climb-down")
+	check(stag, "over the edge the body is Sinew's (the balancer took it)")
+	chars.erase(c)
+	c.queue_free()
+	await ticks(3)
+
+
+## Gaps (the gap walk: a 0.6 m high path with gaps of 0.4 / 0.7 / 1.0 / 1.4 m): one the legs can span along the way the
+## body goes is crossed in a stride - no fall, no foot put down in it; one wider than that is a fall like any edge.
+const GAPS := [[108.0, 107.6], [104.6, 103.9], [100.9, 99.9], [96.9, 95.5]]
+
+
+func _gap_run(sprint: bool) -> Dictionary:
+	var c := _marksman(marker("gap_walk").global_position, true)
+	bot(c).live_yaw = 0.0
+	await ticks(40)
+	var sk := c.skeleton
+	var res := {"crossed": [false, false, false, false], "fell_at": -1, "foot_in_gap": 0, "states": {}}
+	var feet := [sk.find_bone("LeftFoot"), sk.find_bone("RightFoot")]
+	var grab := func() -> void:
+		for f: int in feet:
+			var p := (sk.global_transform * sk.get_bone_global_pose(f)).origin
+			if p.y < 0.6 + 0.12 and p.y > 0.4:            # a foot down at the path's height ..
+				for g: Array in GAPS:
+					if p.z < float(g[0]) - 0.03 and p.z > float(g[1]) + 0.03 and absf(p.x) < 1.0:
+						res.foot_in_gap += 1          # .. over a gap
+	sk.skeleton_updated.connect(grab)
+	bot(c).set_steps([{"ticks": 600, "move": Vector2(0, 1), "yaw": 0.0, "buttons": InputFrame.B_SPRINT if sprint else 0}])
+	for i in 600:
+		await ticks(1)
+		(res.states as Dictionary)[Id.keys()[c.state.state]] = true
+		for k in GAPS.size():
+			if c.state.pos.z < float(GAPS[k][1]) - 0.3 and c.state.pos.y > 0.5:
+				res.crossed[k] = true
+		if res.fell_at < 0 and c.state.pos.y < 0.4:
+			res.fell_at = c.state.pos.z
+		if c.state.pos.z < 92.0 or (res.fell_at >= 0 and i > 0 and c.state.state in [Id.IDLE, Id.MOVE, Id.GET_UP, Id.RAGDOLL] and c.state.pos.y < 0.2):
+			break
+	sk.skeleton_updated.disconnect(grab)
+	chars.erase(c)
+	c.queue_free()
+	await ticks(3)
+	return res
+
+
+func test_gaps_are_strides() -> void:
+	load_playground()
+	var walk: Dictionary = await _gap_run(false)
+	info("walking the gap walk: crossed %s, fell at z %.1f, feet planted in a gap %d frames, states %s" % [walk.crossed, walk.fell_at, walk.foot_in_gap, (walk.states as Dictionary).keys()])
+	check(walk.crossed[0] and walk.crossed[1], "walking, the 0.4 and 0.7 m gaps are strides")
+	check(not walk.crossed[2] and walk.fell_at < 100.9 and walk.fell_at > 99.0, "the 1.0 m gap is wider than a walking stride: it falls there (z %.1f)" % walk.fell_at)
+	check(walk.foot_in_gap == 0, "no foot put down in a gap (%d frames)" % walk.foot_in_gap)
+	var run: Dictionary = await _gap_run(true)
+	info("sprinting the gap walk: crossed %s, fell at z %.1f, feet planted in a gap %d frames, states %s" % [run.crossed, run.fell_at, run.foot_in_gap, (run.states as Dictionary).keys()])
+	check(run.crossed == [true, true, true, true] and run.fell_at < 0, "sprinting, every gap up to 1.4 m is a stride")
+	check(run.foot_in_gap == 0, "no foot put down in a gap (%d frames)" % run.foot_in_gap)

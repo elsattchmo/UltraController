@@ -155,6 +155,14 @@ Vec3 Balancer::ankle(int i) const {
 	return _c.part_transform(foot).p;
 }
 
+float Balancer::leg_tone(int i) const {
+	float t = 1.0f;
+	for (int p : _limbs.limb(leg(i)).parts) {
+		t = std::min(t, _c.part_tone(p));
+	}
+	return t;
+}
+
 float Balancer::ground_at(Vec3 p) const {
 	const RayHit h = probes::ground_below(_c.world(), p + _up * 0.5f, 3.0f);
 	return h.hit ? dot(h.point, _up) : dot(p, _up) - 1.0f;
@@ -190,6 +198,30 @@ void Balancer::pre_step(float dt) {
 		}
 		ContactPoint pts[16];
 		int n = i == _swing ? 0 : _c.part_contacts(l.end, pts, 16);
+		// Just taken over (a stagger starting mid-stride): feet the animation had placed make no contacts until they are
+		// physical bodies resting on something - a sole already flat on the ground counts as standing at once (else the
+		// first ticks had no support at all and the body tipped over its planted ankle before a contact arrived).
+		if (n == 0 && i != _swing && _touch_age[i] >= 99) {
+			const PartDef& fd = _c.rig().parts[size_t(l.end)];
+			if (fd.box) {
+				const Transform sole = _c.part_transform(l.end) * fd.box_xform;
+				const Vec3 sole_up = rotate(sole.q, Vec3{ 0, 1, 0 });
+				const Vec3 e = fd.box_half;
+				float low = 1e9f;
+				for (int k = 0; k < 4; ++k) {
+					const Vec3 corner{ (k & 1) ? e.x : -e.x, -e.y, (k & 2) ? e.z : -e.z };
+					low = std::min(low, dot(xform(sole, corner), _up));
+				}
+				const float g = ground_at(sole.p);
+				if (dot(sole_up, _up) >= _s.planted_tilt && low - g < _s.seed_contact) {
+					for (int k = 0; k < 4 && n < 16; ++k) {
+						const Vec3 corner{ (k & 1) ? e.x : -e.x, -e.y, (k & 2) ? e.z : -e.z };
+						const Vec3 c = xform(sole, corner);
+						pts[n++].point = c - _up * (dot(c, _up) - g);
+					}
+				}
+			}
+		}
 		if (n > 0) {
 			// Standing on it = the sole down on the ground (not tipped onto its toe or edge).
 			const PartDef& fd = _c.rig().parts[size_t(l.end)];
@@ -230,7 +262,9 @@ void Balancer::pre_step(float dt) {
 			}
 		}
 	}
-	if (_planted[0] && _planted[1]) {
+	// (One foot down is enough to step from: taken over mid-stride, the other is in the air - waiting for both to have
+	// touched, it never stepped and toppled over the planted ankle.)
+	if (_planted[0] || _planted[1]) {
 		_grounded_once = true;
 	}
 	if (!legs_ok) {
@@ -462,13 +496,16 @@ void Balancer::stance_forces(float /*dt*/) {
 	for (int i = 0; i < 2; ++i) {
 		const LimbInfo& l = _limbs.limb(leg(i));
 		const bool st = _planted[i] && i != _swing;
+		// A leg holds the body only as well as its muscles can: a weakened one (a hit leg, Character::set_tone per part)
+		// stiffens and pushes in proportion - standing on it, the body gives way over it unless the other foot gets down.
+		const float t = std::clamp(leg_tone(i), 0.0f, 1.0f);
 		for (int p : { l.upper, l.end }) {
 			if (p >= 0) {
-				_c.set_part_stiffness(p, st ? _s.stance_stiffness : 1.0f);
+				_c.set_part_stiffness(p, st ? 1.0f + (_s.stance_stiffness - 1.0f) * t : 1.0f);
 			}
 		}
 		if (l.end >= 0) {
-			_c.set_part_torque_cap(l.end, st && _s.ankle_cap > 0.0f ? ankle_cap : -1.0f);
+			_c.set_part_torque_cap(l.end, st && _s.ankle_cap > 0.0f ? ankle_cap * t : -1.0f);
 		}
 	}
 	if (n == 0) {

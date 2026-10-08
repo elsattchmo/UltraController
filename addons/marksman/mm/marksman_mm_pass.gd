@@ -155,6 +155,9 @@ func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> vo
 		release[side] = lock_at[side] - foot_w
 		release_t[side] = RELEASE_TIME
 		shown = lock_at[side]
+	# (A planted foot being drawn back onto a lip: its lock follows it there.)
+	if locked[side] and _edge_pull[side] != Vector3.ZERO:
+		lock_at[side] = foot_w
 	var target := lock_at[side] if locked[side] else shown
 	if target.distance_to(foot_w) < 1e-4:
 		return
@@ -178,6 +181,14 @@ const REACH := 0.97
 ## A planted sole turns onto the surface by at most this (rad).
 const TILT_MAX := deg_to_rad(28.0)
 
+## Over a gap: the far edge takes the ankle this far past it (the heel lands on it), the near one keeps the ball this
+## far short of it (m).
+const GAP_HEEL := 0.09
+const GAP_BALL := 0.03
+## A foot over a drop deeper than this (m) is over an edge.
+const EDGE_DROP := 0.3
+## Per foot: how far a planted foot over an edge is drawn back onto the lip (skeleton space).
+var _edge_pull: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 ## Per foot: how far its ground is above (+) / below (-) the body's floor (eased), and the surface's normal.
 var fit_off: Array[float] = [0.0, 0.0]
 var fit_normal: Array[Vector3] = [Vector3.UP, Vector3.UP]
@@ -212,6 +223,45 @@ func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 				n = hit.n
 		want[side] = clampf(best - floor_y, -FIT_DOWN, FIT_UP) if best > -INF else 0.0
 		normals[side] = n
+		# Over an edge (nothing within reach under it, or a drop): a planted foot stays on the lip - drawn back toward
+		# the body's centre onto the last solid ground (the body itself goes over only with its centre: the motor's
+		# fall, MarksmanCharacter). A swinging foot may pass over.
+		_edge_pull[side] = Vector3.ZERO
+		# Crossing a gap in a stride (MarksmanCharacter.gap): over it the foot keeps the edges' height (a swinging foot
+		# doesn't reach down into it), and a foot the clip plants in it lands on the nearer edge - the far one is the
+		# long stride across.
+		var g: Variant = character.get("gap")
+		if g is Dictionary and not (g as Dictionary).is_empty():
+			var gd: Dictionary = g
+			var dir: Vector3 = gd.dir
+			var width: float = gd.width
+			var a_ank := (ankle - (gd.from as Vector3)).dot(dir)
+			var a_ball := (ball - (gd.from as Vector3)).dot(dir)
+			if (a_ank > -0.02 and a_ank < width + 0.02) or (a_ball > -0.02 and a_ball < width + 0.02):
+				want[side] = float(gd.y) - floor_y
+				normals[side] = Vector3.UP
+				if matcher.planted(side):
+					var to_far := a_ank > width * 0.5 - 0.1
+					# (Far edge: the heel just onto it; near edge: the ball just short of it.)
+					var shift := (width + GAP_HEEL - a_ank) if to_far else (-GAP_BALL - a_ball)
+					_edge_pull[side] = to_sk * (dir * shift)
+				continue
+		if matcher.planted(side):
+			# The ball first (the foot's front over the lip), then the whole foot: drawn back toward the body's centre
+			# until the ball is on solid ground.
+			var ball_hit := _probe(space, ball, floor_y)
+			var ball_over := ball_hit.is_empty() or float(ball_hit.y) < floor_y - EDGE_DROP
+			if ball_over:
+				var centre := Vector3(xf.origin.x, ball.y, xf.origin.z)
+				for k in range(1, 9):
+					var p := ball.lerp(centre, k / 8.0)
+					var h := _probe(space, p, floor_y)
+					if not h.is_empty() and float(h.y) > floor_y - EDGE_DROP:
+						_edge_pull[side] = to_sk * (ball.lerp(centre, minf((k + 0.3) / 8.0, 1.0)) - ball)
+						want[side] = clampf(float(h.y) - floor_y, -FIT_DOWN, FIT_UP)
+						normals[side] = h.n
+						break
+
 	for side in 2:
 		if not _fit_set or dt <= 0.0:
 			fit_off[side] = want[side]
@@ -256,9 +306,9 @@ func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
 			if ang > 1e-4:
 				q = Quaternion(q.get_axis(), minf(ang, TILT_MAX) * k)
 				b = Basis(q) * b
-		if absf(lift) < 1e-4 and b == pose[ft_i].basis:
+		if absf(lift) < 1e-4 and b == pose[ft_i].basis and _edge_pull[side] == Vector3.ZERO:
 			continue
-		var t := pose[ft_i].origin + Vector3(0.0, lift, 0.0)
+		var t := pose[ft_i].origin + Vector3(0.0, lift, 0.0) + _edge_pull[side] * k
 		_two_bone(pose, up_i, lo_i, ft_i, Transform3D(b, t), 1.0)
 
 

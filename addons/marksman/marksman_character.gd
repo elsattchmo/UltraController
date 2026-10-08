@@ -24,6 +24,140 @@ func _ready() -> void:
 	if motion_matching_on():
 		motion_matching = true
 	super._ready()
+	# Ledges are taken crouched: the traversal hook's climb-downs (drop to hang, down a wall / ladder) only for a body
+	# that is crouched or crouching - standing, the feet keep to the lip and walking on goes over (see simulate).
+	if motor:
+		var i := motor.transition_hooks.find(UltraTraversal.hook)
+		if i >= 0:
+			motor.transition_hooks[i] = _traversal_hook
+
+
+func _traversal_hook(m: UltraMotor, s: MotorState, inp: InputFrame) -> int:
+	var crouched := s.stance == MotorState.Stance.CROUCH or inp.has(InputFrame.B_CROUCH)
+	var before := s.copy() if not crouched else null
+	var r: int = UltraTraversal.hook(m, s, inp)
+	if before != null and r == MotorState.Id.LEDGE_CLIMB and s.trav_kind in UltraTraversal.DOWN_MOVES:
+		s.copy_from(before)           # (the down moves only set state fields)
+		return -1
+	return r
+
+
+# ------------------------------------------------------------------ going over an edge
+
+## Walking off an edge standing (motion matching, single player): Sinew has the body from the moment the capsule
+## leaves the ground - the legs physical in the air, the balancer meeting the ground - so how it lands (a stagger
+## caught, or down) is the simulation's, not the fall clip's. Kerbs and stair steps are the motor's snap (never airborne).
+const OVER_EDGE_MIN := 0.3        ## m of drop below the feet before it counts (smaller: a step down)
+
+
+var _prev_state := -1
+var _prev_grounded := true
+
+
+func simulate(input: InputFrame, delta: float, replaying := false) -> void:
+	super.simulate(input, delta, replaying)
+	if replaying:
+		return
+	_cross_gaps()
+	var was := _prev_state
+	var was_grounded := _prev_grounded
+	_prev_state = state.state
+	_prev_grounded = state.is_grounded()
+	var r := ragdoll as MarksmanRagdoll
+	var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
+	# (Walking off: the tick the capsule leaves the ground from a ground state - not a jump. The motor only says FALL a
+	# moment later, by when Sinew had already let the body go to the animation for the air.)
+	if was in MOTION_STATES and was_grounded and not state.is_grounded() and state.state in [MotorState.Id.FALL, MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TURN_IN_PLACE] and r != null and r.mm_legs() and offline and is_authority() \
+			and state.stance != MotorState.Stance.CROUCH and _drop_below() > OVER_EDGE_MIN:
+		r.over_edge()
+
+
+# ------------------------------------------------------------------ gaps: one long stride
+
+## A gap the legs can span along the way the body is going is crossed in a stride: the body is held at the edges'
+## height while its centre is over it (no fall, no fall clip), and the feet land on the edges (MarksmanMMPass). Wider
+## than the legs can span at this speed, it's a fall like any other edge. Single player, motion matching (like the
+## rest of Marksman's physical presentation, the networked motor stays the predicting one).
+## How wide a gap the legs can span (m): walking .. sprinting.
+const GAP_SPAN := Vector2(0.9, 1.8)
+## Ground this far below the feet is a gap; ground back within this of the near side is its far edge (m).
+const GAP_DROP := 0.3
+const GAP_LEVEL := 0.25
+const GAP_LOOK := 2.6            ## m ahead scanned
+## The gap being crossed: {from: near edge (world), to: far edge, dir: unit (flat), y: the edges' height}; {} = none.
+var gap := {}
+
+
+func _span(speed: float) -> float:
+	return lerpf(GAP_SPAN.x, GAP_SPAN.y, smoothstep(profile.walk_speed, profile.sprint_speed, speed))
+
+
+## Ahead along `dir` from the capsule: the first gap (ground falling away more than GAP_DROP, coming back within
+## GAP_LEVEL of the near side) within GAP_LOOK, or {}.
+func _scan_gap(dir: Vector3) -> Dictionary:
+	var space := get_world_3d().direct_space_state
+	var y0 := state.pos.y
+	var start := -1.0
+	const STEP := 0.05
+	var n := int(GAP_LOOK / STEP)
+	for k in n + 1:
+		var d := k * STEP
+		var p := state.pos + dir * d
+		var q := PhysicsRayQueryParameters3D.create(Vector3(p.x, y0 + 0.5, p.z), Vector3(p.x, y0 - 1.5, p.z), UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC)
+		q.exclude = [get_rid()]
+		var hit := space.intersect_ray(q)
+		var h: float = (hit.position as Vector3).y - y0 if not hit.is_empty() else -9.0
+		if start < 0.0:
+			if h < -GAP_DROP:
+				if k == 0:
+					return {}               # (already over it: the motor's)
+				start = d
+		elif absf(h) <= GAP_LEVEL:
+			return {"from": state.pos + dir * (start - STEP * 0.5), "to": state.pos + dir * (d - STEP * 0.5), "dir": dir,
+					"y": y0, "width": d - start}
+	return {}
+
+
+## After the motor's step: start, hold or end a gap crossing.
+func _cross_gaps() -> void:
+	var r := ragdoll as MarksmanRagdoll
+	var offline := UltraNet.mode == UltraNet.Mode.NONE or UltraNet.mode == UltraNet.Mode.OFFLINE
+	var hv := Vector3(state.vel.x, 0.0, state.vel.z)
+	var speed := hv.length()
+	if r == null or not r.mm_legs() or not offline or not is_authority() or r.staggering() or r.active:
+		gap = {}
+		return
+	if gap.is_empty():
+		if state.is_grounded() and state.state in MOTION_STATES and speed > 0.5:
+			var g := _scan_gap(hv / speed)
+			if not g.is_empty() and float(g.width) <= _span(speed):
+				gap = g
+		return
+	# Crossing: along the gap's way, until the centre is past the far edge (or the body turned back / stopped).
+	var dir: Vector3 = gap.dir
+	var along := (state.pos - (gap.from as Vector3)).dot(dir)
+	var width: float = gap.width
+	if along > width + 0.35 or hv.dot(dir) < 0.3 or along < -0.6:
+		gap = {}
+		return
+	if along > -0.05 and along < width + 0.05 and state.pos.y < float(gap.y) + 0.05:
+		# Over it: the body stays at the edges' height, on its feet (the motor would have it fall in).
+		global_position.y = float(gap.y)
+		state.pos = global_position
+		velocity.y = 0.0
+		state.vel.y = 0.0
+		state.teeter = 0.0
+		if state.state in [MotorState.Id.FALL, MotorState.Id.JUMP]:
+			state.state = MotorState.Id.MOVE
+		state.set_flag(MotorState.F_GROUNDED, true)
+
+
+## How far the ground is under the capsule's centre (m; 9 when nothing within 3 m).
+func _drop_below() -> float:
+	var q := PhysicsRayQueryParameters3D.create(state.pos + Vector3.UP * 0.3, state.pos + Vector3.DOWN * 3.0, UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC)
+	q.exclude = [get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	return state.pos.y - (hit.position as Vector3).y if not hit.is_empty() else 9.0
 
 
 ## A push under motion matching: the legs go to Sinew's gait for the stumble (its catching steps under physical

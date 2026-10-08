@@ -149,6 +149,25 @@ func _gait_upper_weight(busy: bool, speed: float) -> float:
 	return super._gait_upper_weight(really, speed)
 
 
+## The body went over an edge (MarksmanCharacter.simulate): the whole body physical now, the balancer on - it lands
+## on whatever is below and either catches itself or goes down.
+func over_edge() -> void:
+	if _id == 0 or active or not _powered_on or _stagger_t >= 0.0:
+		return
+	start_stagger()
+	_over_edge = _stagger_t >= 0.0
+
+
+var _over_edge := false
+
+
+## Going over an edge, the body stays powered in the air (the balancer has it until it lands and settles or falls).
+func _powered_in_air() -> bool:
+	if _over_edge and _stagger_t < 0.0:
+		_over_edge = false
+	return _over_edge
+
+
 # ------------------------------------------------------------------ hits are felt
 
 ## Region groups for hits.

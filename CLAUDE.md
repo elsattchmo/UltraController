@@ -1352,3 +1352,34 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   raised x (1 - gun_low), eased. The rifle stance plays its aim clip (r_aim / rc_aim) when the gun is up. Suite g2
   (barrel <= 1 deg standing / 2 moving, support hand <= 1.5 cm, stock in the pocket <= 3 cm, arms animated), tour
   `marksman_aim_review` (red = barrel line, green = aim ray).
+- **Motion matching** (the user's go after a spike; `MarksmanCharacter.motion_matching`, main menu "Marksman: motion
+  matching" / `--mm`, Engine meta `marksman_mm`): standing legs are matched clips, the gait stands by. `MarksmanMMDatabase`
+  (clips are IN PLACE: ground velocity = the planted foot's slide; per-clip floor = the soles' 5th percentile; features feet
+  pos/vel, hips vel, trajectory pos/vel at 0.33/0.67/1 s), `MarksmanMotionMatcher` (SETS per stance - unarmed: Idle_A,
+  N_StdWalk2, U_Walk_R + mirrored, Walk_Backwards, U_Run_*, S_Fast; rifle: RFP 8-way walk/run/sprint; picked by their own
+  leg gap: U_Walk_L -6 cm, Strafe_Walk_* cross; trajectory = the motor's accelerate_ground run forward; search every 0.1 s
+  or on a stick change; the query's pose part uses the BODY's velocity - else an idle playing while the body sets off asks
+  for more idle), dead-blended switches (the base `inertial` member, first modifier), rate warp 0.5-1.35. Clip node must
+  be a plain AnimationNodeAnimation (a custom timeline froze shorter clips on their last frame). `MarksmanMMPass` (first
+  SinewPoseModifier pass): clip floor, direction warp (<= 50 deg, spine turns it back), ground fit (below), foot locks
+  (release 0.15 m; a lock pulled out waits for the next plant). Suites `mm` (gait vs MM table), `gm`.
+- **Hits and pushes with MM**: a push (`receive_push`) hands the legs to the gait's catching steps (`MarksmanRagdoll.
+  stumble_start`; back to MM once caught 0.25 s), trips via Sinew's rule; staggers freeze the matched pose (no search) and
+  the pass only lets the feet go. Hits are felt: light ones push the feet (`hit_push_per_impulse`), a leg hit >= 6 N s is
+  taken IN the leg (stagger first, the leg knocked and weak: tone 0.7 -> 0.15, 0.5 -> 1.2 s by impulse). Balancer (core):
+  steps from ONE planted foot (it waited for both: mid-stride takeovers toppled), seeds contacts for soles already on the
+  ground at takeover (`seed_contact`), and a standing leg holds only as well as its tone (`leg_tone`: stance stiffness and
+  ankle cap scale with it). Outcome = simulation (gm: 16/30 dmg staggers, 60 dmg falls 2 in 8).
+- **Foot IK (ground fit)**: each foot onto the ground under its ankle / ball (higher of the two), followed (rise 3.5, fall
+  2 m/s); hips down only as far as a leg can't reach (`REACH` 0.97); planted soles tilt to the surface (<= 28 deg). Leg IK
+  swings the knee WITH the leg onto the new hip->foot line, plus the thigh's forward only when the knee is nearly straight
+  (a fixed forward pull crossed the rifle stance's out-turned knees; the old offset against a far-moved line flipped knees).
+- **Ledges**: climb-downs only crouched (or crouch pressed) - `_traversal_hook` vetoes the down moves standing (restores the
+  state copy); standing at a lip a planted foot's ball is drawn back onto solid ground (the lock follows it); the tick the
+  capsule leaves the ground from a ground state over a drop > 0.3 m, Sinew takes the body (`over_edge` -> stagger, kept
+  powered in the air by Sinew's additive `_powered_in_air` hook) - it lands and recovers or falls.
+- **Gaps**: `MarksmanCharacter._cross_gaps` scans ahead along the travel; a gap (ground back within 0.25 m) no wider than the
+  span (0.9 m walking .. 1.8 m sprinting) is crossed held at the edges' height; the fit pass keeps feet level over it and
+  lands planted feet on the nearer edge. Playground: GAP WALK (0.4 / 0.7 / 1.0 / 1.4 m, marker `gap_walk`), SPRINT TRACK
+  (a `Sprinter` dummy: `UltraDummyPost.sprint_loop`, steered corner to corner), animation gallery square grid + floor sized
+  to every clip at load (suite `pg`).
