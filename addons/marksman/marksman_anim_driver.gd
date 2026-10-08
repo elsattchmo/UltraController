@@ -44,9 +44,9 @@ func _stance_chain(bt: AnimationNodeBlendTree, src: String, rifle_role: StringNa
 	if out_name == "":
 		bt.connect_node("output", 0, "st_pistol")
 	else:
-		# (A chain feeding another node: its end named by a pass-through - a Blend2 left at 0 - since one
-		# node's output can't feed two inputs.)
-		bt.add_node(out_name, AnimationNodeBlend2.new(), at + Vector2(600, 0))
+		# (A chain feeding another node: its end named by a pass-through - a TimeScale left at 1. A Blend2
+		# with its second input unconnected left the crouch's "still" branch empty: crouched still, it stood.)
+		bt.add_node(out_name, AnimationNodeTimeScale.new(), at + Vector2(600, 0))
 		bt.connect_node(out_name, 0, "st_pistol")
 
 
