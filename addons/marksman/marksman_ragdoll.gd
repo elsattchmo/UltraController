@@ -78,7 +78,15 @@ func _update_gait(dt: float) -> void:
 	super._update_gait(dt)
 
 
+## Standing on the ground (the motion matcher's states).
+const GROUND_STATES := [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.TURN_IN_PLACE, MotorState.Id.LAND]
+
+
 func _gait_states() -> Array:
+	# (Motion matching - the spike - has the legs standing in a stance it has clips for: the gait only crouches.)
+	var drv := character.anim as MarksmanAnimDriver
+	if drv and drv.mm and drv.mm.has_stance(MarksmanStance.of(character)):
+		return [MotorState.Id.CROUCH]
 	return super._gait_states() + [MotorState.Id.CROUCH]
 
 

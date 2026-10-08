@@ -31,6 +31,28 @@ func _build_sinew() -> AnimationNodeBlendTree:
 	_stance_chain(c, "mix", &"rc_idle", &"rc_aim", &"pc_idle", Vector2(650, 60))
 	# --- prone: 8 ways
 	loco.replace_node("prone", _build_prone())
+	# --- motion matching (spike, MarksmanCharacter.motion_matching): one clip node the matcher re-points and seeks
+	if _mm_on():
+		var m := AnimationNodeBlendTree.new()
+		# (Plain: each clip's own length and loop - a custom timeline kept the first clip's length and froze a shorter
+		# clip on its last frame.)
+		var clip_node := AnimationNodeAnimation.new()
+		clip_node.animation = _clip(&"idle")
+		m.add_node("clip", clip_node, Vector2(0, 0))
+		m.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		m.add_node("rate", AnimationNodeTimeScale.new(), Vector2(400, 0))
+		m.connect_node("seek", 0, "clip")
+		m.connect_node("rate", 0, "seek")
+		m.connect_node("output", 0, "rate")
+		loco.add_node("mm", m, Vector2(0, 200))
+		for n in loco.get_node_list():
+			if n == &"mm" or n == &"Start" or n == &"End":
+				continue
+			for pair: Array in [[n, &"mm"], [&"mm", n]]:
+				var t := AnimationNodeStateMachineTransition.new()
+				t.xfade_time = XFADE
+				t.xfade_curve = _ease_curve()
+				loco.add_transition(pair[0], pair[1], t)
 	return root
 
 
@@ -114,6 +136,66 @@ func setup(p: AnimationPlayer, sk: Skeleton3D) -> void:
 	super.setup(p, sk)
 	for e: Array in _scales:
 		tree.set(e[0], e[1])
+	if _mm_on():
+		mm = MarksmanMotionMatcher.new(get_parent() as UltraCharacter, self)
+		# Switches dead-blend (first in the stack, so on the clip pose).
+		inertial = InertialBlendModifier.new()
+		inertial.name = "MMInertial"
+		inertial.blend_time = MM_BLEND
+		sk.add_child(inertial)
+		sk.move_child(inertial, 0)
+
+
+# ------------------------------------------------------------------ motion matching (spike)
+
+## Seconds a matched switch dead-blends over.
+const MM_BLEND := 0.25
+var mm: MarksmanMotionMatcher
+var mm_pass: MarksmanMMPass
+## (`inertial`, UltraAnimDriver's member - unused under Sinew - is the matcher's dead blend.)
+var _mm_clip := &""
+
+
+func _mm_on() -> bool:
+	var c := get_parent() as MarksmanCharacter
+	return c != null and c.motion_matching
+
+
+## Standing on the ground in a stance the matcher has clips for.
+func mm_active() -> bool:
+	return mm != null and mm.has_stance(MarksmanStance.of_item(held_def)) and state in MarksmanRagdoll.GROUND_STATES
+
+
+func _wanted() -> String:
+	var w := super._wanted()
+	return "mm" if w == "ground" and mm_active() else w
+
+
+func _drive_mm(delta: float) -> void:
+	if mm_pass == null:
+		var c := get_parent() as UltraCharacter
+		var r := c.ragdoll as SinewRagdoll if c else null
+		if r and r.modifier:
+			mm_pass = MarksmanMMPass.new(c, r, mm)
+			r.modifier.passes.insert(0, mm_pass)
+	var on := _cur_loco == "mm"
+	if mm_pass:
+		mm_pass.weight = _ease_w(&"mm_pass", 1.0 if on else 0.0, delta)
+	if not on:
+		return
+	if mm.update(delta, MarksmanStance.of_item(held_def)) or mm.db.clips[mm.clip].name != _mm_clip:
+		var c: Dictionary = mm.db.clips[mm.clip]
+		var node := ((tree.tree_root as AnimationNodeBlendTree).get_node("loco") as AnimationNodeStateMachine).get_node("mm") as AnimationNodeBlendTree
+		(node.get_node("clip") as AnimationNodeAnimation).animation = c.name
+		_mm_clip = c.name
+		tree.set(LOCO + "mm/seek/seek_request", mm.time)
+		inertial.trigger(MM_BLEND)
+	tree.set(LOCO + "mm/rate/scale", mm.rate)
+	if OS.get_environment("MM_DUMP") != "":
+		var v := Vector2(velocity.x, velocity.z).length()
+		print("MM t%d v %.2f %s t %.2f rate %.2f cost %.2f keep %.2f contact %d lock %s warp %.0f" % [Engine.get_physics_frames(), v,
+				String(mm.db.clips[mm.clip].name).get_file(), mm.time, mm.rate, mm.last_cost, mm.last_keep, mm.db.contact[mm.frame],
+				str(mm_pass.locked) if mm_pass else "-", rad_to_deg(mm_pass.warp) if mm_pass else 0.0])
 
 
 # ------------------------------------------------------------------ per frame
@@ -136,6 +218,8 @@ func _process(delta: float) -> void:
 	tree.set(LOCO + "crouch/rifle_src/blend_amount", aim_w)
 	if _cur_loco == "prone":
 		_mk_drive_prone(delta)
+	if mm:
+		_drive_mm(delta)
 
 
 func _mk_drive_prone(delta: float) -> void:

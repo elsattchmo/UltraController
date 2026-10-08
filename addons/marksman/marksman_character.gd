@@ -7,6 +7,17 @@ extends SinewCharacter
 ## addons/marksman/README.md. Movement, weapons, input, net and HUD are the UltraCharacter's, untouched.
 
 
+## Motion matching for the standing legs (a spike: MarksmanMotionMatcher, MarksmanMMPass) instead of Sinew's gait.
+## Also `--mm` on the command line.
+@export var motion_matching := false
+
+
+func _ready() -> void:
+	if "--mm" in OS.get_cmdline_user_args():
+		motion_matching = true
+	super._ready()
+
+
 func _new_anim_driver() -> SinewAnimDriver:
 	return MarksmanAnimDriver.new()
 
