@@ -227,3 +227,27 @@ func test_water() -> void:
 	check("RAGDOLL" in r.states and "SWIM" in r.states, "knocked limp in the water, then swimming (%s)" % " ".join(r.states))
 	check(hips_low[0] > -1.6, "the limp body floats (hips down to %.2f m; the pool is 4 m deep)" % hips_low[0])
 	await _done(p)
+
+
+## Jumping at something low hops up onto it (the standing hop over the motor's mantle); at a 1 m wall, the hands-on
+## climb - not one run-up-and-knee clip for everything (the user: "a mantle type thing everywhere").
+func test_low_mantle_hops_up() -> void:
+	load_playground()
+	var bad := []
+	for spec: Array in [[50, "hop_up"], [100, "climb_up"]]:
+		var a := marker("ledge_%d" % spec[0])
+		var c := _marksman(a.global_position, a.global_rotation.y)
+		await ticks(20)
+		var top := float(spec[0]) / 100.0
+		var r: Dictionary = await _course(c, 240, func(_k: int, ch: MarksmanCharacter) -> InputFrame:
+			var up := ch.state.is_grounded() and ch.state.pos.y > top - 0.2
+			return frame(Vector2.ZERO if up else Vector2(0, 1), InputFrame.B_JUMP if ch.state.pos.z < -27.3 and ch.state.is_grounded() and not up else 0))
+		_line("%.1f m mantle" % top, r)
+		if not String(spec[1]) in r.nodes or not "MANTLE" in r.states:
+			bad.append("%.1f m: no %s (%s / %s)" % [top, spec[1], " ".join(r.nodes), " ".join(r.states)])
+		if float(r.fast) > SPEED_MAX:
+			bad.append("%.1f m: %s at %.1f m/s" % [top, r.fast_bone, r.fast])
+		if c.state.pos.y < top - 0.15:
+			bad.append("%.1f m: not on top (y %.2f)" % [top, c.state.pos.y])
+		await _done(c)
+	check(bad.is_empty(), "low tops are hopped onto, 1 m is climbed (%s)" % "; ".join(bad))

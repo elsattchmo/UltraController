@@ -1640,6 +1640,8 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   the jump's own clip, hard (>= LAND_HARD 9.5) AAD_HardLanding 0.15 .. 1.75 over 1.2 s, between the squat; on the move
   (> 1.2 m/s) it runs on. Roles mk_hop / mk_jump_run / mk_fall / mk_land_hard in marksman_animset.tres (and the builder).
   Clip filmstrips: tour `clip_strip -- --clips=a,b --frames=8`.
+- **Low mantles hop up**: a MANTLE lower than MANTLE_HOP_MAX 0.9 m plays `hop_up` (the standing hop from its push-off
+  to HOP_UP_PAST 0.12 s past its touchdown over the move's trav_dur); from 0.9 m the climb clip. g13 test_low_mantle.
 - **Landing stumble**: a landing at LAND_STUMBLE_SPEED 2.5 .. 4.5 m/s from LAND_STUMBLE_IMPACT 6 m/s down lurches on
   (receive_push along the travel by the impact, after the motor's LAND hands back; `moving_stumble` set so the run sags
   only by severity) - the gait's catching steps. A sprinter isn't: handed over at 6 m/s the gait tripped on any lurch.

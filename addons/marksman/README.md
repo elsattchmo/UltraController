@@ -257,8 +257,9 @@ Marksman makes all of it **visible through the body**: the gun pass drives the a
 - Jumps on their own clips (standing hop, moving jump, sprint leap), falls, landings by impact (soft on the jump's clip,
   squat, hard landing) and momentum (a stumble on at jogging pace); the brace catch onto a ledge; hands on the lip; a
   diagonal stick shimmies; climb up from a hang; water: stroke pace, hovering under water, a floating limp plunge. g13.
-- Still open: a hang-to-top climb clip (procedural / authored: none in the packs), mantle vs vault vs step-up by height
-  (ClimbUp_1m everywhere), Sinew reacting physically on a catch, an underwater stroke (no clip: the surface crawl pitched).
+- Low tops (< 0.9 m) are hopped onto (the standing hop over the mantle), higher ones climbed.
+- Still open: a hang-to-top climb clip (ClimbUp_1m from 0.22 s; none in the packs), Sinew reacting physically on a
+  catch (the Braced_Catch clip swings the legs in), an underwater stroke (no clip: the surface crawl pitched).
 
 ## Known issues
 - The unarmed back walk (UAL Walk_Backwards) scuffs its feet as they land and lift: 2.1-2.4 mm a frame under motion

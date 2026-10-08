@@ -286,7 +286,18 @@ func _parity_wanted(w: String) -> String:
 				return "catch"
 			return w
 		Id.MANTLE, Id.LEDGE_CLIMB:
-			return "drop_hang" if trav_kind in UltraTraversal.DOWN_MOVES and _role_anim(&"drop_hang") else w
+			if trav_kind in UltraTraversal.DOWN_MOVES:
+				return "drop_hang" if _role_anim(&"drop_hang") else w
+			if state == Id.MANTLE and _role_anim(&"mk_hop"):
+				var ch := get_parent() as UltraCharacter
+				var h := ch.state.trav_to.y - ch.state.trav_from.y if ch else 9.0
+				if _cur_loco == "hop_up" or h < MANTLE_HOP_MAX:
+					if _cur_loco != "hop_up":
+						var spec: Dictionary = JUMPS["hop"]
+						tree.set(LOCO + "hop_up/seek/seek_request", float(spec.push))
+						tree.set(LOCO + "hop_up/rate/scale", (float(spec.down) + HOP_UP_PAST - float(spec.push)) / maxf(climb_duration, 0.2))
+					return "hop_up"
+			return w
 		Id.DIVE:
 			return "dive"
 	var lw := _landing_hold(w)
@@ -325,6 +336,10 @@ const JUMPS := {
 	"jump_run": {"role": &"mk_jump_run", "push": 0.30, "apex": 0.70, "down": 1.00, "settle": 1.38},
 }
 const JUMP_RUN_FROM := 1.0
+## A mantle lower than this (m) is a hop up onto it (`hop_up`); the hop is played this far past its touchdown by the move's
+## end (the knees taking the landing on the top).
+const MANTLE_HOP_MAX := 0.9
+const HOP_UP_PAST := 0.12
 ## A jump's clip carries on through a fall this long (s), then the falling loop takes over.
 const JUMP_HOLD_AIR := 1.6
 ## Landing (m/s down at touchdown): softer than LAND_SOFT the jump's own clip lands it; from LAND_HARD the action pack's
@@ -359,6 +374,17 @@ func _add_jump_nodes(loco: AnimationNodeStateMachine) -> void:
 		tb.connect_node("output", 0, "rate")
 		_add_loco(loco, n, tb, 0.1, 0.25)
 		_jump_nodes[n] = true
+	# Up onto something low (a mantle under MANTLE_HOP_MAX): the standing hop from its push-off to its touchdown over the
+	# motor's move - not the 1 m climb clip (a run-up and a knee onto the top) for a knee-high box.
+	if _role_anim(&"mk_hop"):
+		var hu := AnimationNodeBlendTree.new()
+		hu.add_node("clip", _anim(&"mk_hop", false), Vector2(0, 0))
+		hu.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		hu.add_node("rate", AnimationNodeTimeScale.new(), Vector2(400, 0))
+		hu.connect_node("seek", 0, "clip")
+		hu.connect_node("rate", 0, "seek")
+		hu.connect_node("output", 0, "rate")
+		_add_loco(loco, "hop_up", hu, 0.1, 0.25)
 	if _role_anim(&"mk_land_hard"):
 		var hl := AnimationNodeBlendTree.new()
 		var ha := AnimationNodeAnimation.new()
