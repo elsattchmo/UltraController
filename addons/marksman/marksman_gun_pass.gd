@@ -117,6 +117,8 @@ var _last_pose: Array[Transform3D] = []
 func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	var changed := _apply(mod, sk)
 	var pose: Array[Transform3D] = mod.anim_pose
+	if _carry_hands(sk, pose, clampf(mod.get_process_delta_time(), 0.0, 0.1)):
+		changed = true
 	# (A strike last, over whatever the hold - fading out / back in - left: the gun from the clip's hands.)
 	var eq := _equipment()
 	if strike_w > 0.001 and eq and eq.held_def and eq.held_node and eq.held_def.two_handed and two and character.state.held_uid != 0:
@@ -259,6 +261,85 @@ func _apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 		# (The hand knocked off: the target is where the kick has it; apply_post lets go past LET_GO.)
 		_two_bone(pose, _part("LeftUpperArm"), _part("LeftLowerArm"), lh, Transform3D(support_target.basis, support_target.origin + support_kick), weight)
 	_look_about(pose)
+	return true
+
+
+## Carrying a prop (V7; Sinew's character lends the equipment an inactive hand IK, so nothing put the hands on it): both
+## palms flat on its outside - its left and right faces toward the back half, a little low, or on top of a team-lift
+## grip - fingers forward, at the real surface of its collision shape (UltraEquipmentVisual._hands_on_prop's targets),
+## by this pass's arm IK; eased in / out over CARRY_FADE.
+const CARRY_FADE := 0.2
+## Leaning in to reach a held prop: rad per metre short (the shoulders ~0.45 m over the bend), at most.
+const CARRY_LEAN_LEVER := 0.45
+const CARRY_LEAN_MAX := 0.35
+var carry_w := 0.0
+var carry_error := 0.0                 ## (tests) the worse hand's distance from its spot on the prop (m)
+
+
+func _carry_hands(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> bool:
+	var s := character.state
+	var o := UltraNet.world.get_object(s.held_id) if s.held_id != 0 and UltraNet.world else null
+	var rb := o.rigid() if o else null
+	carry_w = move_toward(carry_w, 1.0 if rb else 0.0, dt / CARRY_FADE)
+	if carry_w <= 0.001 or rb == null or not _learn_palm(sk) or character.visual_root == null:
+		carry_error = 0.0
+		return false
+	var to_sk := sk.global_transform.affine_inverse()
+	var vb := character.visual_root.global_basis.orthonormalized()
+	var right := vb.x
+	var fwd := -vb.z
+	var c := rb.global_position
+	var k := smoothstep(0.0, 1.0, carry_w)
+	carry_error = 0.0
+	var targets := []
+	for hs: int in [-1, 1]:
+		var contact: Vector3
+		var palm_dir: Vector3
+		var fingers := (fwd * 0.9 + Vector3.DOWN * 0.3).normalized()
+		if s.held_grip >= 0:
+			var grips := UltraGrab.grip_points(rb)
+			var gp := grips[s.held_grip].global_position if s.held_grip < grips.size() else c
+			var axis := rb.global_basis.x.normalized()
+			if axis.dot(right) < 0.0:
+				axis = -axis
+			contact = UltraGrab.surface_point(rb, gp + axis * 0.14 * float(hs), Vector3.UP)
+			palm_dir = Vector3.DOWN
+		else:
+			var out: Vector3 = right * float(hs)
+			var from := c + Vector3.DOWN * UltraGrab.support(rb, Vector3.DOWN) * 0.25 - fwd * UltraGrab.support(rb, -fwd) * 0.4
+			contact = UltraGrab.surface_point(rb, from, out)
+			palm_dir = -out
+		targets.append(_hand(hs, (to_sk.basis * fingers).normalized(), (to_sk.basis * palm_dir).normalized(), to_sk * contact, 0.028))
+	# Out of reach (held still, the hold puts the prop ~6 cm past the arms): the chest leans in over it, just enough.
+	var uc := _part("UpperChest")
+	var leaned := 0.0
+	for _r in (3 if uc >= 0 else 0):
+		var short := 0.0
+		for i in 2:
+			var pre := "Left" if i == 0 else "Right"
+			var ua := _part(pre + "UpperArm")
+			var la := _part(pre + "LowerArm")
+			var hb := _part(pre + "Hand")
+			if ua < 0 or la < 0 or hb < 0:
+				continue
+			var reach := pose[ua].origin.distance_to(pose[la].origin) + pose[la].origin.distance_to(pose[hb].origin)
+			short = maxf(short, pose[ua].origin.distance_to((targets[i] as Transform3D).origin) - reach * 0.98)
+		if short <= 0.005 or leaned >= CARRY_LEAN_MAX:
+			break
+		var a := minf(short / CARRY_LEAN_LEVER, CARRY_LEAN_MAX - leaned)
+		leaned += a
+		var lean := Quaternion(_chest_axes(pose, uc).x, a * k)
+		for n: String in SPINE_SHARE:
+			var i := _part(n)
+			if i >= 0:
+				_turn_subtree(pose, i, Quaternion.IDENTITY.slerp(lean, float(SPINE_SHARE[n])), pose[i].origin)
+	for i in 2:
+		var pre := "Left" if i == 0 else "Right"
+		var hb := _part(pre + "Hand")
+		var hand: Transform3D = targets[i]
+		_two_bone(pose, _part(pre + "UpperArm"), _part(pre + "LowerArm"), hb, hand, k)
+		if hb >= 0:
+			carry_error = maxf(carry_error, pose[hb].origin.distance_to(hand.origin))
 	return true
 
 

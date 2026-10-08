@@ -1587,4 +1587,10 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   clip's support hand (through the punch that arm is at full stretch) - gun hand re-seated, support hand on
   (`_support_under`), strike_w faded over STRIKE_FADE. Support hand 56 cm off the gun on the gun hand alone; 0.0 now (g9
   melee courses: bat standing / walking, rifle standing / walking, pistol; strikes' hands are fast for real: SWING_MAX 40).
+- **Carrying under Marksman** (`MarksmanGunPass._carry_hands`, last in `apply`): the palms on the held prop at
+  UltraEquipmentVisual._hands_on_prop's spots (side faces toward the back half, or on top of a team-lift grip), by the
+  pass's arm IK, eased CARRY_FADE 0.2 s; held still the hold puts a crate ~6 cm past the arms: the chest leans in just
+  enough (iterated, <= CARRY_LEAN_MAX 0.35 rad). `MarksmanEquipment._drive_held_prop`: Sinew lends a hand IK only while
+  holding - the base's release on letting go called a null one every frame. Suite g11 (OFFLINE session, 5 kg crate:
+  hands 0.6 cm off standing, 0.2 walking; drop lets go).
 
