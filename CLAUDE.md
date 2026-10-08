@@ -1494,3 +1494,15 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   eases back (9/s). Presentation only: shots never move. g4 test_freelook_turns_the_head_not_the_aim. Tour
   `marksman_gunfeel_review` (empty reloads close up, freelook; tours wait on physics ticks - frame grabs under xvfb are
   slow and a wall-clock tour shot everything in 30 frames).
+- **Hits with a gun up (V5)**: whatever holds the gun stays animated (`MarksmanRagdoll.armed_hold`: gun pass weight > 0.5):
+  Sinew's additive `_part_wants_physics(i, want)` hook keeps the arm parts kinematic even through a stagger, and
+  `_hit_chain` drops them. A body / head hit: spine / neck / head physical, the arms RIDE on the chest
+  (`MarksmanGunPass._carry_arms`: shown chest x animated chest^-1 x animated arm) - the gun rocks off the aim ~25 deg and
+  is back in 0.4 s. An arm hit is a sprung kick in the gun pass (`arm_hit`: the gun arm's moves the gun along the hit and
+  turns it KICK_TURN rad/m - ~9 deg at 25 points, back in 0.2 s; the support arm's knocks the hand off the grip, x3, up to
+  SUPPORT_KICK_MAX). A physical arm was tried: switched on it sagged ~free fall (23 cm in 0.18 s whatever the push or
+  tone) and kept a ~12 deg wrist error while physical: the barrel stayed 10-14 deg off for a second.
+  After physics, Sinew's additive `SinewPoseModifier.post_passes` hook (empty for Sinew) runs `MarksmanGunPass.apply_post`:
+  the support hand two-bone IK'd onto the gun AS SHOWN; knocked further than LET_GO 14 cm it lets go (grip_w eases to
+  0), takes hold again within REGRIP 7 cm over 0.18 s. Hits in tests need `react_to_hit` called by hand (UltraEffects
+  calls it on every machine; a test scene has none). Suite g5 (CI).

@@ -22,6 +22,7 @@ func setup(c: UltraCharacter) -> void:
 	if modifier != null and not parts.is_empty():
 		gun_pass = MarksmanGunPass.new(c, self)
 		modifier.passes.append(gun_pass)
+		modifier.post_passes.append(gun_pass)
 		rope_pass = MarksmanRopePass.new(c, self)
 		modifier.passes.append(rope_pass)
 
@@ -298,6 +299,10 @@ var _leg_weak := {}                  ## part -> [floor tone, seconds]
 
 
 func hit(region: int, dir: Vector3, amount: float) -> void:
+	# (Armed, an arm hit is the gun pass's kick - MarksmanGunPass.arm_hit: an arm switched to physics sags ~free fall
+	# before its muscles take it, 23 cm in 0.18 s whatever the push, and keeps a wrist error while physical.)
+	if armed_hold() and region in ARM_REGIONS:
+		gun_pass.arm_hit(region, dir, amount)
 	var imp := minf(amount * hit_impulse_per_damage, hit_impulse_max)
 	var c := character as SinewCharacter
 	var hv := Vector3(character.state.vel.x, 0.0, character.state.vel.z)
@@ -414,6 +419,30 @@ func _track_hips(dt: float) -> void:
 	var h := (pose_now[0] as Transform3D).origin
 	_hips_v = (h - _hips_last) / dt if _hips_last != Vector3.INF else Vector3.INF
 	_hips_last = h
+
+
+## Armed, whatever holds the gun stays the animation's (V5): a hit to the body or the head makes only the spine / neck /
+## head physical - the arms ride on the chest as it rocks (MarksmanGunPass.apply_post) - and an arm hit is a kick of the
+## gun (gun arm) or of the support hand off it (MarksmanGunPass.arm_hit), never a physical arm (at Sinew's arm slack the
+## gun dropped 66-87 deg and stayed there; a firm physical arm still sagged 23 cm on switching).
+const ARM_PARTS := ["LeftShoulder", "LeftUpperArm", "LeftLowerArm", "LeftHand", "RightShoulder", "RightUpperArm", "RightLowerArm", "RightHand"]
+
+
+func armed_hold() -> bool:
+	return gun_pass != null and gun_pass.weight > 0.5
+
+
+func _part_wants_physics(i: int, want: bool) -> bool:
+	if want and armed_hold() and String(parts[i].name) in ARM_PARTS:
+		return false
+	return want
+
+
+func _hit_chain(part: int) -> Array:
+	var chain := super._hit_chain(part)
+	if not armed_hold():
+		return chain
+	return chain.filter(func(i: int) -> bool: return not String(parts[i].name) in ARM_PARTS)
 
 
 func _relax_floor(part: int) -> float:

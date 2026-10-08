@@ -19,6 +19,9 @@ var clip_pose: Array[Transform3D] = []
 ## the gait and the torso twist, before the physics: what they make is what shows AND what the body tracks. Each is
 ## an object with `apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool` (true = it changed `anim_pose`).
 var passes: Array = []
+## The same after the physics pose is written (on the skeleton itself: `apply_post(mod, sk)`): what must hold on the pose
+## as it SHOWS, physics included - Marksman's support hand back on the gun a physical arm or chest carried off.
+var post_passes: Array = []
 ## Torso twist shares, by bone (the head's part sits on the neck bone).
 const TWIST_SHARE := {"Spine": 0.15, "Chest": 0.15, "UpperChest": 0.2, "Neck": 0.5}
 var _twist_parts: Array = []     ## [[part index, share, [subtree part indices]], ...]
@@ -70,6 +73,8 @@ func _process_modification_with_delta(_delta: float) -> void:
 		if gait or twisted:
 			for i in n:
 				sk.set_bone_global_pose(ragdoll.parts[i].bone, anim_pose[i])
+		for p in post_passes:
+			p.apply_post(self, sk)
 		return
 	var pw := ragdoll.part_w
 	var cut := ragdoll.part_cut
@@ -90,6 +95,8 @@ func _process_modification_with_delta(_delta: float) -> void:
 		var phys := to_skel * w
 		var xf := anim_pose[i].interpolate_with(phys, k) if k < 1.0 else phys
 		sk.set_bone_global_pose(ragdoll.parts[i].bone, xf)
+	for p in post_passes:
+		p.apply_post(self, sk)
 
 
 func _twist(sk: Skeleton3D, n: int) -> void:

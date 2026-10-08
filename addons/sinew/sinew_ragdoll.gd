@@ -730,7 +730,7 @@ func _update_parts(dt: float) -> void:
 		if _walks(i):
 			want = legs
 		else:
-			want = calm or _stagger_t >= 0.0 or _hit_t.has(i)
+			want = _part_wants_physics(i, calm or _stagger_t >= 0.0 or _hit_t.has(i))
 		if _walks(i):
 			# The legs go physical with a stagger and come back through the hand-back glide (whose
 			# kinematic targets ARE the glide): show them for exactly as long.
@@ -747,6 +747,12 @@ func _update_parts(dt: float) -> void:
 			part_w[i] = maxf(part_w[i] - dt / 0.3, 0.0)
 			if part_w[i] <= 0.0:
 				_set_dyn(i, false)
+
+
+## The simulation policy's last word on an upper-body part (a controller built on Sinew overrides it: Marksman keeps
+## the arms that hold a gun animated through a stagger). `want` = Sinew's own rule.
+func _part_wants_physics(_i: int, want: bool) -> bool:
+	return want
 
 
 ## The chain a hit on `part` makes physical: an arm from its shoulder down; else the upper body.

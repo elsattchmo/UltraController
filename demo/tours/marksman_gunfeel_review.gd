@@ -22,6 +22,11 @@ func _build() -> void:
 		for k in at.size():
 			steps.append({"t": 600.0, "until": _ticks.bind(int(at[k])), "yaw": 0, "pitch": -5, "shot": "%s_empty_%d" % [item, k]})
 		steps.append({"t": 600.0, "until": _ticks.bind(260), "yaw": 0, "pitch": -5})
+	# Hits with the rifle up (V5): the body flinches, the gun is knocked off its line, the support hand knocked off.
+	steps.append({"call": _arm.bind("rifle"), "t": 600.0, "until": _ticks.bind(100), "yaw": 0, "pitch": 0})
+	for h: Array in [["torso", UltraLimbs.Region.TORSO, 25.0], ["gun_arm", UltraLimbs.Region.FOREARM_R, 25.0], ["support_arm", UltraLimbs.Region.FOREARM_L, 60.0]]:
+		steps.append({"call": _hit.bind(h[1], h[2]), "t": 600.0, "until": _ticks.bind(6), "yaw": 0, "pitch": 0, "shot": "hit_%s" % h[0]})
+		steps.append({"t": 600.0, "until": _ticks.bind(70), "yaw": 0, "pitch": 0})
 	steps.append({"call": _arm.bind("rifle"), "t": 600.0, "until": _ticks.bind(80), "yaw": 0, "pitch": 0})
 	steps.append({"call": _freelook.bind(true), "t": 600.0, "until": _ticks.bind(50), "yaw": 0, "pitch": 0, "shot": "freelook_left"})
 	steps.append({"call": _freelook.bind(false), "t": 600.0, "until": _ticks.bind(50), "yaw": 0, "pitch": 0, "shot": "freelook_back"})
@@ -53,6 +58,21 @@ func _setup() -> void:
 
 func _arm(item: String) -> void:
 	_slot = int(_slots.get(item, 0))
+	_tick0 = Engine.get_physics_frames()
+
+
+func _hit(region: int, amount: float) -> void:
+	_c.state.hp = 100.0
+	var d := UltraCombat.DamageInfo.new()
+	d.amount = amount
+	d.region = region
+	d.kind = &"bullet"
+	d.dir = Vector3(1, 0, 0.3).normalized()
+	d.point = _c.state.pos + Vector3.UP * 1.3
+	_c.apply_damage(d)
+	_c.state.hp = 100.0
+	_view_off = Vector3(1.4, 1.5, -1.6)
+	_look_y = 1.3
 	_tick0 = Engine.get_physics_frames()
 
 
