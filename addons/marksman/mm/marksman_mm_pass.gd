@@ -3,6 +3,7 @@ extends RefCounted
 ## Motion matching's pose pass (a SinewPoseModifier pass, before the gun pass): fits the matched clip to the body's
 ## real motion.
 ## 0. Ground: the clip's soles onto the floor (clips are authored a few cm above or below it; per clip, eased).
+## 0b. Ground fit (foot IK): each foot onto the surface under it (stairs, ramps, uneven ground) - see _ground_fit.
 ## 1. Direction warp: the clip's legs travel along ITS ground velocity; the body's goes elsewhere (a diagonal between
 ##    two clips' ways, a velocity still turning) - the whole body turns about the hips by the difference (<= WARP_MAX)
 ##    and the spine turns the chest back, so the legs walk where the body goes and the torso keeps facing the aim.
@@ -70,6 +71,7 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 		locked = [false, false]
 		warp = 0.0
 		_ground_set = false
+		_fit_set = false
 		return false
 	var pose := mod.anim_pose
 	_w = w
@@ -83,6 +85,8 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 			pose[i].origin += down
 	if OS.get_environment("MM_NOWARP") == "":
 		_warp(sk, pose, dt)
+	if OS.get_environment("MM_NOFIT") == "":
+		_ground_fit(sk, pose, dt)
 	if OS.get_environment("MM_NOLOCK") == "":
 		for side in 2:
 			_foot(sk, pose, side, dt)
@@ -158,6 +162,128 @@ func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> vo
 	_two_bone(pose, up_i, lo_i, ft_i, Transform3D(pose[ft_i].basis, t_sk), _w)
 
 
+# ------------------------------------------------------------------ ground fit
+
+## Probes start this far over the body's floor and reach this far under it (m).
+const FIT_UP := 0.55
+const FIT_DOWN := 0.7
+## A foot's offset follows the ground under it at most this fast (m/s): up quicker than down (a toe meeting a riser).
+const FIT_RISE := 3.5
+const FIT_FALL := 2.0
+## The hips go down for the lower foot (legs can't stretch), at most this far, following at this rate (m/s).
+const PELVIS_MAX := 0.4
+const PELVIS_RATE := 1.6
+## Share of a leg's length it may straighten to (the rest is the hips going down).
+const REACH := 0.97
+## A planted sole turns onto the surface by at most this (rad).
+const TILT_MAX := deg_to_rad(28.0)
+
+## Per foot: how far its ground is above (+) / below (-) the body's floor (eased), and the surface's normal.
+var fit_off: Array[float] = [0.0, 0.0]
+var fit_normal: Array[Vector3] = [Vector3.UP, Vector3.UP]
+var pelvis_off := 0.0
+var _fit_set := false
+
+
+## The matched clip walks on flat ground at the body's floor (the skeleton's origin); the world isn't flat. Under each
+## foot's ankle and ball the ground is probed (the higher of the two: a ball on the next tread holds the foot up there);
+## the hips lower for the lower foot, each leg reaches its foot onto its ground (two-bone IK) and a planted sole turns
+## onto the surface. Followed per foot, so a swinging foot passing over a step edge rises instead of popping.
+## No ground within reach under a foot (a gap): it keeps the floor's height.
+func _ground_fit(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> void:
+	var xf := sk.global_transform
+	var floor_y := xf.origin.y
+	var space := sk.get_world_3d().direct_space_state
+	var to_sk := xf.basis.orthonormalized().inverse()
+	var want: Array[float] = [0.0, 0.0]
+	var normals: Array[Vector3] = [Vector3.UP, Vector3.UP]
+	for side in 2:
+		var ft := _part("LeftFoot" if side == 0 else "RightFoot")
+		if ft < 0:
+			return
+		var ankle: Vector3 = xf * pose[ft].origin
+		var ball := ankle + (xf.basis * (pose[ft].basis * _ball_local(sk, side)))
+		var best := -INF
+		var n := Vector3.UP
+		for p: Vector3 in [ankle, ball]:
+			var hit := _probe(space, p, floor_y)
+			if not hit.is_empty() and float(hit.y) > best:
+				best = hit.y
+				n = hit.n
+		want[side] = clampf(best - floor_y, -FIT_DOWN, FIT_UP) if best > -INF else 0.0
+		normals[side] = n
+	for side in 2:
+		if not _fit_set or dt <= 0.0:
+			fit_off[side] = want[side]
+		else:
+			var rate := FIT_RISE if want[side] > fit_off[side] else FIT_FALL
+			fit_off[side] = move_toward(fit_off[side], want[side], rate * dt)
+		fit_normal[side] = fit_normal[side].slerp(normals[side], clampf(dt * 12.0, 0.0, 1.0)) if _fit_set else normals[side]
+	# The hips only go down as far as a leg needs to reach its foot (straightening takes up the rest).
+	var k := _w
+	var need := 0.0
+	for side in 2:
+		var pre := "Left" if side == 0 else "Right"
+		var up_i := _part(pre + "UpperLeg")
+		var lo_i := _part(pre + "LowerLeg")
+		var ft_i := _part(pre + "Foot")
+		var hip: Vector3 = pose[up_i].origin
+		var reach := (pose[up_i].origin.distance_to(pose[lo_i].origin) + pose[lo_i].origin.distance_to(pose[ft_i].origin)) * REACH
+		var tgt: Vector3 = pose[ft_i].origin + Vector3(0.0, fit_off[side] * k, 0.0)
+		var hz := Vector2(tgt.x - hip.x, tgt.z - hip.z).length()
+		var v := hip.y - tgt.y
+		var fits := sqrt(maxf(reach * reach - hz * hz, 0.0))
+		need = maxf(need, v - fits)
+	var p_want := -clampf(need, 0.0, PELVIS_MAX)
+	pelvis_off = move_toward(pelvis_off, p_want, PELVIS_RATE * dt) if _fit_set and dt > 0.0 else p_want
+	_fit_set = true
+	if absf(pelvis_off) > 1e-4:
+		var d := to_sk * Vector3(0.0, pelvis_off, 0.0)
+		for i in pose.size():
+			pose[i].origin += d
+	for side in 2:
+		var pre := "Left" if side == 0 else "Right"
+		var up_i := _part(pre + "UpperLeg")
+		var lo_i := _part(pre + "LowerLeg")
+		var ft_i := _part(pre + "Foot")
+		var lift := fit_off[side] * k - pelvis_off
+		var b: Basis = pose[ft_i].basis
+		# A planted sole onto the surface (its normal in the skeleton's frame), limited.
+		if matcher.planted(side):
+			var n_sk := (to_sk * fit_normal[side]).normalized()
+			var q := _arc(Vector3.UP, n_sk)
+			var ang := q.get_angle()
+			if ang > 1e-4:
+				q = Quaternion(q.get_axis(), minf(ang, TILT_MAX) * k)
+				b = Basis(q) * b
+		if absf(lift) < 1e-4 and b == pose[ft_i].basis:
+			continue
+		var t := pose[ft_i].origin + Vector3(0.0, lift, 0.0)
+		_two_bone(pose, up_i, lo_i, ft_i, Transform3D(b, t), 1.0)
+
+
+func _probe(space: PhysicsDirectSpaceState3D, p: Vector3, floor_y: float) -> Dictionary:
+	var q := PhysicsRayQueryParameters3D.create(Vector3(p.x, floor_y + FIT_UP, p.z), Vector3(p.x, floor_y - FIT_DOWN, p.z),
+			UltraLayers.WORLD_STATIC | UltraLayers.WORLD_DYNAMIC)
+	q.exclude = [character.get_rid()]
+	var hit := space.intersect_ray(q)
+	if hit.is_empty():
+		return {}
+	return {"y": (hit.position as Vector3).y, "n": hit.normal as Vector3}
+
+
+## The ball of the foot (the sole under the toe joint) in the foot bone's frame, from the rest pose.
+var _ball_cache: Array = [null, null]
+func _ball_local(sk: Skeleton3D, side: int) -> Vector3:
+	if _ball_cache[side] == null:
+		var f := sk.find_bone("LeftFoot" if side == 0 else "RightFoot")
+		var t := sk.find_bone("LeftToes" if side == 0 else "RightToes")
+		var rest := sk.get_bone_global_rest(f)
+		var tr := sk.get_bone_global_rest(t)
+		_ball_cache[side] = rest.basis.inverse() * (Vector3(tr.origin.x, 0.0, tr.origin.z) - rest.origin)
+	return _ball_cache[side]
+
+
 func _subtree(top: int) -> Array:
 	if _sub.has(top):
 		return _sub[top]
@@ -186,7 +312,19 @@ func _two_bone(pose: Array[Transform3D], up: int, lo: int, end: int, target: Tra
 	var at := T - A
 	var c := clampf(at.length(), absf(a - b) + 1e-3, a + b - 1e-3)
 	var dir := at.normalized() if at.length() > 1e-5 else (C - A).normalized()
-	var pole := (B - A) - dir * (B - A).dot(dir)
+	# The knee's way, swung with the leg onto the new hip -> foot line (a foot lifted 0.4 m onto a higher tread turns
+	# that line far: the knee's old offset, measured against the new line, pointed across the other leg).
+	var swing := _arc((C - A).normalized(), dir) if (C - A).length() > 1e-5 else Quaternion.IDENTITY
+	var knee := Basis(swing) * (B - A)
+	var pole := knee - dir * knee.dot(dir)
+	# (Plus the way this knee bends - the thigh's own forward: on a nearly straight leg the knee's offset is a few mm and
+	# its direction anything; the knee flipped sideways for a frame and the thighs went through each other.)
+	var hint := pose[up].basis * _knee_fwd(up)
+	hint -= dir * hint.dot(dir)
+	# (Only where the knee's own offset is too small to say: a bent knee keeps the clip's direction - the rifle stance's
+	# knees point out, and a fixed forward pull crossed the legs.)
+	var fill := clampf(KNEE_HINT - pole.length(), 0.0, KNEE_HINT)
+	pole = pole + hint.normalized() * fill if hint.length() > 1e-4 else pole
 	if pole.length() < 1e-4:
 		pole = (C - A).cross(Vector3.UP).cross(dir)
 	pole = pole.normalized()
@@ -199,6 +337,20 @@ func _two_bone(pose: Array[Transform3D], up: int, lo: int, end: int, target: Tra
 	var q_lo := _arc(lo_dir, (C2 - B2).normalized())
 	pose[lo] = Transform3D(Basis(q_lo) * Basis(q_up) * pose[lo].basis, B2)
 	pose[end] = Transform3D(target.basis, C2)
+
+
+## Below this knee offset (m) the thigh's forward fills in for the knee's bend direction.
+const KNEE_HINT := 0.08
+var _knee_cache := {}
+
+
+## The model's forward (+Z: the way knees bend) in the thigh part's bone frame, from the rest pose.
+func _knee_fwd(up: int) -> Vector3:
+	if not _knee_cache.has(up):
+		var sk := character.skeleton
+		var rest := sk.get_bone_global_rest(int(ragdoll.parts[up].bone))
+		_knee_cache[up] = (rest.basis.orthonormalized().inverse() * Vector3.FORWARD * -1.0).normalized()
+	return _knee_cache[up]
 
 
 static func _arc(a: Vector3, b: Vector3) -> Quaternion:

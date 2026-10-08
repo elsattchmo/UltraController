@@ -192,3 +192,76 @@ func test_leg_shots_are_simulated() -> void:
 	check((outcomes["60"] as Dictionary).size() > 1 or not (outcomes["60"] as Dictionary).has("fell"),
 			"even a heavy leg hit isn't a guaranteed fall: the outcome depends on the moment (%s)" % [outcomes["60"]])
 
+
+
+## Feet on the ground with matched clips (MarksmanMMPass ground fit): the playground's stairs and ramps up and down,
+## unarmed and with the rifle, measured like s10 (SinewMoveMetrics: soles probed from above, calibrated on the
+## idle; legs as capsules; hips).
+const GROUND_SEGS := ["@flat", "idle unarmed", "@reset", "walk fwd", "@stairs", "stairs up", "stairs down",
+		"@ramp:20:up", "ramp 20 up", "@ramp:20:down", "ramp 20 down", "@ramp:30:up", "ramp 30 up", "@ramp:30:down", "ramp 30 down"]
+## Sink into the ground past flat walking (m) and hips below standing, per kind.
+const GROUND_LIMITS := {"stairs": {"sink": 0.20, "hips": 0.30}, "ramp": {"sink": 0.03, "hips": 0.22}}
+
+
+func test_feet_on_stairs_and_ramps() -> void:
+	var map := load_playground()
+	for item: StringName in [&"", &"rifle"]:
+		var c := _marksman(marker("spawn").global_position)
+		await ticks(40)
+		var sl := 0
+		if item != &"":
+			UltraItems.give(c, item)
+			for i in c.inventory.size():
+				var it := c.inventory.get_slot(i)
+				if it and it.def_id == item:
+					sl = i + 1
+		var m := SinewMoveMetrics.new(c)
+		var b := bot(c)
+		for s: Array in SinewMoveSegments.all():
+			var label: String = s[0]
+			if not label in GROUND_SEGS:
+				continue
+			var inp: Dictionary = s[2]
+			if label.begins_with("@"):
+				m.label = ""
+				var at := SinewMoveSegments.place(label, map)
+				if not at.is_empty():
+					c.teleport(at[0], at[1])
+					b.live_yaw = at[1]
+			else:
+				m.label = label
+			var step := {"ticks": int(s[1]) + 1, "move": inp.get("move", Vector2.ZERO), "slot": sl}
+			if inp.has("yaw"):
+				step["yaw"] = deg_to_rad(float(inp.yaw))
+			b.set_steps([step])
+			await ticks(int(s[1]))
+		m.label = ""
+		m.detach()
+		m.calibrate("idle unarmed")
+		var dump := OS.get_environment("GM_DUMP")
+		if dump != "":
+			for f: Dictionary in m.frames:
+				if String(f.label).contains(dump) and SinewMoveMetrics.legs_gap(f.bones) < 0.0:
+					var bs: Dictionary = f.bones
+					var h: Vector3 = bs.Hips
+					var y := float(f.body)
+					var rt := Vector3(cos(y), 0, -sin(y))
+					var fw := Vector3(-sin(y), 0, -cos(y))
+					var loc := func(p: Vector3) -> String: return "(r%+.2f f%+.2f u%+.2f)" % [(p - h).dot(rt), (p - h).dot(fw), p.y - h.y]
+					print("GAP %s t%d %.1f cm %s kneeL %s kneeR %s footL %s footR %s" % [f.label, f.t, SinewMoveMetrics.legs_gap(bs) * 100.0, SinewMoveMetrics.legs_gap_pair(bs),
+							loc.call(bs.LeftLowerLeg), loc.call(bs.RightLowerLeg), loc.call(bs.LeftFoot), loc.call(bs.RightFoot)])
+		var name := "unarmed" if item == &"" else String(item)
+		info("%s, matched:\n%s" % [name, m.table()])
+		var flat: float = m.summary("walk fwd").sink
+		for lab: String in m.labels():
+			var kind := "stairs" if lab.contains("stairs") else ("ramp" if lab.contains("ramp") else "")
+			if kind == "":
+				continue
+			var sm := m.summary(lab)
+			var lim: Dictionary = GROUND_LIMITS[kind]
+			# (Legs: the unarmed clips' shins graze ~1 cm on flat ground already - walk fwd -0.6 cm.)
+			check(float(sm.sink) - flat <= float(lim.sink) and float(sm.hips_drop) <= float(lim.hips) and float(sm.gap_min) >= -0.016,
+					"%s %s: sink %.1f cm, hips -%.1f cm, legs gap %.1f cm" % [name, lab, (float(sm.sink) - flat) * 100.0, float(sm.hips_drop) * 100.0, float(sm.gap_min) * 100.0])
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
