@@ -43,6 +43,13 @@ func test_single_player_plays_marksman() -> void:
 	await ticks(10)
 	var c: UltraCharacter = main.get("player")
 	check(c is MarksmanCharacter, "Single player plays a MarksmanCharacter (got %s)" % [c])
+	# (The ball launcher must be on the hotbar - a number key - not in the backpack: the user couldn't select it.)
+	var at := -1
+	for i in c.inventory.size() if c and c.inventory else 0:
+		var it := c.inventory.get_slot(i)
+		if it and it.def_id == &"ball_launcher":
+			at = i
+	check(at >= 0 and at < Inventory.HOTBAR, "the ball launcher is on the hotbar (slot index %d of %d)" % [at, Inventory.HOTBAR])
 
 
 

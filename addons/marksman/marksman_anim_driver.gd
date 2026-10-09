@@ -48,11 +48,6 @@ func _build_sinew() -> AnimationNodeBlendTree:
 	air.connect_node("ready", 0, "clip_ts")
 	air.connect_node("ready", 1, "ready_ts")
 	air.connect_node("output", 0, "ready")
-	# --- letting go of a rope: the arms come down off it slowly (the grip pose is overhead; at the plain cross-fade the
-	# hands swept down 17 cm a frame)
-	for ti in loco.get_transition_count():
-		if loco.get_transition_from(ti) == &"rope":
-			loco.get_transition(ti).xfade_time = ROPE_LET_GO_XFADE
 	# --- landing: as deep as the impact (Jump_Land squats 45 cm - for a hop, a little of it over the idle)
 	var land := loco.get_node("land") as AnimationNodeBlendTree
 	land.disconnect_node("output", 0)
@@ -61,6 +56,8 @@ func _build_sinew() -> AnimationNodeBlendTree:
 	land.connect_node("depth", 0, "stand")
 	land.connect_node("depth", 1, "clip_ts")
 	land.connect_node("output", 0, "depth")
+	_add_parity_nodes(loco)
+	_add_jump_nodes(loco)
 	# --- motion matching (spike, MarksmanCharacter.motion_matching): one clip node the matcher re-points and seeks
 	if _mm_on():
 		var m := AnimationNodeBlendTree.new()
@@ -139,7 +136,452 @@ func _build_sinew() -> AnimationNodeBlendTree:
 				t.xfade_time = XFADE
 				t.xfade_curve = _ease_curve()
 				loco.add_transition(pair[0], pair[1], t)
+	# --- letting go of a rope: the arms come down off it slowly (the grip pose is overhead; at the plain cross-fade the
+	# hands swept down 17 cm a frame) - after every node is in (the leap / fall nodes came later and got 0.2 s)
+	for ti in loco.get_transition_count():
+		if loco.get_transition_from(ti) == &"rope":
+			loco.get_transition(ti).xfade_time = ROPE_LET_GO_XFADE
+	# (Into and out of the drop to hang: always a cut - the capsule is already 2 m down at the end; a cross-fade from the
+	# standing pose drew the body 2 m down and rising.)
+	for ti in loco.get_transition_count():
+		if loco.get_transition_from(ti) == &"drop_hang" or loco.get_transition_to(ti) == &"drop_hang":
+			loco.get_transition(ti).xfade_time = 0.0
 	return root
+
+
+# ------------------------------------------------------------------ V7: the UltraController's other states
+
+## The states the Sinew tree shows with one clip (or not at all), built as the UltraController builds them (its helpers
+## are inherited): the running leap (`air_run`, seeked by the vertical speed), a plain fall, the heavy landing, the slide
+## dropping in from Slide_Start, lowering over an edge (`drop_hang`, Standing Drop To Freehang fitted to our hang), the
+## ledge hang's shimmy blend and the ladder refit (UltraAnimDriver._build_hang / _build_ladder), the dive.
+func _add_parity_nodes(loco: AnimationNodeStateMachine) -> void:
+	if _role_anim(&"leap"):
+		var rj := AnimationNodeBlendTree.new()
+		var rja := AnimationNodeAnimation.new()
+		rja.animation = _segment(_clip(&"leap"), RUN_JUMP_SEG.x, RUN_JUMP_SEG.y)
+		rj.add_node("clip", rja, Vector2(0, 0))
+		rj.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		rj.add_node("hold", AnimationNodeTimeScale.new(), Vector2(400, 0))
+		rj.connect_node("seek", 0, "clip")
+		rj.connect_node("hold", 0, "seek")
+		var arms := AnimationNodeBlend2.new()
+		arms.filter_enabled = true
+		for bn in _arm_bones():
+			arms.set_filter_path(NodePath("%" + String(skeleton.name) + ":" + bn), true)
+		rj.add_node("arms", arms, Vector2(600, 0))
+		rj.add_node("arms_src", _anim(&"jump_air"), Vector2(400, 150))
+		rj.connect_node("arms", 0, "hold")
+		rj.connect_node("arms", 1, "arms_src")
+		rj.connect_node("output", 0, "arms")
+		_add_loco(loco, "air_run", rj)
+	_add_loco(loco, "fall", _anim(&"jump_air"))
+	if _role_anim(&"land_heavy"):
+		_add_loco(loco, "land_heavy", _anim_from(&"land_heavy", 0.45))
+	if _role_anim(&"slide_start"):
+		var slide := AnimationNodeStateMachine.new()
+		var ss := _anim(&"slide_start", false)
+		ss.animation = _segment(ss.animation, 0.0, 0.40)       # (Slide_Start is a whole slide: only the drop into it)
+		slide.add_node("start", ss, Vector2(0, 0))
+		slide.add_node("loop", _anim(&"slide"), Vector2(200, 0))
+		var sl := AnimationNodeStateMachineTransition.new()
+		sl.switch_mode = AnimationNodeStateMachineTransition.SWITCH_MODE_AT_END
+		sl.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO
+		sl.xfade_time = 0.15
+		slide.add_transition("start", "loop", sl)
+		var sl_in := AnimationNodeStateMachineTransition.new()
+		sl_in.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_AUTO
+		slide.add_transition("Start", "start", sl_in)
+		loco.replace_node("slide", slide)
+	if _role_anim(&"drop_hang"):
+		var dh := AnimationNodeBlendTree.new()
+		var da := AnimationNodeAnimation.new()
+		da.animation = _offset_hips(_segment(_clip(&"drop_hang"), DROP_SEG.x, DROP_SEG.y), DROP_CLIP_FIT)
+		dh.add_node("clip", da, Vector2(0, 0))
+		dh.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		dh.add_node("speed", AnimationNodeTimeScale.new(), Vector2(400, 0))
+		dh.connect_node("seek", 0, "clip")
+		dh.connect_node("speed", 0, "seek")
+		dh.connect_node("output", 0, "speed")
+		_add_loco(loco, "drop_hang", dh, 0.0, 0.0)
+	_build_hang(loco)
+	_build_ladder(loco)
+	# Getting down to prone / back up to a crouch (Mixamo PR_FromCrouch / PR_ToCrouch, played over the motor's
+	# PRONE_TRANSITION while the capsule's height eases) - the matcher / prone set cut straight from one to the other.
+	for spec: Array in [["prone_down", &"prone_down"], ["prone_up", &"prone_up"]]:
+		if _role_anim(spec[1]):
+			var tb := AnimationNodeBlendTree.new()
+			tb.add_node("clip", _anim(spec[1], false), Vector2(0, 0))
+			tb.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+			tb.add_node("speed", AnimationNodeTimeScale.new(), Vector2(400, 0))
+			tb.connect_node("seek", 0, "clip")
+			tb.connect_node("speed", 0, "seek")
+			tb.connect_node("output", 0, "speed")
+			_add_loco(loco, spec[0], tb, 0.15, 0.15)
+	var dive := AnimationNodeBlendTree.new()
+	dive.add_node("clip", _anim(&"swim_f"), Vector2(0, 0))
+	dive.add_node("rate", AnimationNodeTimeScale.new(), Vector2(200, 0))
+	dive.connect_node("rate", 0, "clip")
+	dive.connect_node("output", 0, "rate")
+	_add_loco(loco, "dive", dive)
+
+
+## A loco node with cross-fades to and from every other one.
+func _add_loco(loco: AnimationNodeStateMachine, n: String, node: AnimationNode, xfade_in := XFADE, xfade_out := XFADE) -> void:
+	var others := loco.get_node_list()
+	loco.add_node(n, node, Vector2(1200, 200 + 100 * others.size()))
+	for o in others:
+		if o == &"Start" or o == &"End":
+			continue
+		for pair: Array in [[o, StringName(n)], [StringName(n), o]]:
+			var t := AnimationNodeStateMachineTransition.new()
+			t.xfade_time = xfade_in if pair[1] == StringName(n) else xfade_out
+			t.xfade_curve = _ease_curve()
+			loco.add_transition(pair[0], pair[1], t)
+
+
+## The motor states the Sinew mapping folds together, told apart as the UltraController does.
+func _parity_wanted(w: String) -> String:
+	var Id := MotorState.Id
+	var hsp := Vector2(velocity.x, velocity.z).length()
+	var has_leap := _role_anim(&"leap") != null
+	match state:
+		Id.JUMP:
+			if not _cur_loco in ["air", "air_run", "hop", "jump_run"]:
+				_run_jump = hsp > RUN_JUMP_SPEED and has_leap
+				_jump_vy0 = 0.0
+				_jump_node = "" if _run_jump else ("jump_run" if hsp > JUMP_RUN_FROM else "hop")
+				if not _jump_nodes.has(_jump_node):
+					_jump_node = ""
+				_land_t = -1.0
+				_jump_t = 0.0
+			if _run_jump:
+				return "air_run"
+			return _jump_node if _jump_node != "" else "air"
+		Id.FALL:
+			var hop := _cur_loco in ["ground", "mm"] and velocity.y > 1.0 and hsp > RUN_JUMP_SPEED and has_leap
+			if hop:
+				_run_jump = true
+				_jump_vy0 = 0.0
+				return "air_run"
+			if _cur_loco == "rope":
+				return w          # (Marksman's own air clip off a rope, legs reaching for the landing - the leap, seeked by the
+				                  # vertical speed, swung the body 9 cm a frame letting go: gm rope test)
+			if _cur_loco == "air_run" and air_time < 1.3:
+				return "air_run"
+			if _cur_loco in ["hop", "jump_run"] and air_time < JUMP_HOLD_AIR:
+				return _cur_loco
+			if w == "air" and _cur_loco != "air":
+				return "fall"
+			return w
+		Id.LAND:
+			return _landing(w)
+		Id.LEDGE_HANG:
+			# Caught out of the air: the brace catch plays out first (unless the hands are already shimmying / it climbs).
+			if w == "hang" and _cur_loco in ["air", "air_run", "hop", "jump_run", "fall"] and _catch_ok():
+				_catch_t = 0.0
+				tree.set(LOCO + "catch/seek/seek_request", 0.0)
+				return "catch"
+			if _cur_loco == "catch" and _catch_t < CATCH_SEG.y - CATCH_SEG.x and absf(climb_speed) < 0.05:
+				return "catch"
+			return w
+		Id.MANTLE, Id.LEDGE_CLIMB:
+			if trav_kind in UltraTraversal.DOWN_MOVES:
+				return "drop_hang" if _role_anim(&"drop_hang") else w
+			if state == Id.MANTLE and _role_anim(&"mk_hop"):
+				var ch := get_parent() as UltraCharacter
+				var h := ch.state.trav_to.y - ch.state.trav_from.y if ch else 9.0
+				if _cur_loco == "hop_up" or h < MANTLE_HOP_MAX:
+					if _cur_loco != "hop_up":
+						var spec: Dictionary = JUMPS["hop"]
+						tree.set(LOCO + "hop_up/seek/seek_request", float(spec.push))
+						tree.set(LOCO + "hop_up/rate/scale", (float(spec.down) + HOP_UP_PAST - float(spec.push)) / maxf(climb_duration, 0.2))
+					return "hop_up"
+			return w
+		Id.DIVE:
+			return "dive"
+	var lw := _landing_hold(w)
+	if lw != "":
+		return lw
+	return _prone_transition(w)
+
+
+## Down to prone from standing / crouched, and back up: the transition clip first (the UltraController's way).
+func _prone_transition(w: String) -> String:
+	var upright := ["ground", "crouch", "land", "mm"]
+	if w == "prone" and _cur_loco in upright and _role_anim(&"prone_down"):
+		_prone_trans = PRONE_TRANSITION_TIME
+		tree.set(LOCO + "prone_down/seek/seek_request", 0.0)
+		tree.set(LOCO + "prone_down/speed/scale", _clip_len(&"prone_down", 1.8) / PRONE_TRANSITION_TIME)
+		return "prone_down"
+	if _cur_loco == "prone" and w in upright and _role_anim(&"prone_up"):
+		_prone_trans = PRONE_TRANSITION_TIME
+		tree.set(LOCO + "prone_up/seek/seek_request", 0.0)
+		tree.set(LOCO + "prone_up/speed/scale", _clip_len(&"prone_up", 1.8) / PRONE_TRANSITION_TIME)
+		return "prone_up"
+	if _cur_loco in ["prone_down", "prone_up"] and _prone_trans > 0.0 and (w == "prone" or w in upright):
+		return _cur_loco               # (let it finish)
+	return w
+
+
+# ------------------------------------------------------------------ jumps and landings (the user: "move away from the
+# current jump animation as it looks terrible and unnatural ... different landing animations based off height and
+# momentum")
+## A jump's own clip, its time SEEKED from the vertical speed (take-off at `push`: the legs already driving -> `apex` at the
+## top -> `down`: legs reaching for the ground, held for a longer fall), then played on from `down` through its landing
+## to `settle` when it lands softly. Standing: the male locomotion pack's jump (both knees up, arms forward); on the move
+## (JUMP_RUN_FROM .. the leap's RUN_JUMP_SPEED): the axe pack's unarmed running jump. tools/marksman/measure_jumps.gd.
+const JUMPS := {
+	"hop": {"role": &"mk_hop", "push": 0.70, "apex": 1.05, "down": 1.28, "settle": 1.70},
+	"jump_run": {"role": &"mk_jump_run", "push": 0.30, "apex": 0.70, "down": 1.00, "settle": 1.38},
+}
+const JUMP_RUN_FROM := 1.0
+## A mantle lower than this (m) is a hop up onto it (`hop_up`); the hop is played this far past its touchdown by the move's
+## end (the knees taking the landing on the top).
+const MANTLE_HOP_MAX := 0.9
+const HOP_UP_PAST := 0.12
+## A jump's clip carries on through a fall this long (s), then the falling loop takes over.
+const JUMP_HOLD_AIR := 1.6
+## Landing (m/s down at touchdown): softer than LAND_SOFT the jump's own clip lands it; from LAND_HARD the action pack's
+## hard landing (down on a hand, up again over HARD_LAND_TIME); between, the squat by depth (`land`).
+const LAND_SOFT := 6.5
+const LAND_HARD := 9.5
+const HARD_LAND_SEG := Vector2(0.15, 1.75)
+const HARD_LAND_TIME := 1.2
+## A landing shown past the motor's short LAND state is cut short by moving off faster than this (m/s).
+const LAND_MOVE_OFF := 1.2
+var _jump_node := ""
+var _jump_nodes := {}
+var _jump_t := 0.0
+## The brace catch: Braced_Catch from the hands striking the lip to the settled hang (s), and the time into one.
+const CATCH_SEG := Vector2(0.30, 1.30)
+var _catch_t := 9.0
+var _land_t := -1.0                 ## time into a landing that outlasts LAND (-1: none)
+var _land_node := ""
+
+
+func _add_jump_nodes(loco: AnimationNodeStateMachine) -> void:
+	for n: String in JUMPS:
+		var spec: Dictionary = JUMPS[n]
+		if _role_anim(spec.role) == null:
+			continue
+		var tb := AnimationNodeBlendTree.new()
+		tb.add_node("clip", _anim(spec.role, false), Vector2(0, 0))
+		tb.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		tb.add_node("rate", AnimationNodeTimeScale.new(), Vector2(400, 0))
+		tb.connect_node("seek", 0, "clip")
+		tb.connect_node("rate", 0, "seek")
+		tb.connect_node("output", 0, "rate")
+		_add_loco(loco, n, tb, 0.1, 0.25)
+		_jump_nodes[n] = true
+	# Up onto something low (a mantle under MANTLE_HOP_MAX): the standing hop from its push-off to its touchdown over the
+	# motor's move - not the 1 m climb clip (a run-up and a knee onto the top) for a knee-high box.
+	if _role_anim(&"mk_hop"):
+		var hu := AnimationNodeBlendTree.new()
+		hu.add_node("clip", _anim(&"mk_hop", false), Vector2(0, 0))
+		hu.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		hu.add_node("rate", AnimationNodeTimeScale.new(), Vector2(400, 0))
+		hu.connect_node("seek", 0, "clip")
+		hu.connect_node("rate", 0, "seek")
+		hu.connect_node("output", 0, "rate")
+		_add_loco(loco, "hop_up", hu, 0.1, 0.25)
+	if _role_anim(&"mk_land_hard"):
+		var hl := AnimationNodeBlendTree.new()
+		var ha := AnimationNodeAnimation.new()
+		ha.animation = _segment(_clip(&"mk_land_hard"), HARD_LAND_SEG.x, HARD_LAND_SEG.y)
+		hl.add_node("clip", ha, Vector2(0, 0))
+		hl.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		hl.add_node("rate", AnimationNodeTimeScale.new(), Vector2(400, 0))
+		hl.connect_node("seek", 0, "clip")
+		hl.connect_node("rate", 0, "seek")
+		hl.connect_node("output", 0, "rate")
+		_add_loco(loco, "land_hard", hl, 0.06, 0.3)
+	# The brace catch: jumping / falling onto a ledge, Braced_Catch from the hands striking the lip - the body swings in
+	# and settles - fitted to the hang as the hang's hold is (UltraAnimDriver._build_hang's refit).
+	var hc := _role_anim(&"hang_idle")
+	if hc:
+		var cb := AnimationNodeBlendTree.new()
+		var ca := AnimationNodeAnimation.new()
+		var hands := Vector3(0.0, UltraTraversal.HANG_DROP + 0.03, UltraTraversal.HANG_BACK + 0.03)
+		ca.animation = _refit(_segment(_clip(&"hang_idle"), CATCH_SEG.x, minf(CATCH_SEG.y, hc.length)), "hang_catch", hands, Vector3.ONE)
+		cb.add_node("clip", ca, Vector2(0, 0))
+		cb.add_node("seek", AnimationNodeTimeSeek.new(), Vector2(200, 0))
+		cb.connect_node("seek", 0, "clip")
+		cb.connect_node("output", 0, "seek")
+		_add_loco(loco, "catch", cb, 0.08, 0.2)
+	# A fall is a fall (arms up, legs loose), not the UAL jump's held one-knee pose.
+	if _role_anim(&"mk_fall"):
+		loco.replace_node("fall", _anim(&"mk_fall"))
+		var air := loco.get_node("air") as AnimationNodeBlendTree
+		if air and air.has_node("clip"):
+			(air.get_node("clip") as AnimationNodeAnimation).animation = _clip(&"mk_fall")
+
+
+## The landing node for LAND: the jump's own landing when soft, the hard landing from LAND_HARD, else the squat.
+func _landing(w: String) -> String:
+	if _land_t < 0.0:
+		_land_t = 0.0
+		var hsp := Vector2(velocity.x, velocity.z).length()
+		if hsp > LAND_RUN_ON and land_impact < LAND_HARD:
+			_land_node = ""                # (on the move: it runs on - the matcher, or the squat)
+		elif land_impact >= LAND_HARD and _role_anim(&"mk_land_hard"):
+			_land_node = "land_hard"
+			tree.set(LOCO + "land_hard/seek/seek_request", 0.0)
+			tree.set(LOCO + "land_hard/rate/scale", (HARD_LAND_SEG.y - HARD_LAND_SEG.x) / HARD_LAND_TIME)
+		elif land_impact < LAND_SOFT and _cur_loco in _jump_nodes:
+			_land_node = _cur_loco
+			var spec: Dictionary = JUMPS[_cur_loco]
+			tree.set(LOCO + _cur_loco + "/seek/seek_request", float(spec.down))
+			tree.set(LOCO + _cur_loco + "/rate/scale", 1.0)
+		else:
+			_land_node = ""
+	return _land_node if _land_node != "" else w
+
+
+## Past the motor's LAND a landing plays on until it's done - unless the body moves off.
+func _landing_hold(w: String) -> String:
+	if _land_t < 0.0 or _land_node == "" or not state in [MotorState.Id.IDLE, MotorState.Id.MOVE, MotorState.Id.LAND]:
+		if state != MotorState.Id.LAND:
+			_land_t = -1.0
+		return ""
+	var hsp := Vector2(velocity.x, velocity.z).length()
+	var left := HARD_LAND_TIME if _land_node == "land_hard" else float(JUMPS[_land_node].settle) - float(JUMPS[_land_node].down)
+	if _land_t >= left or (hsp > LAND_MOVE_OFF and state != MotorState.Id.LAND):
+		_land_t = -1.0
+		_land_node = ""
+		return ""
+	return _land_node
+
+
+func _catch_ok() -> bool:
+	return (tree.tree_root as AnimationNodeBlendTree).get_node("loco").has_node("catch")
+
+
+func _drive_jumps(delta: float) -> void:
+	if _land_t >= 0.0:
+		_land_t += delta
+	_catch_t += delta
+	if not _cur_loco in _jump_nodes or _land_t >= 0.0:
+		return
+	# Rising: take-off -> apex; falling: apex -> touchdown pose (held).
+	var spec: Dictionary = JUMPS[_cur_loco]
+	_jump_vy0 = maxf(_jump_vy0, velocity.y)
+	var v0 := maxf(_jump_vy0, 2.5)
+	var t := lerpf(float(spec.push), float(spec.apex), clampf(1.0 - velocity.y / v0, 0.0, 1.0)) if velocity.y > 0.0 \
+		else lerpf(float(spec.apex), float(spec.down), clampf(-velocity.y / v0, 0.0, 1.0))
+	# (Only ever on through the jump: the touchdown tick reads no vertical speed a frame before LAND - that read as the
+	# apex and the legs flew back up 0.6 m.)
+	t = maxf(t, _jump_t)
+	_jump_t = t
+	tree.set(LOCO + _cur_loco + "/seek/seek_request", t)
+	tree.set(LOCO + _cur_loco + "/rate/scale", 0.0)
+
+
+func _drive_parity(delta: float) -> void:
+	_drive_jumps(delta)
+	if _cur_loco == "air_run":
+		# Rising: take-off -> apex; falling: apex -> touchdown pose (held for a longer fall); the falling arms come in last.
+		_jump_vy0 = maxf(_jump_vy0, velocity.y)
+		var v0 := maxf(_jump_vy0, 3.0)
+		var seg := RUN_JUMP_SEG.y - RUN_JUMP_SEG.x
+		var apex := RUN_JUMP_APEX - RUN_JUMP_SEG.x
+		var t := lerpf(0.02, apex, clampf(1.0 - velocity.y / v0, 0.0, 1.0)) if velocity.y > 0.0 \
+			else lerpf(apex, seg - 0.02, clampf(-velocity.y / v0, 0.0, 1.0))
+		tree.set(LOCO + "air_run/seek/seek_request", t)
+		tree.set(LOCO + "air_run/hold/scale", 0.0)
+		var down := smoothstep(apex + (seg - apex) * 0.55, seg - 0.02, t) if velocity.y < 0.0 else 0.0
+		_leap_arms = move_toward(_leap_arms, down * LEAP_ARMS, delta * 1.5)
+		tree.set(LOCO + "air_run/arms/blend_amount", smoothstep(0.0, 1.0, _leap_arms / LEAP_ARMS) * LEAP_ARMS)
+	else:
+		_leap_arms = 0.0
+	if _cur_loco == "hang":
+		_hang_dir = move_toward(_hang_dir, clampf(climb_speed / 0.5, -1.0, 1.0), delta * 5.0)
+		tree.set(LOCO + "hang/side/blend_position", _hang_dir)
+		tree.set(LOCO + "hang/rate/scale", 1.0 if absf(_hang_dir) < 0.05 else maxf(absf(climb_speed) / _shimmy_speed, 0.4))
+	if _cur_loco == "ladder":
+		tree.set(LOCO + "ladder/rate/scale", climb_speed / _ladder_speed)
+	if _cur_loco == "dive":
+		tree.set(LOCO + "dive/rate/scale", clampf(velocity.length() / 1.8, 0.3, 1.6))
+	if _cur_loco == "swim":
+		# (The surface stroke at its own pace: Sinew's driver scales it by the clip's authored speed, which Swim_Fwd
+		# doesn't have - 0.6 m/s by default - so at 1.5 m/s it stroked at its 2.5x clamp. The UltraController's rule.)
+		var sp := Vector2(velocity.x, velocity.z).length()
+		tree.set(LOCO + "swim/go_ts/scale", clampf(sp / SWIM_STROKE_SPEED, 0.5, 1.8))
+
+
+# ------------------------------------------------------------------ V7: actions (Sinew's driver ignores item events)
+
+## The held item's events as the UltraController plays them: a melee swing (UltraActionLayer.melee_swing: the item's clip
+## segment timed to the sim's contact), its cancel, a prop thrown (the push one-shot: arms out from the chest). Fire and
+## reload are MarksmanGunPass's (the gun in the hands, procedural).
+func item_event(kind: StringName, data := {}) -> void:
+	match kind:
+		&"melee":
+			if held_def and held_def.kind == ItemDefinition.Kind.FIREARM:
+				_play_strike(UltraActionLayer.melee_swing(held_def, 0))
+			elif held_def:
+				play_swing(UltraActionLayer.melee_swing(held_def, int(data.get("combo", 0)) & 0x3F))
+		&"melee_cancel":
+			if _sw_left > 0.0:
+				tree.set("parameters/swing/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FADE_OUT)
+				_sw_left = 0.0
+		&"throw":
+			play_push(PUSH_OUT_AT)
+
+
+## Weapon melee with a gun (Marksman's own - the UltraController's gun-butt was a procedural hook in first person and a
+## clip the shouldered-gun pose fought in third): the strike clip, both views (the eye is the head's), named here - not
+## an item role. [clip, segment start, end, contact] - contact = the hand's speed peak driving the blow in
+## (tools/measure_melee.gd): a long gun's stock driven in with a step (Mixamo "Advancing And Punching With Butt Of A
+## Rifle": right hand fastest 1.0-1.07 s, out at 1.3), a pistol whipped overhand ("Overhand Strike With Pistol": 0.87-
+## 0.93 s). The segment is time-scaled so contact lands on the sim's hit_from; the gun rides the clip's gun hand and the
+## support hand is put on our gun (MarksmanGunPass._strike_support).
+const STRIKES := {
+	"long": ["mixamo/M_RiflePunch", 0.15, 2.3, 1.03],
+	"pistol": ["mixamo/M_PistolStrike", 0.25, 1.6, 0.9],
+}
+var striking := 0.0                    ## (> 0) seconds of the strike clip left to play
+
+
+func _play_strike(sw: Dictionary) -> void:
+	var long := held_def.two_handed or held_def.equip_slots & ItemDefinition.EquipSlot.BACK
+	var spec: Array = STRIKES["long" if long else "pistol"]
+	var clip := StringName(spec[0])
+	if tree == null or not player.has_animation(clip):
+		return
+	var seg := Vector2(float(spec[1]), float(spec[2]))
+	var rate := clampf((float(spec[3]) - seg.x) / maxf(float(sw.get("hit_from", 0.4)), 0.05), 0.5, 3.0)
+	var one := (tree.tree_root as AnimationNodeBlendTree).get_node("swing") as AnimationNodeOneShot
+	var moving := Vector2(velocity.x, velocity.z).length() > SWING_UPPER_FROM
+	if moving and not one.filter_enabled:
+		for b in _upper_body_bones():
+			one.set_filter_path(NodePath("%" + String(skeleton.name) + ":" + b), true)
+	one.filter_enabled = moving
+	# (On the move only the upper body strikes - with the clip's hip turn folded into the spine, all of it: without, the
+	# upper body swung round the other way and the stock trailed 0.7 m behind the muzzle at the blow.)
+	var seg_clip := _segment(clip, seg.x, seg.y)
+	(tree.tree_root as AnimationNodeBlendTree).get_node("swing_src").set("animation", _upper_lean(seg_clip, 1.0) if moving else seg_clip)
+	tree.set("parameters/swing_seek/seek_request", 0.0)
+	tree.set("parameters/swing_ts/scale", rate)
+	tree.set("parameters/swing/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
+	_sw_left = (seg.y - seg.x) / rate
+	striking = _sw_left
+
+
+## A swing standing is the whole body's (GTA / RDR play standing attacks full-body); on the move only the upper body
+## swings over the legs' own gait (a whole-body swing stopped the run dead) - the one-shot's filter, set as it fires.
+const SWING_UPPER_FROM := 1.2
+
+
+func play_swing(sw: Dictionary) -> void:
+	var one := (tree.tree_root as AnimationNodeBlendTree).get_node("swing") as AnimationNodeOneShot if tree else null
+	if one:
+		var moving := Vector2(velocity.x, velocity.z).length() > SWING_UPPER_FROM
+		if moving and not one.filter_enabled:
+			for b in _upper_body_bones():
+				one.set_filter_path(NodePath("%" + String(skeleton.name) + ":" + b), true)
+		one.filter_enabled = moving
+	super.play_swing(sw)
 
 
 # ------------------------------------------------------------------ turning on the spot
@@ -263,8 +705,35 @@ func _drive_mk_turn(delta: float) -> void:
 
 
 ## Getting up: the clip MarksmanRagdoll picked for how the body lies, only its rising segment, over the get-up time.
+## MarksmanCharacter keeps the visual root's last rotation up to this process frame.
+var hold_visual_until := -1
+## Loco node changes dead-blend over this long (s).
+const LOCO_BLEND := 0.25
+
+
 func _go(want: String) -> void:
+	# (Not out of the drop to hang: the visual root turns round to the wall as it ends - the clip has turned itself round
+	# - so the cut is continuous in the world, and a blend of local poses across the turn swung the body 1.1 m.)
+	# (Into / out of the matcher too: a running landing handed to it moved the hands 0.7 m in a frame.)
+	# (Not off a rope or out of a slide either: the dead blend carries the old motion on, and fast legs fling out - the
+	# rope's pumping legs 9 cm a frame, the slide's kick put a toe 0.44 m under the floor; their own cross-fades do it.)
+	if want != _cur_loco and _cur_loco != "" and inertial and not _cur_loco in ["drop_hang", "rope", "slide"]:
+		inertial.trigger(LOCO_BLEND)
+	if _cur_loco == "drop_hang" and want != "drop_hang":
+		# (The visual root turns round the frame after the motor does, the tree shows the new node the frame after that:
+		# the drop's last pose was drawn turned round for a frame - the body spun 1.1 m. Hold the old turn till then.)
+		hold_visual_until = Engine.get_process_frames() + 1
+	var from := _cur_loco
 	super._go(want)
+	if want == "climb_up" and (from == "hang" or state == MotorState.Id.LEDGE_CLIMB):
+		# Up from a hang: the climb starts with the hands already on top (the UltraController's way: CLIMB_FROM_HANG into
+		# the clip) - from its start Sinew's driver played the whole waist-high step-up, a vault-like move off the wall.
+		var len := _clip_len(&"climb_up_1m", 0.6)
+		tree.set(LOCO + "climb_up/seek/seek_request", CLIMB_FROM_HANG)
+		tree.set(LOCO + "climb_up/speed/scale", maxf(len - CLIMB_FROM_HANG, 0.1) / maxf(climb_duration, 0.2))
+	if want == "drop_hang":
+		tree.set(LOCO + "drop_hang/seek/seek_request", 0.0)
+		tree.set(LOCO + "drop_hang/speed/scale", (DROP_SEG.y - DROP_SEG.x) / maxf(climb_duration, 0.2))
 	if not want.begins_with("getup"):
 		return
 	var r := (get_parent() as UltraCharacter).ragdoll as MarksmanRagdoll if get_parent() is UltraCharacter else null
@@ -381,12 +850,30 @@ func setup(p: AnimationPlayer, sk: Skeleton3D) -> void:
 		mm = MarksmanMotionMatcher.new(get_parent() as UltraCharacter, self)
 		mm_limp = MarksmanMotionMatcher.new(get_parent() as UltraCharacter, self)
 		mm_limp.follow = mm
-		# Switches dead-blend (first in the stack, so on the clip pose).
-		inertial = InertialBlendModifier.new()
-		inertial.name = "MMInertial"
-		inertial.blend_time = MM_BLEND
-		sk.add_child(inertial)
-		sk.move_child(inertial, 0)
+	# Switches dead-blend (first in the stack, so on the clip pose): the matcher's clip changes and every loco node
+	# change (Sinew starts the timed moves - climb up, get-ups, the roll - with a cut: hang -> climb up moved a hand 1 m
+	# in a frame).
+	inertial = MarksmanInertial.new()
+	inertial.name = "MMInertial"
+	inertial.blend_time = MM_BLEND
+	sk.add_child(inertial)
+	sk.move_child(inertial, 0)
+
+
+## The capsule jumped (a scripted move waiting at its end - the drop to hang puts it 2 m down at once - the clip offset
+## back): the dead blend's history moves with it, and the physics picture goes at once (Sinew powers down for the move a
+## tick later and fades it out - drawn on the new root it showed the body 2 m down).
+func root_jumped(d: Vector3) -> void:
+	if inertial:
+		inertial.shift(d)
+	var r := (get_parent() as UltraCharacter).ragdoll as SinewRagdoll if get_parent() is UltraCharacter else null
+	if r and r.modifier and not r.active:
+		r.modifier.blend = 0.0
+	# (And the matched pass goes at once: easing out on the new root its ground fit pulled the body down to the floor
+	# below - a drop to hang began 2 m down and climbed back up.)
+	if mm_pass:
+		mm_pass.weight = 0.0
+		_mix[&"mm_pass"] = Vector2.ZERO
 
 
 # ------------------------------------------------------------------ motion matching (spike)
@@ -485,7 +972,7 @@ func mm_active() -> bool:
 
 
 func _wanted() -> String:
-	var w := super._wanted()
+	var w := _parity_wanted(super._wanted())
 	# (A landing on the move runs on: the matcher picks it up, no stop-and-squat clip under a running body.)
 	var running_land := w == "land" and not hard_landing and Vector2(velocity.x, velocity.z).length() > LAND_RUN_ON
 	return "mm" if (w == "ground" or w == "crouch" or running_land) and mm_active() else w
@@ -539,7 +1026,8 @@ func _process(delta: float) -> void:
 	super._process(delta)
 	if tree == null:
 		return
-	_stance = MarksmanStance.of_item(held_def)
+	var ch := get_parent() as UltraCharacter
+	_stance = MarksmanStance.of(ch) if ch else MarksmanStance.of_item(held_def)
 	rifle_w = _ease_w(&"st_rifle", 1.0 if _stance == "rifle" else 0.0, delta)
 	pistol_w = _ease_w(&"st_pistol", 1.0 if _stance == "pistol" else 0.0, delta)
 	tree.set(GROUND + "st_rifle/blend_amount", rifle_w)
@@ -554,6 +1042,9 @@ func _process(delta: float) -> void:
 	if _cur_loco == "prone":
 		_mk_drive_prone(delta)
 	_drive_air(delta)
+	_drive_parity(delta)
+	_prone_trans = maxf(_prone_trans - delta, 0.0)
+	striking = maxf(striking - delta, 0.0)
 	if mm:
 		_drive_mm(delta)
 
@@ -576,6 +1067,10 @@ func _drive_air(delta: float) -> void:
 
 
 const ROPE_LET_GO_XFADE := 0.5
+## A ledge climb-up (LEDGE_CLIMB) starts this far into the climb clip: the hands already on top (s).
+const CLIMB_FROM_HANG := 0.22
+## The surface stroke clip's own speed (m/s).
+const SWIM_STROKE_SPEED := 1.5
 ## Seconds before touchdown the legs are fully down .. start coming down.
 const LEGS_READY := Vector2(0.08, 0.4)
 ## Landing speed (m/s) for no squat .. the clip's full squat.
@@ -605,7 +1100,9 @@ func _crawl_ref() -> float:
 ## The held item's own upper-body clips only for items without a stance (melee, tools): a gun's stance
 ## shows its arms through the stance idles and the gait's cycles.
 func _drive_item_layer(delta: float) -> void:
-	if MarksmanStance.of_item(held_def) != "unarmed":
+	var ch := get_parent() as UltraCharacter
+	# (A gun's stance holds it; anything on its way out of / back into its place isn't held yet: MarksmanDraw.)
+	if MarksmanStance.of_item(held_def) != "unarmed" or (ch and not MarksmanDraw.in_hand(ch.state, held_def)):
 		item_w = _ease_w(&"item", 0.0, delta)
 		tree.set("parameters/item/blend_amount", item_w)
 		return

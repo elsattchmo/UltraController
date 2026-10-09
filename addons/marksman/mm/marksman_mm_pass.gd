@@ -105,6 +105,10 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	if OS.get_environment("MM_NOWARP") == "":
 		_warp(sk, pose, dt)
 	_limp(pose, dt)
+	# (The clip's own foot heights, before the ground fit moves them onto a slope.)
+	for side in 2:
+		var fi := _part("LeftFoot" if side == 0 else "RightFoot")
+		_clip_foot_y[side] = pose[fi].origin.y if fi >= 0 else INF
 	if OS.get_environment("MM_NOFIT") == "":
 		_ground_fit(sk, pose, dt)
 	if OS.get_environment("MM_NOLOCK") == "":
@@ -217,9 +221,12 @@ func _limp(pose: Array[Transform3D], dt: float) -> void:
 const STEP_LIFT_FROM := 0.06
 ## A turn clip's foot is down while its ankle is within this of the rest height (m).
 const TURN_LIFT := 0.03
+## A walking clip's foot is on the ground while its ankle is within this of the rest height (m).
+const GROUND_KEEP := 0.018
 ## Fading out of a turn, a lock holds this far off the idle's own foot (m).
 const RELEASE_TURN := 0.45
 var _ankle_h := [INF, INF]
+var _clip_foot_y := [INF, INF]
 
 
 func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> void:
@@ -242,6 +249,12 @@ func _foot(sk: Skeleton3D, pose: Array[Transform3D], side: int, dt: float) -> vo
 	# feet turned round with the body); in a turn clip, a foot the clip has down (it's locked until the clip lifts it -
 	# else its stance, unlike the idle's, slid in under the body); fading out of a turn, where the turn left them.)
 	var planted := _planted(side) or idle_clip or fading
+	# (A walking clip's foot still flat on the ground either side of its contact window is down too: the UAL back walk
+	# scuffs its feet 1-2.5 cm a frame along the floor as they land and before they lift - the lock holds them and the
+	# offset glides off in the air. The clip's height, before the ground fit: fitted onto a ramp the downhill foot read as
+	# down mid-swing and the legs crossed.)
+	if not planted and float(_clip_foot_y[side]) < _ankle_h[side] + GROUND_KEEP:
+		planted = true
 	if turning:
 		planted = pose[ft_i].origin.y < _ankle_h[side] + TURN_LIFT
 	planted = planted and not _physics_legs

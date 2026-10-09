@@ -370,3 +370,49 @@ func test_freelook_turns_the_head_not_the_aim() -> void:
 	rig.queue_free()
 	chars.erase(c)
 	c.queue_free()
+
+
+## Leaning, the gun goes over with the body: its top cants the way of the lean and it moves out that way with the eye
+## (the user: "leaning to the right - the gun needs to lean to the right too, currently it goes left. left lean is
+## correct"). Rifle and pistol, at the hip and in ADS, first person.
+func test_gun_leans_with_the_body() -> void:
+	load_playground()
+	var bad := []
+	for item: StringName in [&"rifle", &"pistol"]:
+		var c := _marksman(marker("spawn").global_position + Vector3(-16, 0, -3))
+		var rig := _rig(c)
+		await ticks(40)
+		var sl := _slot(c, item)
+		var eq := c.get_node("Equipment") as UltraEquipmentVisual
+		bot(c).view_tp = false
+		bot(c).live_yaw = 0.0
+		for ads: int in [0, InputFrame.B_SECONDARY]:
+			bot(c).set_steps([{"ticks": 120, "slot": sl, "yaw": 0.0, "buttons": ads}])
+			await ticks(110)
+			var g0 := eq.held_node.global_transform
+			var e0: Vector3 = c.eye.eye
+			var right := Vector3(1, 0, 0)          # (yaw 0 faces -Z: right is +X)
+			for side: Array in [["right", InputFrame.B_LEAN_R, 1.0], ["left", InputFrame.B_LEAN_L, -1.0]]:
+				bot(c).set_steps([{"ticks": 90, "slot": sl, "yaw": 0.0, "buttons": side[1] | ads}])
+				await ticks(80)
+				var g := eq.held_node.global_transform
+				# Cant: the gun's up axis tipped toward the view's right (deg, + = top to the right), against unleaned.
+				var up0 := g0.basis.y.normalized()
+				var up := g.basis.y.normalized()
+				var cant := rad_to_deg(asin(clampf(up.dot(right), -1.0, 1.0)) - asin(clampf(up0.dot(right), -1.0, 1.0)))
+				var moved := (g.origin - g0.origin).dot(right)
+				var eye := (c.eye.eye - e0).dot(right)
+				var label := "%-7s %s lean %-5s" % [item, "ADS" if ads else "hip", side[0]]
+				info("%s: gun cant %+.1f deg, gun out %+.1f cm, eye out %+.1f cm" % [label, cant, moved * 100.0, eye * 100.0])
+				var s: float = side[2]
+				if cant * s < 3.0:
+					bad.append("%s: the gun cants %+.1f deg (the other way / not at all)" % [label, cant])
+				if moved * s < 0.1:
+					bad.append("%s: the gun moves %+.1f cm (should go out with the lean)" % [label, moved * 100.0])
+				bot(c).set_steps([{"ticks": 60, "slot": sl, "yaw": 0.0, "buttons": ads}])
+				await ticks(60)
+		rig.queue_free()
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+	check(bad.is_empty(), "the gun leans with the body both ways (%s)" % "; ".join(bad))

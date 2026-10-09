@@ -94,7 +94,10 @@ func _watch(c: MarksmanCharacter, frames: int) -> Dictionary:
 				worst[key] = maxf(float(worst.get(key, 0.0)), dd)
 			# (The elbow's way out from the body: smallest normalised distance; and how far it is to the side.)
 			var ek: String = side[0] + " elbow_out"
-			worst[ek] = minf(float(worst.get(ek, 9.0)), outness(f, e))
+			# (Not with the elbow up at the shoulders - over the neck line the ellipse is wider than the body, as for the upper
+			# arm above: a pistol arm kicked up by a hit read 1.09 for one frame there.)
+			if (e - (f[0] as Vector3)).dot(f[1]) <= float(f[2]):
+				worst[ek] = minf(float(worst.get(ek, 9.0)), outness(f, e))
 	sk.skeleton_updated.connect(probe)
 	await ticks(frames)
 	sk.skeleton_updated.disconnect(probe)

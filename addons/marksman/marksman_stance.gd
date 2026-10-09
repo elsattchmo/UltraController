@@ -15,7 +15,7 @@ static func of_item(def: ItemDefinition) -> String:
 
 
 static func of(c: UltraCharacter) -> String:
-	return of_item(c.held_def())
+	return of_item(MarksmanDraw.shown_def(c))
 
 
 static func posture(c: UltraCharacter) -> String:

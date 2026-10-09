@@ -28,3 +28,14 @@ func mag_reload() -> bool:
 	return s.action == UltraActionLayer.Action.RELOADING and held_node != null and held_def != null \
 		and held_def.kind == ItemDefinition.Kind.FIREARM and String(held_def.stat("reload_mode", "")) != "shell" \
 		and has_view() and held_node.find_child("Magazine", true, false) != null
+
+
+## The prop's hands are the gun pass's (_carry_hands); Sinew lends a hand IK only while a prop is held, so the base's
+## release on letting go called a null one every frame - nothing of it to release here.
+func _drive_held_prop(delta: float) -> void:
+	if character.anim == null or character.anim.hand_ik == null:
+		_owns_prop = false
+		if character.state.held_id == 0:
+			_prop = null
+			return
+	super._drive_held_prop(delta)

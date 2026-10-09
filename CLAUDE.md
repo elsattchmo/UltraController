@@ -1543,4 +1543,111 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   turning at 300 deg/s the aim leads ~55 deg while the matcher's turn clip squares the chest - support arm 4.5 cm in), and
   the hold's frame takes `HOLD_DOWN_SHARE` 0.7 of a downward pitch (at 70 down "below the view" pointed back at the body:
   the hand sat behind the eye, the off arm 4-5 cm in).
-
+- **Lean carries the gun** (user: "leaning to the right - the gun needs to lean to the right too, currently it goes
+  left"; g4 test_gun_leans_with_the_body): the lean bends the chest about the VIEW's forward, which tips the bladed chest's
+  own forward sideways - `_chest_to_aim` read that as a heading error and turned the chest back (leaning right the stock
+  swung 17 cm back to the middle): it now reads the heading with the lean taken out (`_lean_a`, `_lean_fwd`). The gun
+  cants LEAN_CANT 0.5 of the lean's bend (`_lean_cant`, closed on the final pose: placed level gun-first, the eye's settle
+  rolled it either way - right lean canted the pistol 10-16 deg LEFT). Leaning toward the gun's side the bend pivots at
+  the chest and the shoulder drops more than it goes out: the stock follows the lean out to LEAN_GUN 0.85 of the eye's
+  way (`_pocket_pre`). Rifle right lean: gun out 1 -> 22 cm at the hip.
+- **Prone transitions under Marksman**: PR_FromCrouch / PR_ToCrouch (roles prone_down / prone_up) over the motor's 0.8 s
+  (`MarksmanAnimDriver._prone_transition`, the UltraController's rule); the gun pass lets go and Sinew's upper body stays
+  animated meanwhile (`prone_transitioning()`). g9 prone cases.
+- **Back diagonals (MM)** (user: "walk back and a direction at the same time we get a shuffle"; suite g10: 8 ways x stance
+  x posture x MM on / off - clips played, planted slide (ankle AND toe low, the smaller move), steps): on a diagonal no
+  clip fitted the trajectory and the IDLE won (pistol all four diagonals, rifle back-right): its feet stepped after the
+  sliding body - 21-24 steps in 3 s. Moving (wish >= 0.3 m/s) the matcher only takes clips travelling within DIR_FIT 70
+  deg of the wish (`_dir_fit`; a clip outside the mask always switches). Pistol set: the pack's walk back (55 mm a
+  frame) and 1 m/s strafe (38) skate -> the UAL Walk_Backwards (as unarmed: its feet drift ~6 mm a frame, g10 KNOWN;
+  AXE_UnarmedWalkBack holds them still but swings the head 12.7 cm - 0.6 for Walk_Backwards: gm limp baseline), U_Run_B,
+  mirrored PST_PistolStrafe2.
+- **V7 parity nodes** (`MarksmanAnimDriver._add_parity_nodes`, the UltraController's builders and helpers - inherited):
+  air_run (leap seeked by vertical speed), fall, land_heavy, slide start, drop_hang, the hang's shimmy blend
+  (`_build_hang`), ladder refit, dive, prone_down / prone_up; `_parity_wanted` maps the motor states as the UltraController
+  does (off a rope: Marksman's own air clip - the leap swung the body 9 cm a frame). Every loco change dead-blends
+  (`inertial` = `MarksmanInertial`, always made; Sinew started timed moves with a cut: hang -> climb up moved a hand 1 m) -
+  NOT out of a rope / slide (the blend carries the old motion on: pumping legs flung out, a slide's kick put a toe 0.44 m
+  under the floor) nor out of drop_hang. `root_jumped` (UltraCharacter: > 1 m; MarksmanCharacter.simulate also reports a
+  state change's capsule snap > SNAP_JUMP 0.2 m against the pre-tick velocity - a ladder grab moved the body 0.48 m in a
+  frame - and resets `_prev_pos`: no glide) shifts the blend, drops the stale physics picture and cuts the matched pass
+  (its ground fit pulled a drop to hang 2 m down). drop_hang transitions are cuts (the mm node's 0.2 s cross-fades came
+  after); at a drop's end the visual root holds its old turn the frame the tree lags (`hold_visual_until`), then
+  `MarksmanInertial.turn` turns the blend's remembered hips by the root's turn and blends into the hang (a cut jumped the
+  legs 0.8 m). Suite g9 (CI): ledges, vault, ladder, shimmy, rope, leap, jump, slide, prone, drop to hang, cliff fall,
+  swim + dive - each its node, no NaN, no bone (but leaf / Root) over 25 m/s.
+- **Melee and throw under Marksman** (Sinew's driver ignored item events): `MarksmanAnimDriver.item_event` plays a melee
+  weapon's swings (UltraActionLayer.melee_swing, Sinew's play_swing; whole body standing, upper body from
+  SWING_UPPER_FROM 1.2 m/s - the one-shot's filter set as it fires) and the throw (push one-shot). **Weapon melee is
+  Marksman's own** (the user: the old controller's was broken - start fresh, the clips are in): `STRIKES` names the clips
+  directly (long gun mixamo/M_RiflePunch 0.15-2.3 s, contact 1.03; pistol M_PistolStrike 0.25-1.6, contact 0.9 - hand
+  speed peaks, tools/measure_melee.gd), time-scaled so contact lands on the sim's hit_from (the sim's gun-butt timing is
+  UltraActionLayer's, unchanged). The gun pass lets go (want 0 while `_sw_left`) and `_strike_support` runs LAST in
+  `apply` (after the fading hold): the gun from BOTH clip hands - grip at the clip's gun hand, fore-end exactly at the
+  clip's support hand (through the punch that arm is at full stretch) - gun hand re-seated, support hand on
+  (`_support_under`), strike_w faded over STRIKE_FADE. Support hand 56 cm off the gun on the gun hand alone; 0.0 now (g9
+  melee courses: bat standing / walking, rifle standing / walking, pistol; strikes' hands are fast for real: SWING_MAX 40).
+- **Carrying under Marksman** (`MarksmanGunPass._carry_hands`, last in `apply`): the palms on the held prop at
+  UltraEquipmentVisual._hands_on_prop's spots (side faces toward the back half, or on top of a team-lift grip), by the
+  pass's arm IK, eased CARRY_FADE 0.2 s; held still the hold puts a crate ~6 cm past the arms: the chest leans in just
+  enough (iterated, <= CARRY_LEAN_MAX 0.35 rad). `MarksmanEquipment._drive_held_prop`: Sinew lends a hand IK only while
+  holding - the base's release on letting go called a null one every frame. Suite g11 (OFFLINE session, 5 kg crate:
+  hands 0.6 cm off standing, 0.2 walking; drop lets go).
+- **Pistol stands up** (user: "the pistol holding is off, we are leaning backwards"; g8 test_torso_upright_with_a_gun:
+  trunk tilt hips -> neck, + = back): `_hold_out` turned the spine so the CLIP's gun pointed at the aim; under a clip with
+  the hand hanging (the back walk, the turn clips) that "gun" pointed at the floor and the spine bent back up to 34 deg
+  (walking back +14 deg, a fast turn +30). The turn is now weighted by how level the clip holds the gun (`level`, its
+  barrel's horizontal share 0.4 .. 0.8): full for the pistol clips (it stands their idle's 11 deg hunch up - the sights
+  need it), none for a hanging hand; then the chest-follow's band narrows to HOLD_CHEST_BAND_LOOSE 0.25 (else a fast
+  turn put the support arm 2.2 cm in). Pistol trunk now -4 .. +1 deg every way (unarmed -15 .. -1).
+- **Draw / put away** (`MarksmanDraw`, the user: "a small animation to equip these items"): keyed off the sim's
+  EQUIPPING / HOLSTERING clock (presentation; the UltraController's times). The gun-side hand goes to the item's place
+  (`holster_bone` x `holster_offset` x grip^-1, path bowed out BOW_OUT 16 cm + forward), takes it at GRAB 0.45 of the
+  draw, brings it up as the gun pass rises (`MarksmanDraw.raised`: 0 until then); away: to the place by RELEASE 0.68,
+  then the empty hand back. Meanwhile the held node is put in its place (`post`, top_level) and the body shows unarmed
+  (`MarksmanStance.of` reads `MarksmanDraw.shown_def`: stance sets, matcher, item clips). Upright the hip holster is out
+  of reach: the trunk bends toward it (<= BEND_MAX 0.45). The arms are kept animated through a draw and their Sinew
+  picture faded out fast (`MarksmanRagdoll.DRAW_FADE`: an idle's physical arm, eased over Sinew's 0.3 s, left the hand
+  10 cm short of the pistol). The support hand joins over the last half of the bring-up (`support_w`, also scaling
+  `_post_hands`). Suite g12, tour `marksman_feedback_review -- --draw`.
+- MM foot lock: a walking clip's foot within GROUND_KEEP 18 mm of its rest height (the clip's own, BEFORE the ground
+  fit - fitted onto a ramp the downhill foot read as down mid-swing and crossed the legs) counts as planted beside the
+  database's contact window: the UAL back walk scuffs its feet 2 cm a frame landing and lifting (6 -> 2.2 mm/frame).
+- The ball launcher is given right after the melee weapons (hotbar slot 6): after the ammo and medkit it was the tenth
+  item, in the backpack past Inventory.HOTBAR 9, and no key selected it (g0 checks).
+- **Hits with a gun up, follow-ups**: a stagger sets every Sinew part physical at once - `MarksmanRagdoll.start_stagger`
+  zeroes the armed arms' part_w (eased back by the hook they flailed 0.3 s, the support hand 10 cm off the grip). The
+  arms ride a body hit's jolt (`_carry_arms`) then aim back out: `body_hit()` starts `_ride_t`, the ride's rotation is
+  kept 1 -> 0 over RIDE_TIME 0.12 .. 0.45 s (always above RIDE_TILT: going over), turned back about the stock for a
+  shouldered gun (about the chest the hand went 2.6 cm into a staggered body). g5: back on aim in 0.32 s (riding all of
+  it left 2-8 deg for as long as the body was physical). g6's elbow_out skips an elbow up over the neck line.
+- **Ledge (user round: "we aren't really grabbing the edge ... two directional inputs ... still a shimmy and broken ...
+  hanging to vault animations")**: `MarksmanCharacter.hang_input` (sim, deterministic: a copy of the input in
+  LEDGE_HANG) - in the hang's terms sideways wins unless the stick is clearly up (HANG_UP_SHARE 1.4), a shimmy at the
+  stick's whole strength (forward + right shimmied at 70 % with the clip 30 % still hang, or climbed). `MarksmanLedgePass`
+  (pose pass after the rope pass): palms on top of the lip, fingers over (UltraTraversalVisual's grip), each hand at its
+  clip's sideways place (clamped 0.08 .. 0.45 m), lifted off the lip only while shimmying (by the clip hand's rise over
+  its lowest), the whole body lifted when straight arms can't reach (it hangs FROM the hands), FADE_IN 0.25 (the capsule
+  snaps onto the ledge: in 0.12 fingers whipped 25 m/s). Climb from a hang starts ClimbUp_1m at CLIMB_FROM_HANG 0.22 (the
+  UltraController's; Sinew's driver played the whole waist-high step-up). Brace catch: out of the air onto a ledge the
+  `catch` node plays Braced_Catch CATCH_SEG 0.30 .. 1.30 (refit like the hang hold) before the hang. g13.
+- **Jumps (user: "move away from the current jump animation")**: `MarksmanAnimDriver.JUMPS` - standing `hop`
+  (mixamo/LMM_Jump: push 0.70, apex 1.05, down 1.28, settle 1.70), moving from JUMP_RUN_FROM 1.0 m/s `jump_run`
+  (AXE_UnarmedJumpRunning 0.30 / 0.70 / 1.00 / 1.38), the sprint leap as before; seeked by the vertical speed and only
+  ever forward (`_jump_t`: the touchdown tick reads vy 0 a frame before LAND - read as the apex the legs flew up 0.6 m).
+  Timings: `tools/marksman/measure_jumps.gd`. Falls: AAD_FallingIdle (`mk_fall`, the fall and air nodes). Landings
+  (`_landing` / `_landing_hold`, past the motor's 0.22 s LAND unless moving off > 1.2 m/s): soft (< LAND_SOFT 6.5) on
+  the jump's own clip, hard (>= LAND_HARD 9.5) AAD_HardLanding 0.15 .. 1.75 over 1.2 s, between the squat; on the move
+  (> 1.2 m/s) it runs on. Roles mk_hop / mk_jump_run / mk_fall / mk_land_hard in marksman_animset.tres (and the builder).
+  Clip filmstrips: tour `clip_strip -- --clips=a,b --frames=8`.
+- **Low mantles hop up**: a MANTLE lower than MANTLE_HOP_MAX 0.9 m plays `hop_up` (the standing hop from its push-off
+  to HOP_UP_PAST 0.12 s past its touchdown over the move's trav_dur); from 0.9 m the climb clip. g13 test_low_mantle.
+- **Landing stumble**: a landing at LAND_STUMBLE_SPEED 2.5 .. 4.5 m/s from LAND_STUMBLE_IMPACT 6 m/s down lurches on
+  (receive_push along the travel by the impact, after the motor's LAND hands back; `moving_stumble` set so the run sags
+  only by severity) - the gait's catching steps. A sprinter isn't: handed over at 6 m/s the gait tripped on any lurch.
+  From land_stagger_speed 11.5 the balancer has the legs (may go down: a 6 m drop does).
+- **Water**: swim stroke at SWIM_STROKE_SPEED 1.5 (Swim_Fwd has no authored speed: Sinew's driver scaled it by 0.6 -
+  2.5x); `MarksmanCharacter._dive_hover` (sim) holds a still diver near its depth (DIVE_RISE 0.04 m/s pulled at 4 m/s2;
+  the motor drifted it up 0.4 m/s "lungs full"); `MarksmanRagdoll._buoy` floats the limp Sinew body (per part, the
+  UltraRagdoll's numbers) - it sank to the pool's floor while the capsule floated. Tours marksman_swim_review,
+  marksman_ledge_review, marksman_jump_review.

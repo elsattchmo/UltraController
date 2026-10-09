@@ -109,6 +109,7 @@ func _equipment() -> UltraEquipmentVisual:
 ## pose last shown (the equipment re-attached the gun at once; solved straight onto the new side the body popped 27 cm).
 const SWITCH_TIME := 0.3
 var _switch_t := SWITCH_TIME
+var draw := MarksmanDraw.new()
 var _switch_from: Array[Transform3D] = []
 var _last_pose: Array[Transform3D] = []
 
@@ -117,6 +118,16 @@ var _last_pose: Array[Transform3D] = []
 func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	var changed := _apply(mod, sk)
 	var pose: Array[Transform3D] = mod.anim_pose
+	if _carry_hands(sk, pose, clampf(mod.get_process_delta_time(), 0.0, 0.1)):
+		changed = true
+	# (A strike last, over whatever the hold - fading out / back in - left: the gun from the clip's hands.)
+	var eq := _equipment()
+	if strike_w > 0.001 and eq and eq.held_def and eq.held_node and eq.held_def.two_handed and two and character.state.held_uid != 0:
+		_strike_support(sk, pose, eq, eq.held_def)
+		changed = true
+	# (Drawing / putting away: the hand to the holster / sling and back - MarksmanDraw.)
+	if draw.apply(self, sk, pose):
+		changed = true
 	if _switch_t < SWITCH_TIME and _switch_from.size() == pose.size():
 		_switch_t += clampf(mod.get_process_delta_time(), 0.0, 0.1)
 		var k := smoothstep(0.0, SWITCH_TIME, _switch_t)
@@ -151,10 +162,19 @@ func _apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	# (Reloading the gun stays in the hands - brought in and loaded by the body, MarksmanGunPass reload section; with one
 	# working arm the gun is pinned against the body while the hand loads it: _one_hand_reload.)
 	var reloading := armed and st.action == UltraActionLayer.Action.RELOADING and def.kind == ItemDefinition.Kind.FIREARM
-	var want := (1.0 if reloading else UltraActionLayer.raised(st) * (1.0 - st.gun_low)) if armed else 0.0
+	var want := (1.0 if reloading else MarksmanDraw.raised(st, def) * (1.0 - st.gun_low)) if armed else 0.0
+	var drv := character.anim as UltraAnimDriver
+	if drv and drv.prone_transitioning():
+		want = 0.0             # (getting down to prone / up: the transition clip carries the gun)
+	if drv is SinewAnimDriver and (drv as SinewAnimDriver)._sw_left > 0.0:
+		want = 0.0             # (a strike: the strike clip has the arms and the gun - _strike_support)
+	var mdrv := drv as MarksmanAnimDriver
+	strike_w = move_toward(strike_w, 1.0 if mdrv and mdrv.striking > STRIKE_FADE else 0.0, dt / STRIKE_FADE)
 	weight = move_toward(weight, want, 6.0 * dt)
 	reload_w = move_toward(reload_w, 1.0 if reloading else 0.0, 4.0 * dt)
 	_lean_e0 = Vector3.INF
+	_lean_a = 0.0
+	_pocket_pre = Vector3.INF
 	_armed_now = false
 	var leaned := _lean(sk, mod.anim_pose, dt)
 	if weight <= 0.001 or not armed:
@@ -212,7 +232,9 @@ func _apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 	_apply_gun_kick(pose, rh, grip)
 	if leaned:
 		_lean_settle(sk, pose)
+		_lean_cant(pose, rh, grip)
 	var gun: Transform3D = pose[rh] * grip
+
 	aim_error = _barrel_turn(gun, target_sk).get_angle()
 	_grip_grip = grip
 	_armed_now = true
@@ -244,6 +266,139 @@ func _apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 		_two_bone(pose, _part("LeftUpperArm"), _part("LeftLowerArm"), lh, Transform3D(support_target.basis, support_target.origin + support_kick), weight)
 	_look_about(pose)
 	return true
+
+
+## Carrying a prop (V7; Sinew's character lends the equipment an inactive hand IK, so nothing put the hands on it): both
+## palms flat on its outside - its left and right faces toward the back half, a little low, or on top of a team-lift
+## grip - fingers forward, at the real surface of its collision shape (UltraEquipmentVisual._hands_on_prop's targets),
+## by this pass's arm IK; eased in / out over CARRY_FADE.
+const CARRY_FADE := 0.2
+## Leaning in to reach a held prop: rad per metre short (the shoulders ~0.45 m over the bend), at most.
+const CARRY_LEAN_LEVER := 0.45
+const CARRY_LEAN_MAX := 0.35
+var carry_w := 0.0
+var carry_error := 0.0                 ## (tests) the worse hand's distance from its spot on the prop (m)
+
+
+func _carry_hands(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> bool:
+	var s := character.state
+	var o := UltraNet.world.get_object(s.held_id) if s.held_id != 0 and UltraNet.world else null
+	var rb := o.rigid() if o else null
+	carry_w = move_toward(carry_w, 1.0 if rb else 0.0, dt / CARRY_FADE)
+	if carry_w <= 0.001 or rb == null or not _learn_palm(sk) or character.visual_root == null:
+		carry_error = 0.0
+		return false
+	var to_sk := sk.global_transform.affine_inverse()
+	var vb := character.visual_root.global_basis.orthonormalized()
+	var right := vb.x
+	var fwd := -vb.z
+	var c := rb.global_position
+	var k := smoothstep(0.0, 1.0, carry_w)
+	carry_error = 0.0
+	var targets := []
+	for hs: int in [-1, 1]:
+		var contact: Vector3
+		var palm_dir: Vector3
+		var fingers := (fwd * 0.9 + Vector3.DOWN * 0.3).normalized()
+		if s.held_grip >= 0:
+			var grips := UltraGrab.grip_points(rb)
+			var gp := grips[s.held_grip].global_position if s.held_grip < grips.size() else c
+			var axis := rb.global_basis.x.normalized()
+			if axis.dot(right) < 0.0:
+				axis = -axis
+			contact = UltraGrab.surface_point(rb, gp + axis * 0.14 * float(hs), Vector3.UP)
+			palm_dir = Vector3.DOWN
+		else:
+			var out: Vector3 = right * float(hs)
+			var from := c + Vector3.DOWN * UltraGrab.support(rb, Vector3.DOWN) * 0.25 - fwd * UltraGrab.support(rb, -fwd) * 0.4
+			contact = UltraGrab.surface_point(rb, from, out)
+			palm_dir = -out
+		targets.append(_hand(hs, (to_sk.basis * fingers).normalized(), (to_sk.basis * palm_dir).normalized(), to_sk * contact, 0.028))
+	# Out of reach (held still, the hold puts the prop ~6 cm past the arms): the chest leans in over it, just enough.
+	var uc := _part("UpperChest")
+	var leaned := 0.0
+	for _r in (3 if uc >= 0 else 0):
+		var short := 0.0
+		for i in 2:
+			var pre := "Left" if i == 0 else "Right"
+			var ua := _part(pre + "UpperArm")
+			var la := _part(pre + "LowerArm")
+			var hb := _part(pre + "Hand")
+			if ua < 0 or la < 0 or hb < 0:
+				continue
+			var reach := pose[ua].origin.distance_to(pose[la].origin) + pose[la].origin.distance_to(pose[hb].origin)
+			short = maxf(short, pose[ua].origin.distance_to((targets[i] as Transform3D).origin) - reach * 0.98)
+		if short <= 0.005 or leaned >= CARRY_LEAN_MAX:
+			break
+		var a := minf(short / CARRY_LEAN_LEVER, CARRY_LEAN_MAX - leaned)
+		leaned += a
+		var lean := Quaternion(_chest_axes(pose, uc).x, a * k)
+		for n: String in SPINE_SHARE:
+			var i := _part(n)
+			if i >= 0:
+				_turn_subtree(pose, i, Quaternion.IDENTITY.slerp(lean, float(SPINE_SHARE[n])), pose[i].origin)
+	for i in 2:
+		var pre := "Left" if i == 0 else "Right"
+		var hb := _part(pre + "Hand")
+		var hand: Transform3D = targets[i]
+		_two_bone(pose, _part(pre + "UpperArm"), _part(pre + "LowerArm"), hb, hand, k)
+		if hb >= 0:
+			carry_error = maxf(carry_error, pose[hb].origin.distance_to(hand.origin))
+	return true
+
+
+## A weapon strike (MarksmanAnimDriver._play_strike): the gun rides the clip's gun hand, and the support hand - the clip
+## holds ITS rifle, not ours - goes onto our gun's fore-end as the gun pass holds it (`_support_under`, else the item's
+## support_offset), faded in / out over STRIKE_FADE.
+const STRIKE_FADE := 0.12
+var strike_w := 0.0
+
+
+func _strike_support(sk: Skeleton3D, pose: Array[Transform3D], eq: UltraEquipmentVisual, def: ItemDefinition) -> void:
+	var rh := _gpart("Hand")
+	var lh := _part("LeftHand")
+	if rh < 0 or lh < 0 or eq.held_node == null:
+		return
+	if _muzzle_for != eq.held_node:
+		_muzzle_for = eq.held_node
+		_muzzle_local = UltraPoseSampler.marker(eq.held_node, "M_Muzzle")
+	# The gun from BOTH of the clip's hands (it holds its own rifle its own way - hung on the gun hand by our grip, the
+	# fore-end ended 56 cm from the clip's other hand): the grip where the clip's gun hand is, the gun turned about it so
+	# its support grip lies toward the clip's support hand; then the gun hand re-seated on it and the support hand onto it.
+	var grip := eq.grip()
+	var gun: Transform3D = pose[rh] * grip
+	if _grip_for != _muzzle_for:
+		_grip_for = _muzzle_for
+		_grip_contact = UltraPoseSampler.marker(_muzzle_for, "M_SupportGrip").origin
+	var hand_pt := grip.affine_inverse().origin                  # (the gun hand's place in the gun's frame)
+	var axis := _grip_contact - hand_pt
+	if axis.length() > 0.05:
+		var at := gun * hand_pt
+		var want_dir := pose[lh].origin - at
+		if want_dir.length() > 0.05:
+			var q := _arc((gun.basis * axis).normalized(), want_dir.normalized())
+			gun = Transform3D(Basis(q) * gun.basis, at + q * (gun.origin - at))
+			# (The fore-end exactly where the clip's support hand is: through the punch that arm is at full stretch - it
+			# can't reach any further - while the gun arm, bent back at the stock, takes up the difference.)
+			gun.origin += pose[lh].origin - gun * _grip_contact
+			# Upright about that line (both hands stay on it): the clip's gun hand rolled ours onto its side at the blow.
+			var ax_w := (gun.basis * axis).normalized()
+			var up_now := gun.basis.y - ax_w * gun.basis.y.dot(ax_w)
+			var up_want := Vector3.UP - ax_w * ax_w.y
+			if up_now.length() > 1e-3 and up_want.length() > 1e-3:
+				var roll := up_now.normalized().signed_angle_to(up_want.normalized(), ax_w)
+				var pivot := gun * hand_pt
+				var rq := Quaternion(ax_w, roll)
+				gun = Transform3D(Basis(rq) * gun.basis, pivot + rq * (gun.origin - pivot))
+	var k := smoothstep(0.0, 1.0, strike_w)
+	_two_bone(pose, _gpart("UpperArm"), _gpart("LowerArm"), rh, gun * grip.affine_inverse(), k)
+	var target := gun * def.support_offset
+	if def.support_fingers != Vector3.ZERO:
+		var under := _support_under(sk, gun, def)
+		if under != Transform3D():
+			target = under
+	_two_bone(pose, _part("LeftUpperArm"), _part("LeftLowerArm"), lh, target, k)
+	support_error = pose[lh].origin.distance_to(target.origin)
 
 
 ## Freelook (MarksmanFreelook.offset): the head turns toward the view - yaw about the body's up, then pitch about the
@@ -285,6 +440,7 @@ var arm_clear := MarksmanArmClear.new()
 func apply_post(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 	_post_hands(mod, sk)
 	_place_pinned(sk)
+	draw.post(self, sk)
 	# Last: the arms out of the body (the hands where they are).
 	arm_clear.apply(sk)
 
@@ -297,6 +453,7 @@ func _post_hands(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 		post_off = 0.0
 		return
 	var parts: Array = ragdoll.parts
+	_ride_t += dt
 	_carry_arms(mod, sk)
 	if not two:
 		grip_w = 1.0
@@ -329,7 +486,7 @@ func _post_hands(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 	elif _letgo and post_off < REGRIP:
 		_letgo = false
 	grip_w = move_toward(grip_w, 0.0 if _letgo else 1.0, dt / REGRIP_TIME)
-	var k := smoothstep(0.0, 1.0, grip_w) * weight
+	var k := smoothstep(0.0, 1.0, grip_w) * weight * draw.support_w
 	if k <= 0.001:
 		return
 	_two_bone(pose, ids[1], ids[2], ids[3], target, k)
@@ -397,6 +554,19 @@ func _apply_gun_kick(pose: Array[Transform3D], rh: int, grip: Transform3D) -> vo
 
 ## Animated (kinematic) arms on a chest the physics moved: placed on it as they are on the animated chest - the gun
 ## rocks with the body instead of the arms staying where the chest was (a stretched shoulder).
+## The arms ride a body hit's jolt, then bring the gun back onto the aim whatever the trunk still does: held for
+## RIDE_TIME.x after the hit, aimed back out by RIDE_TIME.y (s). A tilt past RIDE_TILT (rad: the body going over) is
+## always ridden.
+const RIDE_TIME := Vector2(0.12, 0.45)
+const RIDE_TILT := Vector2(0.25, 0.5)
+var _ride_t := 9.0
+
+
+## A hit to the body (MarksmanRagdoll.hit): the arms ride the jolt it gives the chest.
+func body_hit() -> void:
+	_ride_t = 0.0
+
+
 func _carry_arms(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 	var uc := _part("UpperChest")
 	if uc < 0 or mod.anim_pose.size() <= uc:
@@ -407,6 +577,20 @@ func _carry_arms(mod: SinewPoseModifier, sk: Skeleton3D) -> void:
 	if shown.is_equal_approx(anim):
 		return
 	var delta := shown * anim.affine_inverse()
+	# (The jolt is ridden; what the trunk keeps after it - a settling chest, a stagger's steps - the arms aim back out:
+	# riding all of it left the gun 2-8 deg off the aim for as long as the body was physical.)
+	var q := delta.basis.get_rotation_quaternion()
+	var ang := q.get_angle()
+	if ang > 1e-5:
+		var keep := maxf(1.0 - smoothstep(RIDE_TIME.x, RIDE_TIME.y, _ride_t), smoothstep(RIDE_TILT.x, RIDE_TILT.y, ang))
+		var rot := Basis(Quaternion.IDENTITY.slerp(q, keep))
+		# (Turned back about the chest - a shouldered gun about its stock, which stays in the riding shoulder's pocket:
+		# about the chest the hand went 2.6 cm into a staggered body.)
+		var piv := anim.origin
+		var gh := _gpart("Hand")
+		if _has_stock and gh >= 0 and gh < mod.anim_pose.size():
+			piv = (mod.anim_pose[gh] * _grip_grip * _stock_local).origin
+		delta = Transform3D(rot, delta * piv - rot * piv)
 	var pw := ragdoll.part_w
 	for n: String in MarksmanRagdoll.ARM_PARTS:
 		var i := _part(n)
@@ -484,6 +668,9 @@ func _lean(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> bool:
 		_eye_setup(sk)
 	var side := fwd.cross(Vector3.UP).normalized()          # (the view's right, skeleton space)
 	var e0 := _eye(sk, pose, neck) if neck >= 0 and _head_bone >= 0 else Vector3.INF
+	var uc0 := _part("UpperChest")
+	var sh0 := _gpart("UpperArm")
+	_pocket_pre = _pocket(pose, uc0, sh0) if uc0 >= 0 and sh0 >= 0 else Vector3.INF
 	_bend(pose, fwd, a)
 	for _r in (2 if e0 != Vector3.INF else 0):
 		var went := (_eye(sk, pose, neck) - e0).dot(side) * signf(a)
@@ -493,6 +680,8 @@ func _lean(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> bool:
 					else clampf(a * (want_out / went - 1.0), -absf(a) * 0.6, absf(a) * 0.5)
 			_bend(pose, fwd, more)
 			a += more
+	_lean_a = a
+	_lean_fwd = fwd
 	if e0 != Vector3.INF:
 		var went := (_eye(sk, pose, neck) - e0).dot(side)
 		_lean_e0 = e0
@@ -504,6 +693,8 @@ func _lean(sk: Skeleton3D, pose: Array[Transform3D], dt: float) -> bool:
 
 
 var _lean_e0 := Vector3.INF
+var _lean_a := 0.0                 ## the bend the lean put on the upper chest (rad, about _lean_fwd)
+var _pocket_pre := Vector3.INF     ## the stock's pocket before the lean bent the body (skeleton space)
 var _lean_fwd := Vector3.ZERO
 var _lean_side := Vector3.ZERO
 var _lean_gain := 0.0
@@ -528,6 +719,41 @@ func _lean_settle(sk: Skeleton3D, pose: Array[Transform3D]) -> void:
 			break
 		_bend(pose, _lean_fwd, more)
 		total += more
+
+
+## Leaning, the gun cants with the body: its top tipped toward the lean by LEAN_CANT of the lean's bend (placed level
+## gun-first, the eye's settle then rolled it whichever way it bent - leaning right the pistol canted 10-16 deg LEFT).
+## Closed on the final pose: the gun hand turned about the barrel through the gun, the arm re-solved onto it.
+const LEAN_CANT := 0.5
+## Leaning, the stock goes at least this share of the eye's way out.
+const LEAN_GUN := 0.85
+const LEAN_GUN_ADS := 1.15
+
+
+func _lean_cant(pose: Array[Transform3D], rh: int, grip: Transform3D) -> void:
+	if absf(_lean_a) < 1e-3 or _lean_fwd == Vector3.ZERO:
+		return
+	var gun: Transform3D = pose[rh] * grip
+	var bar := (-gun.basis.z).normalized()
+	# (The gun's up against the vertical plane through the barrel: + = top to the view's right.)
+	var level_x := Vector3.UP.cross(-bar)
+	if level_x.length() < 1e-3:
+		return
+	level_x = level_x.normalized()                      # (the gun's level right: x of a level gun on this barrel)
+	var level_up := (-bar).cross(level_x).normalized()
+	var up := gun.basis.y.normalized()
+	var roll := atan2(up.dot(level_x), up.dot(level_up))     # (+ = top tipped toward the gun's right)
+	# (+ lean tips the top to the view's right; the gun's right is the view's right when it points ahead.)
+	# (From the lean asked for, not the bend it took: leaning right needs more bend to get the eye out - the cant came
+	# out +34 deg right against -19 left.)
+	var want := signf(lean) * smoothstep(0.0, 1.0, absf(lean)) * LEAN_MAX * LEAN_CANT * weight
+	var turn := angle_difference(roll, want)
+	if absf(turn) < 1e-3:
+		return
+	# (About the barrel - forward - a positive turn tips the top to the right, as the lean's bend does.)
+	var q := Quaternion(bar, turn)
+	var g2 := Transform3D(Basis(q) * gun.basis, gun.origin)
+	_two_bone(pose, _gpart("UpperArm"), _gpart("LowerArm"), rh, g2 * grip.affine_inverse(), 1.0)
 
 
 func _bend(pose: Array[Transform3D], fwd: Vector3, a: float) -> void:
@@ -1192,19 +1418,28 @@ const HOLD_DOWN_SHARE := 0.7
 ## clean to 45 deg off (fully followed, the gun arm's upper arm went 2-5 cm in), but turning at speed the aim leads the
 ## body ~55 deg while the matcher's turn clip squares the chest: the support arm went across it (4.5 cm).
 const HOLD_CHEST_BAND := 0.6
+const HOLD_CHEST_BAND_LOOSE := 0.25
 
 
 func _hold_out(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transform3D, target_sk: Vector3, at: Vector3) -> void:
 	var uc0 := _part("UpperChest")
 	var sh0 := _gpart("UpperArm")
+	var bar0 := -(pose[rh] * grip).basis.z.normalized()
+	var level := smoothstep(0.4, 0.8, Vector2(bar0.x, bar0.z).length())     # (how horizontal the clip holds the gun)
 	if two and uc0 >= 0 and sh0 >= 0:
-		_chest_to_aim(pose, uc0, sh0, target_sk, HOLD_CHEST_BAND)
-	var turn := _barrel_turn(pose[rh] * grip, target_sk)
+		# (A clip with no gun held out - a turn clip - gives the spine no turn below: the chest follows sooner.)
+		_chest_to_aim(pose, uc0, sh0, target_sk, lerpf(HOLD_CHEST_BAND_LOOSE, HOLD_CHEST_BAND, level))
+	# The spine turns the clip's gun toward the aim - only as far as the clip holds a gun out at all: a clip with the hand
+	# hanging (the back walk, the turn clips - borrowed legs) pointed its "gun" at the floor, and turned onto the aim the
+	# spine bent BACK up to 34 deg (walking backwards with the pistol leaned 15 deg back). The pistol clips hold it out
+	# level: their idle's 11 deg hunch is stood up by it (the sights rely on that).
+	var g0: Transform3D = pose[rh] * grip
+	var turn := _barrel_turn(g0, target_sk)
 	var spine_turn := _limit(turn, SPINE_MAX)
 	for n: String in SPINE_SHARE:
 		var i := _part(n)
 		if i >= 0:
-			_turn_subtree(pose, i, Quaternion.IDENTITY.slerp(spine_turn, float(SPINE_SHARE[n]) * weight), pose[i].origin)
+			_turn_subtree(pose, i, Quaternion.IDENTITY.slerp(spine_turn, float(SPINE_SHARE[n]) * weight * level), pose[i].origin)
 	var neck := _part("Neck")
 	if neck >= 0 and _eye_local == Vector3.INF:
 		_eye_setup(sk)
@@ -1296,6 +1531,16 @@ func _shoulder(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transfor
 ## off the line from the pocket). Sets `pocket` / `stock`.
 func _place_stock(pose: Array[Transform3D], uc: int, sh: int, target_sk: Vector3) -> Transform3D:
 	pocket = _pocket(pose, uc, sh)
+	if _pocket_pre != Vector3.INF and _lean_side != Vector3.ZERO and absf(_lean_out) > 1e-3:
+		# Leaning toward the gun's side the bend pivots at the chest: the shoulder drops more than it goes out (the gun went
+		# 6-12 cm out of the eye's 28-33). The stock follows the lean out to LEAN_GUN of the eye's way.
+		var out := (pocket - _pocket_pre).dot(_lean_side)
+		var eqa := _equipment()
+		# (Down the sights the eye goes onto the gun's sight line: a stock short of the lean pulled the eye back with it -
+		# leaning right in ADS the eye got 19 cm out against 29 leaning left. In ADS it goes all the way.)
+		var want := _lean_out * lerpf(LEAN_GUN, LEAN_GUN_ADS, eqa.ads if eqa else 0.0)
+		if (want > 0.0 and out < want) or (want < 0.0 and out > want):
+			pocket += _lean_side * (want - out)
 	var gun := Transform3D(Basis(), pocket)
 	var d := (target_sk - pocket).normalized()
 	for k in 2:
@@ -1363,6 +1608,10 @@ func _chest_to_aim(pose: Array[Transform3D], uc: int, sh: int, target_sk: Vector
 		var cz := _chest_axes(_clip_pose, uc).z
 		ref = atan2(cz.x, cz.z)
 	var cz2 := _chest_axes(pose, uc).z
+	if absf(_lean_a) > 1e-4:
+		# (A lean bends the chest about the view's forward, tipping its own forward sideways: read as a heading error the
+		# chest was turned back - leaning right that swung the stock 17 cm back to the middle.)
+		cz2 = Quaternion(_lean_fwd, -_lean_a) * cz2
 	var r := angle_difference(atan2(cz2.x, cz2.z), _aim_h_st.x + ref)
 	r = clampf(signf(r) * maxf(absf(r) - band, 0.0), -CHEST_MAX, CHEST_MAX)
 	chest_turn = r
@@ -1585,10 +1834,15 @@ func _turn_subtree(pose: Array[Transform3D], top: int, q: Quaternion, about: Vec
 const ELBOW_KEEP := 0.1
 const ELBOW_OUT_GUN := 1.3
 const ELBOW_OUT_SUPPORT := 0.7
+## The arm IK keeps the arm's own elbow side (MarksmanDraw: an arm going to / back from a holster - forced out, a
+## hanging arm's elbow stuck out like a wing).
+var keep_elbow := false
 
 
 ## Down and out from the shoulder (skeleton space) for an upper arm, else ZERO.
 func _elbow_hint(pose: Array[Transform3D], up: int) -> Vector3:
+	if keep_elbow:
+		return Vector3.ZERO
 	var arm_side := 0.0
 	if up == _part("LeftUpperArm"):
 		arm_side = 1.0
