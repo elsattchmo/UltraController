@@ -32,6 +32,11 @@ set DIRTY=
 for /f "delims=" %%i in ('git status --porcelain -uno') do set DIRTY=1
 if defined DIRTY goto :dirty
 
+rem The open Godot editor writes a .uid for every new script it sees; when GitHub has that same
+rem file, git refuses to pull over the local copy. GitHub's copy wins: remove the local one.
+for /f "delims=" %%f in ('git ls-files --others --exclude-standard -- "*.uid"') do (
+	git cat-file -e origin/%BRANCH%:%%f 2>nul && call :rmuid "%%f"
+)
 git pull --ff-only --quiet origin %BRANCH%
 if errorlevel 1 goto :pullfailed
 for /f "delims=" %%i in ('git log --oneline -1') do echo Pulled. Now at %%i
@@ -62,6 +67,14 @@ goto :done
 :pullfailed
 echo The pull failed (see the message above); nothing was changed.
 set CODE=1
+goto :done
+
+:rmuid
+rem (git lists paths with /, del wants \)
+set "UIDF=%~1"
+del /q "%UIDF:/=\%"
+echo Removed local %~1 (GitHub has it)
+exit /b 0
 
 :done
 rem Double-clicked (not run from a terminal): keep the window open to read the result.
