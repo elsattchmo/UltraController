@@ -209,7 +209,7 @@ func _standing_target() -> void:
 func _powered_in_air() -> bool:
 	if _over_edge and _stagger_t < 0.0:
 		_over_edge = false
-	return _over_edge or _powered_in_air_for_landing()
+	return _over_edge or _catch_t >= 0.0 or _powered_in_air_for_landing()
 
 
 ## A hard landing is coming (MarksmanCharacter._predict_landing, a moment before touchdown at `speed` m/s down): the
@@ -245,9 +245,20 @@ func _powered_in_air_for_landing() -> bool:
 
 func sinew_pre_step(dt: float) -> void:
 	_track_hips(dt)
+	var caught := _catch_begin()
+	_update_catch(dt)
 	var bracing := _land_brace and not active
 	super.sinew_pre_step(dt)
 	_buoy(dt)
+	if caught:
+		_catch_start()
+	if _catch_t >= 0.0 and _dyn.size() == parts.size():
+		for i in parts.size():           # (Sinew eases the upper parts in its own time: the catch fades them all)
+			if _catches(i) and not _walks(i):
+				part_w[i] = minf(part_w[i], _catch_w)
+	if character:
+		_prev_motor = character.state.state
+		_prev_vel = character.state.vel
 	if not bracing:
 		_land_brace = false
 		return
@@ -283,6 +294,98 @@ func sinew_pre_step(dt: float) -> void:
 
 ## Landings the body took (tests).
 var landed_braced := 0
+
+
+# ------------------------------------------------------------------ catching a ledge
+
+## Catching a ledge out of a jump or a fall the hands HOLD (the ledge pass puts them on the lip; the arms stay the
+## animation's, kinematic) and the rest of the body is physics for `catch_window` s (the user: "grab the ledge and have
+## the rest of the body react for a moment"): it carries the jump's momentum on - swings in under the hands, the feet
+## meet the wall, a drop sags on the shoulders - and its slackened muscles bring it back to the hang clip. Presentation:
+## the capsule hangs where the motor put it. Shimmying or climbing hands it back sooner.
+@export var catch_window := 0.9
+## Seconds the physics picture fades back to the animation (at the window's end / when the hang is left: quicker).
+@export var catch_fade := Vector2(0.35, 0.15)
+## The trunk's and legs' tone at the catch (back to 1 over the window).
+@export var catch_tone := 0.45
+## The momentum the body brings into the catch (share of the jump's velocity: the arms take some of it at the grip).
+@export var catch_momentum := 0.85
+const CATCH_FROM := [MotorState.Id.JUMP, MotorState.Id.FALL]
+var _catch_t := -1.0                 ## seconds since the catch (-1: none)
+var _catch_w := 0.0                  ## the physics picture's share
+var _catch_left := false             ## the hang was left / moved (fading quickly)
+var _prev_motor := -1
+var _prev_vel := Vector3.ZERO
+## Catches the body swung through (tests).
+var caught_swinging := 0
+
+
+func catching() -> bool:
+	return _catch_t >= 0.0
+
+
+func _catch_begin() -> bool:
+	if character == null or _id == 0 or active or not powered or _stagger_t >= 0.0:
+		return false
+	var st := character.state
+	if st.state != MotorState.Id.LEDGE_HANG or not _prev_motor in CATCH_FROM:
+		return false
+	_catch_t = 0.0
+	_catch_w = 1.0
+	_catch_left = false
+	return true
+
+
+func _update_catch(dt: float) -> void:
+	if _catch_t < 0.0:
+		return
+	_catch_t += dt
+	var st := character.state
+	var drv := character.anim as UltraAnimDriver
+	if st.state != MotorState.Id.LEDGE_HANG or active or _stagger_t >= 0.0 \
+			or (drv != null and drv._cur_loco == "hang" and absf(drv.climb_speed) > 0.05):
+		_catch_left = true
+	if _catch_left:
+		_catch_w = maxf(_catch_w - dt / catch_fade.y, 0.0)
+	elif _catch_t > catch_window:
+		_catch_w = maxf(_catch_w - dt / catch_fade.x, 0.0)
+	var tone := lerpf(catch_tone, 1.0, smoothstep(0.15, catch_window, _catch_t))
+	var done := _catch_w <= 0.0
+	for i in parts.size():
+		if not _catches(i):
+			continue
+		if done or bool(world.physics.call("character_attached", _id, i)):
+			world.physics.call("character_set_part_tone", _id, i, 1.0 if done else tone)
+	if done:
+		_catch_t = -1.0
+
+
+## The parts that swing under a caught ledge: all but the arms (the hands hold the lip).
+func _catches(i: int) -> bool:
+	return not String(parts[i].name) in ARM_PARTS or String(parts[i].name).ends_with("Shoulder")
+
+
+## Just caught (powered on this tick, on the animated pose): the swinging parts take the jump's momentum.
+func _catch_start() -> void:
+	if not _powered_on:
+		_catch_t = -1.0
+		return
+	var anim := _anim_world()
+	if not anim.is_empty():
+		world.physics.call("character_set_pose", _id, anim, _prev_vel * catch_momentum)
+	_powered_t = maxf(_powered_t, 0.25)
+	for i in parts.size():
+		if _catches(i) and bool(world.physics.call("character_attached", _id, i)):
+			_set_dyn(i, true)
+			part_w[i] = 1.0
+			world.physics.call("character_set_part_tone", _id, i, catch_tone)
+	caught_swinging += 1
+
+
+func _legs_physics_weight(i: int) -> float:
+	if _catch_t < 0.0 or not bool(world.physics.call("character_attached", _id, i)):
+		return -1.0
+	return _catch_w
 
 
 # ------------------------------------------------------------------ hits are felt
@@ -456,6 +559,8 @@ func start_stagger() -> void:
 func _part_wants_physics(i: int, want: bool) -> bool:
 	if _limp_arm(i):
 		return true
+	if _catch_t >= 0.0:
+		return _catches(i) and _catch_w > 0.0
 	var drv := character.anim as UltraAnimDriver if character else null
 	if want and drv and drv.prone_transitioning() and _stagger_t < 0.0:
 		return false           # (getting down to prone / up: the clip, not a physical upper body sagging over it)

@@ -150,8 +150,15 @@ func test_ledge_catch_hands_on_the_lip() -> void:
 	var lip := [INF, INF]            # worst hand height off the lip's top, worst hand distance out from the face (m)
 	var worst := [0.0]
 	var sk := c.skeleton
+	var swing := [0.0, 0.0]          # the catch: the shown hips' and feet's furthest from the animation (m)
 	var probe := func() -> void:
 		var lp := c.ragdoll as MarksmanRagdoll
+		if lp.catching() and lp.modifier.anim_pose.size() == lp.parts.size():
+			for i in lp.parts.size():
+				var n := String(lp.parts[i].name)
+				if i == 0 or n.ends_with("Foot"):
+					var d := sk.get_bone_global_pose(lp.parts[i].bone).origin.distance_to(lp.modifier.anim_pose[i].origin)
+					swing[0 if i == 0 else 1] = maxf(swing[0 if i == 0 else 1], d)
 		if c.state.state != Id.LEDGE_HANG or lp.ledge_pass.weight < 0.99:
 			return
 		for h in ["LeftHand", "RightHand"]:
@@ -165,6 +172,9 @@ func test_ledge_catch_hands_on_the_lip() -> void:
 	sk.skeleton_updated.disconnect(probe)
 	_line("2.5 m wall", r)
 	info("hands off the lip's top by up to %.1f cm while hanging" % (worst[0] * 100.0))
+	info("catch: %d physical, hips swung up to %.1f cm, feet %.1f cm off the clip" % [(c.ragdoll as MarksmanRagdoll).caught_swinging,
+			swing[0] * 100.0, swing[1] * 100.0])
+	check((c.ragdoll as MarksmanRagdoll).caught_swinging == 1 and swing[1] > 0.05, "the body swings under the hands at the catch")
 	check("catch" in r.nodes and "climb_up" in r.nodes, "the brace catch, then the climb (%s)" % " ".join(r.nodes))
 	check(worst[0] < 0.06, "the hands hold the lip (%.1f cm)" % (worst[0] * 100.0))
 	check(float(r.fast) < SPEED_MAX, "nothing flails (%s %.1f m/s)" % [r.fast_bone, r.fast])

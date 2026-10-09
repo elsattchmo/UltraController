@@ -1631,6 +1631,13 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   snaps onto the ledge: in 0.12 fingers whipped 25 m/s). Climb from a hang starts ClimbUp_1m at CLIMB_FROM_HANG 0.22 (the
   UltraController's; Sinew's driver played the whole waist-high step-up). Brace catch: out of the air onto a ledge the
   `catch` node plays Braced_Catch CATCH_SEG 0.30 .. 1.30 (refit like the hang hold) before the hang. g13.
+- **Physical catch** (user: "grab the ledge and have the rest of the body react for a moment"): JUMP / FALL ->
+  LEDGE_HANG powers the Sinew body in the air (`MarksmanRagdoll._catch_*`, `_powered_in_air`): everything but the arms
+  (shoulders included) is physics at `catch_tone` 0.45 with the jump's velocity x `catch_momentum` 0.85, the arms stay
+  kinematic on the ledge pass's grip; `catch_window` 0.9 s, then faded out 0.35 s (0.15 when the hang is left or a
+  shimmy starts). The pelvis + legs through Sinew's additive hook `_legs_physics_weight(i)` (-1 = Sinew's rule; ignored
+  in a stagger / hand-back). Upper parts' part_w are clamped to the catch's weight AFTER Sinew's `_update_parts` (it
+  eases them in its own time). g13: hips swing ~35 cm, feet ~75 cm off the clip.
 - **Jumps (user: "move away from the current jump animation")**: `MarksmanAnimDriver.JUMPS` - standing `hop`
   (mixamo/LMM_Jump: push 0.70, apex 1.05, down 1.28, settle 1.70), moving from JUMP_RUN_FROM 1.0 m/s `jump_run`
   (AXE_UnarmedJumpRunning 0.30 / 0.70 / 1.00 / 1.38), the sprint leap as before; seeked by the vertical speed and only
