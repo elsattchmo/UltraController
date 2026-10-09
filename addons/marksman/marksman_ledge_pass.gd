@@ -26,6 +26,8 @@ var ragdoll: SinewRagdoll
 var weight := 0.0
 var _p := {}
 var _low := [INF, INF]            ## each clip hand's lowest height off the lip seen this hang (its grip height)
+## The last process frame the pass put the hands toward the lip (a catch starts from such a pose).
+var applied_frame := -1
 
 
 func _init(c: UltraCharacter, r: SinewRagdoll) -> void:
@@ -98,4 +100,5 @@ func apply(mod: SinewPoseModifier, sk: Skeleton3D) -> bool:
 		var tg: Array = targets[hs]
 		gp._two_bone(pose, int(tg[0]), int(tg[1]), int(tg[2]), tg[3], k)
 	gp.keep_elbow = false
+	applied_frame = Engine.get_process_frames()
 	return true
