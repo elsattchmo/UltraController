@@ -27,8 +27,8 @@ func _build() -> void:
 	steps.append({"teleport": "ledge_250", "call": _mark, "t": 600.0, "until": _ticks.bind(30), "yaw": 0, "pitch": 0, "view_tp": true})
 	steps.append({"t": 600.0, "until": _hanging, "yaw": 0, "pitch": 0, "move": Vector2(0, 1), "jump_near": true, "view_tp": true})
 	steps.append({"call": _mark, "t": 0.0})
-	for k in 6:
-		steps.append({"t": 600.0, "until": _ticks.bind(4 + k * 6), "yaw": 0, "pitch": 10, "view_tp": true, "shot": "wall_catch_%d" % k})
+	for k in 14:
+		steps.append({"t": 600.0, "until": _ticks.bind(1 + k * 4), "yaw": 0, "pitch": 10, "view_tp": true, "shot": "wall_catch_%02d" % k})
 	steps.append({"t": 600.0, "until": _ticks.bind(50), "yaw": 0, "pitch": 10, "view_tp": true})
 	for k in 8:
 		steps.append({"t": 600.0, "until": _ticks.bind(54 + k * 6), "yaw": 0, "pitch": 10, "view_tp": true, "move": Vector2(0, 1),
@@ -72,5 +72,8 @@ func _process(delta: float) -> void:
 		return
 	# (Close, off the body's right and a little behind - the wall is to the north, -Z.)
 	var at: Vector3 = main.player.state.pos + Vector3(0, 1.6, 0)
-	_cam.global_position = at + Vector3(2.0, 0.5, 1.8)
+	if OS.get_cmdline_user_args().has("--side"):
+		_cam.global_position = at + Vector3(3.2, 0.2, 0.4)
+	else:
+		_cam.global_position = at + Vector3(2.0, 0.5, 1.8)
 	_cam.look_at(at, Vector3.UP)

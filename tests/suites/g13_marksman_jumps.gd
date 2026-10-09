@@ -49,6 +49,8 @@ func _course(c: MarksmanCharacter, n: int, fn: Callable) -> Dictionary:
 			var p := sk.global_transform * sk.get_bone_global_pose(b).origin
 			if last.has(b):
 				var v: float = p.distance_to(last[b]) * 60.0
+				if v > 25.0 and OS.get_environment("CATCH_DBG") != "":
+					print("FAST f%d %s %.1f m/s" % [Engine.get_process_frames(), bn, v])
 				if v > float(out.fast):
 					out.fast = v
 					out.fast_bone = bn
@@ -150,13 +152,33 @@ func test_ledge_catch_hands_on_the_lip() -> void:
 	var lip := [INF, INF]            # worst hand height off the lip's top, worst hand distance out from the face (m)
 	var worst := [0.0]
 	var sk := c.skeleton
+	var swing := [0.0, 0.0]          # the catch: the shown hips' and feet's furthest from the animation (m)
+	var tear := [0.0, ""]            # the widest a shown joint opened (m: a child off where its parent puts it)
 	var probe := func() -> void:
 		var lp := c.ragdoll as MarksmanRagdoll
+		if lp.catching() and lp.modifier.anim_pose.size() == lp.parts.size():
+			for i in lp.parts.size():
+				var n := String(lp.parts[i].name)
+				var pp: int = lp.parts[i].parent
+				if pp >= 0:
+					var ap: Transform3D = lp.modifier.anim_pose[pp]
+					var ai: Transform3D = lp.modifier.anim_pose[i]
+					var want := sk.get_bone_global_pose(lp.parts[pp].bone) * (ap.affine_inverse() * ai).origin
+					var gap := sk.get_bone_global_pose(lp.parts[i].bone).origin.distance_to(want)
+					if gap > float(tear[0]):
+						tear[0] = gap
+						tear[1] = n
+				if i == 0 or n.ends_with("Foot"):
+					var d := sk.get_bone_global_pose(lp.parts[i].bone).origin.distance_to(lp.modifier.anim_pose[i].origin)
+					swing[0 if i == 0 else 1] = maxf(swing[0 if i == 0 else 1], d)
 		if c.state.state != Id.LEDGE_HANG or lp.ledge_pass.weight < 0.99:
 			return
 		for h in ["LeftHand", "RightHand"]:
 			var p := sk.global_transform * sk.get_bone_global_pose(sk.find_bone(h)).origin
 			worst[0] = maxf(worst[0], absf(p.y - c.state.trav_point.y - 0.035 - 0.03))
+			if OS.get_environment("CATCH_DBG") != "":
+				print("f%d %s %s lip %.2f catching %s w %.2f blend %.2f pend %d hips %s" % [Engine.get_process_frames(), h, p.snappedf(0.01), c.state.trav_point.y,
+						lp.catching(), lp._catch_w, lp.modifier.blend, lp._catch_pending, (sk.global_transform * sk.get_bone_global_pose(0).origin).snappedf(0.01)])
 	sk.skeleton_updated.connect(probe)
 	var r: Dictionary = await _course(c, 260, func(k: int, ch: MarksmanCharacter) -> InputFrame:
 		var hanging := ch.state.state == Id.LEDGE_HANG
@@ -165,6 +187,10 @@ func test_ledge_catch_hands_on_the_lip() -> void:
 	sk.skeleton_updated.disconnect(probe)
 	_line("2.5 m wall", r)
 	info("hands off the lip's top by up to %.1f cm while hanging" % (worst[0] * 100.0))
+	info("catch: %d physical, hips swung up to %.1f cm, feet %.1f cm off the clip, widest joint %s %.1f cm" % [
+			(c.ragdoll as MarksmanRagdoll).caught_swinging, swing[0] * 100.0, swing[1] * 100.0, tear[1], float(tear[0]) * 100.0])
+	check((c.ragdoll as MarksmanRagdoll).caught_swinging == 1 and swing[1] > 0.05, "the body swings under the hands at the catch")
+	check(float(tear[0]) < 0.03, "the body holds together through the catch (%s %.1f cm off its parent)" % [tear[1], float(tear[0]) * 100.0])
 	check("catch" in r.nodes and "climb_up" in r.nodes, "the brace catch, then the climb (%s)" % " ".join(r.nodes))
 	check(worst[0] < 0.06, "the hands hold the lip (%.1f cm)" % (worst[0] * 100.0))
 	check(float(r.fast) < SPEED_MAX, "nothing flails (%s %.1f m/s)" % [r.fast_bone, r.fast])
@@ -251,3 +277,84 @@ func test_low_mantle_hops_up() -> void:
 			bad.append("%.1f m: not on top (y %.2f)" % [top, c.state.pos.y])
 		await _done(c)
 	check(bad.is_empty(), "low tops are hopped onto, 1 m is climbed (%s)" % "; ".join(bad))
+
+
+## Off the tower running on (the user: "after falling and running sometimes Sinew stays active too long and you need to
+## stand still to stop it"): once down on its feet with the stick held, the body is the animation's again soon - after a
+## sprint off a block (braced landing) and after backing off one by accident (Sinew's stagger catches the fall).
+func test_running_on_after_a_fall() -> void:
+	load_playground()
+	var bad := []
+	# [name, block x, top, start z, facing, stick before the fall, buttons]
+	for spec: Array in [["2 m sprint", 58.0, 2.0, -48.8, PI, Vector2(0, 1), InputFrame.B_SPRINT],
+			["4 m sprint", 64.0, 4.0, -48.8, PI, Vector2(0, 1), InputFrame.B_SPRINT],
+			["2 m backing off", 58.0, 2.0, -46.25, 0.0, Vector2(0, -1), 0]]:
+		var c := _marksman(Vector3(spec[1], spec[2] + 0.05, spec[3]), spec[4])
+		await ticks(30)
+		var r := c.ragdoll as MarksmanRagdoll
+		var landed := -1
+		var sinew := [0, 0, 0]          # ticks after landing: staggering, stumbling on the gait, any upper part physical
+		var last := -1
+		var down := false
+		for i in 300:
+			# (Down, it runs off west along the open ground: south of the blocks a run met a wall in 1.7 s and stood.)
+			var run := landed >= 0
+			bot(c).set_steps([{"ticks": 100000, "move": Vector2(0, 1) if run else spec[5],
+					"buttons": InputFrame.B_SPRINT if run else int(spec[6]), "yaw": PI * 0.5 if run else float(spec[4])}])
+			await ticks(1)
+			if c.state.state in [Id.RAGDOLL, Id.GET_UP, Id.DEAD]:
+				down = true
+			if landed < 0 and c.state.is_grounded() and i > 10 and c.state.pos.y < float(spec[2]) - 0.5:
+				landed = i
+			if landed < 0 or down:
+				continue
+			var up := 0.0
+			for k in r.parts.size():
+				if not r._walks(k):
+					up = maxf(up, r.part_w[k])
+			var any := false
+			if r.staggering():
+				sinew[0] += 1
+				any = true
+			if r.stumbling_gait():
+				sinew[1] += 1
+				any = true
+			if up > 0.5:
+				sinew[2] += 1
+				any = true
+			if any:
+				last = i - landed
+		info("%s: landed %s, went down %s; after landing: staggering %d, stumbling %d, upper physical %d ticks; Sinew last on %.2f s after; at %.1f m/s" % [
+				spec[0], landed >= 0, down, sinew[0], sinew[1], sinew[2], last / 60.0, Vector2(c.state.vel.x, c.state.vel.z).length()])
+		if landed < 0:
+			bad.append("%s: never landed" % spec[0])
+		elif not down and last > 75:
+			bad.append("%s: Sinew on %.2f s after landing" % [spec[0], last / 60.0])
+		chars.erase(c)
+		c.queue_free()
+		await ticks(3)
+	check(bad.is_empty(), "running on after a fall, the animation has the body back within 1.25 s (%s)" % "; ".join(bad))
+
+
+## A stagger the body has come through ends when the stick asks to go: standing, staggered (as a hard hit or a rough
+## landing does), then sprint held - the animation has the legs back within a second and the body runs.
+func test_stick_ends_a_stagger() -> void:
+	load_playground()
+	var c := _marksman(Vector3(30, 0.05, -60))
+	await ticks(60)
+	var r := c.ragdoll as MarksmanRagdoll
+	r.start_stagger()
+	check(r.staggering(), "staggered")
+	var t := -1
+	for i in 150:
+		bot(c).set_steps([{"ticks": 100000, "move": Vector2(0, 1), "buttons": InputFrame.B_SPRINT, "yaw": 0.0}])
+		await ticks(1)
+		if not r.staggering() and t < 0:
+			t = i
+	info("stick held from the stagger's start: the animation had the legs back after %.2f s (by the stick %d), running at %.1f m/s, state %s" % [
+			t / 60.0, r.stagger_ended_by_stick, Vector2(c.state.vel.x, c.state.vel.z).length(), Id.keys()[c.state.state]])
+	check(t >= 0 and t < 60, "the stick ends the stagger within a second (%.2f s)" % (t / 60.0))
+	check(Vector2(c.state.vel.x, c.state.vel.z).length() > 3.0, "and it runs on")
+	chars.erase(c)
+	c.queue_free()
+	await ticks(3)

@@ -586,17 +586,21 @@ func play_swing(sw: Dictionary) -> void:
 
 # ------------------------------------------------------------------ turning on the spot
 
-## Turn clips per stance [left, right] (registered as roles at build): each weapon type its own - the RFP pack's for the
-## rifle stance (rifle, shotgun), the Mixamo axe pack's for a one-handed melee weapon, the plain standing / crouching
-## turns unarmed and for the pistol (the pistol pack has none; its arms are the gun pass's).
+## Turn clips per stance [left, right] (registered as roles at build; the turn layer takes only the legs and hips): the
+## RFP pack's for the rifle stance (rifle, shotgun); the axe pack's unarmed turn for the standing pistol (its idle stands
+## bladed, feet 52 cm apart fore and aft: from the square T_Stand turn the ankles passed 6 cm apart, and on the RFP turn's
+## bladed hips the gun arm went 2.5 cm into the chest - g8); the plain standing / crouching turns unarmed, crouched with
+## a pistol and for a one-handed melee weapon.
 const MK_TURNS := {
 	"unarmed": ["mixamo/T_StandL90", "mixamo/T_StandR90"],
 	"unarmed_crouch": ["mixamo/T_CrouchB_L", "mixamo/T_CrouchB_R"],
 	"rifle": ["mixamo/RFP_Turn90Left", "mixamo/RFP_Turn90Right"],
 	"rifle_crouch": ["mixamo/RFP_CrouchingTurn90Left", "mixamo/RFP_CrouchingTurn90Right"],
-	"pistol": ["mixamo/T_StandL90", "mixamo/T_StandR90"],
+	"pistol": ["mixamo/AXE_UnarmedTurnLeft90", "mixamo/AXE_UnarmedTurnRight90"],
 	"pistol_crouch": ["mixamo/T_CrouchB_L", "mixamo/T_CrouchB_R"],
-	"melee": ["mixamo/AXE_StandingTurnLeft90", "mixamo/AXE_StandingTurnRight90"],
+	# (Not the axe pack's AXE_StandingTurn: a deep combat crouch, hips 10 cm under the upright melee idle - every turn
+	# dropped into a lunge and stood back up. The user: "melee turn on the spot animations are broken".)
+	"melee": ["mixamo/T_StandL90", "mixamo/T_StandR90"],
 	# Limping (the limp layer most of the picture): the injured pack's turns, the hurt leg the left - mirrored for the
 	# right (a mirrored left turn is a right turn).
 	"limp_l": ["mixamo/INJ_InjuredTurnLeft", "mixamo/INJ_InjuredTurnRight"],

@@ -1631,6 +1631,19 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   snaps onto the ledge: in 0.12 fingers whipped 25 m/s). Climb from a hang starts ClimbUp_1m at CLIMB_FROM_HANG 0.22 (the
   UltraController's; Sinew's driver played the whole waist-high step-up). Brace catch: out of the air onto a ledge the
   `catch` node plays Braced_Catch CATCH_SEG 0.30 .. 1.30 (refit like the hang hold) before the hang. g13.
+- **Physical catch** (user: "grab the ledge and have the rest of the body react for a moment"): JUMP / FALL ->
+  LEDGE_HANG powers the Sinew body in the air (`MarksmanRagdoll._catch_*`, `_powered_in_air`): the WHOLE body physical
+  (trunk / legs at `catch_tone` 0.45, arms `catch_arm_tone` 0.8) with the jump's velocity x `catch_momentum` 0.85, each
+  hand pinned by a ball joint to a shapeless KINEMATIC anchor body (`add_body` kind 1 + `add_ball_joint`, removed with
+  `remove_body`) that follows the animated hand (`move_kinematic` to the ledge pass's grip as it eases in) -
+  `catch_window` 0.9 s, faded out 0.35 s (0.15 when the hang is left or a shimmy starts; at once if knocked down /
+  staggered). NEVER kinematic arms under a physical trunk: Sinew's `Character::post_step` projects every joint back onto
+  its parent from the PELVIS down, so animated arms were dragged off a falling trunk every tick (the user: "the body falls
+  in half" - the upper arm drew 21 cm off the shoulder). The catch starts the frame after the motor's snap
+  (`_catch_pending` until `MarksmanLedgePass.applied_frame` is newer: on the snap tick the animated pose is still the
+  jump's, 1.5 m below), its first step clears the drawn history (`pose_prev = pose_now`). Legs through Sinew's additive
+  hook `_legs_physics_weight(i)` (-1 = Sinew's rule; ignored in a stagger / hand-back). g13: hips swing ~38 cm, hands
+  <= 2.4 cm off the lip, no shown joint opens > 3 cm.
 - **Jumps (user: "move away from the current jump animation")**: `MarksmanAnimDriver.JUMPS` - standing `hop`
   (mixamo/LMM_Jump: push 0.70, apex 1.05, down 1.28, settle 1.70), moving from JUMP_RUN_FROM 1.0 m/s `jump_run`
   (AXE_UnarmedJumpRunning 0.30 / 0.70 / 1.00 / 1.38), the sprint leap as before; seeked by the vertical speed and only
@@ -1640,6 +1653,20 @@ Plan: `C:\Users\Lappy\.claude\plans\using-the-model-and-mossy-haven.md` (M1–M8
   the jump's own clip, hard (>= LAND_HARD 9.5) AAD_HardLanding 0.15 .. 1.75 over 1.2 s, between the squat; on the move
   (> 1.2 m/s) it runs on. Roles mk_hop / mk_jump_run / mk_fall / mk_land_hard in marksman_animset.tres (and the builder).
   Clip filmstrips: tour `clip_strip -- --clips=a,b --frames=8`.
+- **The stick ends a stagger** (user: "after falling and running Sinew stays active too long, you need to stand still"):
+  Sinew hands a stagger back only once the body is steady (no step, COM < 0.2 m/s) or after stagger_max_time; asked to
+  run it never is. `MarksmanRagdoll._update_stagger`: on the ground, from `stagger_min` 0.45 s, the stick held
+  `stagger_wish_time` 0.2 s on a body that hasn't fallen ends it (hand-back glide); stagger_max_time 2 s. `_land_air` is
+  cleared on the ground (Sinew asks `_powered_in_air` only airborne: the flag outlived the landing and powered every later
+  jump). g13 test_stick_ends_a_stagger (0.45 s), test_running_on_after_a_fall (<= 0.83 s after a sprint landing).
+- **Turning on the spot, fixed** (user: "handgun, unarmed and melee turn on the spot animations are broken"; suite g14:
+  slow 90, flick 90, 180, a 360 spin, a small 25 with each kit - skating, steps, feet gap, hips drop, bone speed):
+  one-handed melee turns on T_StandL90 / R90 (the axe pack's AXE_StandingTurn is a combat crouch 10 cm under the upright
+  melee idle: every turn dropped into a lunge); the standing pistol turns on AXE_UnarmedTurnLeft90 / Right90 (the pistol
+  idle stands bladed, feet 52 cm apart fore and aft: blending into the square T_Stand turn passed the ankles 6 cm apart,
+  and the RFP turn's bladed hips put the gun arm 2.5 cm into the chest, g8); a held-out pistol follows the aim only HOLD_MAX_YAW 1.0 rad off the body's
+  facing (`MarksmanGunPass._hold_target`, the heading unwrapped so an aim gone round past 180 stays on its side) - a flick
+  had the gun placed along the view behind the body, arms crossed over the chest, the spine twisted 75 deg.
 - **Low mantles hop up**: a MANTLE lower than MANTLE_HOP_MAX 0.9 m plays `hop_up` (the standing hop from its push-off
   to HOP_UP_PAST 0.12 s past its touchdown over the move's trav_dur); from 0.9 m the climb clip. g13 test_low_mantle.
 - **Landing stumble**: a landing at LAND_STUMBLE_SPEED 2.5 .. 4.5 m/s from LAND_STUMBLE_IMPACT 6 m/s down lurches on

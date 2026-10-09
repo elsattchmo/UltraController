@@ -1421,7 +1421,35 @@ const HOLD_CHEST_BAND := 0.6
 const HOLD_CHEST_BAND_LOOSE := 0.25
 
 
+## A held-out gun follows the aim only this far off the body's facing (rad): turning faster than the body (a flick, a
+## 180) the aim led the body by up to 180 deg and the gun was placed along the view all the same - the arms crossed
+## over the chest pointing behind and the spine twisted 75 deg (the user: "handgun turn on the spot is broken"). Past
+## it the gun comes round with the body.
+const HOLD_MAX_YAW := 1.0
+var _hold_h := INF                    ## the aim's heading off the body's facing (skeleton space, unwrapped: + = left)
+
+
+## `target_sk` brought within HOLD_MAX_YAW of the body's facing (+Z in skeleton space), about the shoulders' middle.
+func _hold_target(pose: Array[Transform3D], target_sk: Vector3) -> Vector3:
+	var uc := _part("UpperChest")
+	var o: Vector3 = pose[uc].origin if uc >= 0 else Vector3.ZERO
+	var d := target_sk - o
+	var flat := Vector2(d.x, d.z).length()
+	if flat < 1e-3:
+		return target_sk
+	var h := atan2(d.x, d.z)
+	# (Unwrapped: an aim that went round past 180 stays on the side it went round, it doesn't flip to the other.)
+	_hold_h = h if _hold_h == INF or weight < 0.05 else _hold_h + angle_difference(_hold_h, h)
+	if absf(_hold_h) > TAU:
+		_hold_h = wrapf(_hold_h, -PI, PI)
+	if absf(_hold_h) <= HOLD_MAX_YAW:
+		return target_sk
+	var hc := clampf(_hold_h, -HOLD_MAX_YAW, HOLD_MAX_YAW)
+	return o + Vector3(sin(hc) * flat, d.y, cos(hc) * flat)
+
+
 func _hold_out(sk: Skeleton3D, pose: Array[Transform3D], rh: int, grip: Transform3D, target_sk: Vector3, at: Vector3) -> void:
+	target_sk = _hold_target(pose, target_sk)
 	var uc0 := _part("UpperChest")
 	var sh0 := _gpart("UpperArm")
 	var bar0 := -(pose[rh] * grip).basis.z.normalized()

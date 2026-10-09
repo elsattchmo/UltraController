@@ -728,6 +728,12 @@ func _update_parts(dt: float) -> void:
 			continue
 		var want: bool
 		if _walks(i):
+			var lw := _legs_physics_weight(i)
+			if lw >= 0.0 and _stagger_t < 0.0 and _handback_t < 0.0:
+				# (A controller built on Sinew has the legs this tick: physical while lw > 0, shown by lw.)
+				_set_dyn(i, lw > 0.0)
+				part_w[i] = lw
+				continue
 			want = legs
 		else:
 			want = _part_wants_physics(i, calm or _stagger_t >= 0.0 or _hit_t.has(i))
@@ -747,6 +753,12 @@ func _update_parts(dt: float) -> void:
 			part_w[i] = maxf(part_w[i] - dt / 0.3, 0.0)
 			if part_w[i] <= 0.0:
 				_set_dyn(i, false)
+
+
+## A controller built on Sinew may take the pelvis and legs off the animation outside a stagger: return their physics
+## weight (0..1; > 0 = dynamic), or -1 for Sinew's own rule (Marksman: the body swinging under a ledge it caught).
+func _legs_physics_weight(_i: int) -> float:
+	return -1.0
 
 
 ## The simulation policy's last word on an upper-body part (a controller built on Sinew overrides it: Marksman keeps
