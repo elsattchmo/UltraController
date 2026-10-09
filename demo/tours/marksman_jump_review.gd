@@ -6,14 +6,20 @@ extends "res://demo/tours/tour_base.gd"
 var _cam: Camera3D
 var _tick0 := 0
 var _sprint := false
-const JUMP_AT := 30
+const JUMP_AT := 80             ## (a run-up: a walk / sprint up to speed)
 
 
 func _build() -> void:
 	out_dir = out_dir.replace("/m1", "/marksman_jump_review")
 	steps = [{"teleport": "spawn", "t": 0.6, "yaw": 0, "pitch": 0, "view_tp": true, "slot": 0}, {"call": _setup, "t": 1.0}]
 	# On the flat east of the spawn, facing north (-Z).
+	var only := ""
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--only="):
+			only = a.trim_prefix("--only=")
 	for spec: Array in [["hop", Vector2.ZERO, false], ["walk_jump", Vector2(0, 1), false], ["sprint_jump", Vector2(0, 1), true]]:
+		if only != "" and not String(spec[0]).contains(only):
+			continue
 		steps.append({"call": _put.bind(Vector3(30, 0.05, -60), 0.0), "t": 600.0, "until": _ticks.bind(20), "yaw": 0, "pitch": 0, "view_tp": true})
 		steps.append({"t": 600.0, "until": _ticks.bind(JUMP_AT), "yaw": 0, "pitch": 0, "view_tp": true, "move": spec[1],
 				"buttons": InputFrame.B_SPRINT if spec[2] else 0})
@@ -24,6 +30,8 @@ func _build() -> void:
 					"buttons": InputFrame.B_SPRINT if spec[2] else 0, "shot": "%s_%02d" % [spec[0], k]})
 	# Off the landing tower's blocks (x 58 / 64 / 70, top 2 / 4 / 6 m, z -50 .. -46): walking south off the edge.
 	for spec: Array in [["drop2", 58.0, 2.0], ["drop4", 64.0, 4.0], ["drop6", 70.0, 6.0]]:
+		if only != "" and not String(spec[0]).contains(only):
+			continue
 		steps.append({"call": _put.bind(Vector3(spec[1], spec[2] + 0.05, -48.5), 180.0), "t": 600.0, "until": _ticks.bind(20), "yaw": 180,
 				"pitch": 0, "view_tp": true})
 		steps.append({"t": 600.0, "until": _falling, "yaw": 180, "pitch": 0, "view_tp": true, "move": Vector2(0, 1)})
